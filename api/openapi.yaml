@@ -155,9 +155,12 @@ paths:
         invites, friendships both ways, blocks both ways, reports filed, push
         tokens and nudges. The caller's place in the invite tree, and as the
         subject of others' reports, is taken by an anonymous placeholder with
-        no name. A purge log keeps only SHA-256 of the user id, so a restored
-        backup can re-apply the purge. Revokes the Sign in with Apple token.
-        Returns only when all of that is done.
+        no name (one placeholder per purged account, so the tree keeps its
+        shape); acceptances the caller signed are dropped from the tree. A
+        purge log keeps only SHA-256 of the user id, so a restored backup can
+        re-apply the purge. Revokes the Sign in with Apple token. Returns only
+        when all of that is done; friends see the caller vanish from
+        `GET /api/friends` (the tombstone).
       responses:
         "204": { description: Purged. The bearer token no longer works. }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -168,10 +171,13 @@ paths:
       operationId: exportMe
       description: |
         GDPR Art. 15 and 20: everything the server holds about the caller,
-        exactly as stored, with bytes as standard base64. `tables` has one key
-        per database table that references a user, so the shape follows the
-        schema. Session token hashes and invite auth-key hashes are omitted.
-        The phone decrypts the sealed logs locally and merges them in.
+        exactly as stored. `tables` has one key per database table with a
+        column referencing a user, so the shape follows the schema and a new
+        table cannot be forgotten (an integration test derives the list from
+        `information_schema`). Session token hashes and invite auth-key hashes
+        are omitted. Blocks and reports are those the caller made; nudges and
+        wraps both those sent and those received. The phone decrypts the
+        sealed logs locally and merges them in.
       responses:
         "200":
           description: The export.
@@ -290,9 +296,10 @@ paths:
         Ed25519 signature over `"duongondro/v1/device-list\n" ‖ payload` with
         the caller's identity key before parsing, then checks that `user` is
         the caller, that `version` is higher than the stored one, and that
-        every listed device is registered to the caller with the same key.
-        The first publication (or the sign-up acceptance) pins the identity
-        key; later ones must use the same key.
+        every listed device is registered to the caller with the same key and
+        tier. The identity key is pinned at sign-up from the signed acceptance
+        (`POST /api/invites/{inviteId}/redeem`) and never replaced by this
+        route, so a session taken over through an inbox cannot sign a list.
       requestBody:
         required: true
         content:
@@ -308,7 +315,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409":
           description: |
-            `stale_version` (with `currentVersion`) or `identity_mismatch`.
+            `stale_version` (with `currentVersion`) or `no_identity`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VersionError" }
@@ -371,6 +378,8 @@ paths:
         cannot verify enrolment or self tags and does not try; recipients
         verify every authenticator before decrypting. Replaces an existing
         wrap with the same user, device, kind, key version and sender.
+        Answers 400 for a wrong size, an ephemeral key that is not a P-256
+        point, or an authenticator of the wrong length for its kind.
       requestBody:
         required: true
         content:
@@ -470,7 +479,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "422":
-          description: "`old_key_version`: sealed under another key version; reseal and retry."
+          description: |
+            `old_key_version`: `keyVersion` is not the account's current
+            version (`currentKeyVersion`); fetch wraps, reseal and retry.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/KeyVersionError" }
@@ -524,9 +535,10 @@ paths:
         Stores a signed `invite` record. The server verifies the signature with
         the caller's pinned identity key, then checks `inviter` = caller,
         `inviterIdentityPk` = the pinned key, an 8-character Crockford base32
-        `inviteId` and an `expiresAt` in the future (at most 30 days). Stores
-        SHA-256 of `authKey` only; `mac` is stored for invitees to check.
-        Invites are reusable until they expire or are revoked.
+        `inviteId` and an `expiresAt` in the future (at most 30 days; the
+        apps default to 7). Stores SHA-256 of `authKey` only; `mac` is stored
+        for invitees to check. Invites are reusable until they expire or are
+        revoked. Rate-limited per caller.
       requestBody:
         required: true
         content:
@@ -562,7 +574,8 @@ paths:
       description: |
         The signed record for anyone holding the link. The invitee's app
         verifies the signature and `mac = HMAC(pin, inviterIdentityPk)` before
-        redeeming. Rate-limited per client IP.
+        redeeming. Expired and revoked invites answer 410 without the record.
+        Rate-limited per client IP.
       responses:
         "200":
           description: The record.
@@ -597,14 +610,18 @@ paths:
         `acceptance`, making invitee and inviter friends.
 
         - **Signed in** (bearer token): the acceptance is verified with the
-          caller's pinned identity key; `invitee` must be the caller.
+          caller's pinned identity key; `invitee` must be the caller and
+          `inviteeIdentityPk` the pinned key.
         - **Sign-up** (no bearer token, `signup` present): the pending-signup
           token from a magic link creates the account with the phone-chosen
           UUIDv7 `userId`, pins `inviteeIdentityPk` from the acceptance after
           verifying the signature with it, and returns a session.
 
-        Each redemption is recorded for the invite tree. Rate-limited per
-        client IP.
+        Each redemption is recorded for the invite tree (inviter, invitee,
+        invite). Redeeming again as an existing friend succeeds without
+        change. Invites are reusable until `expiresAt` or revocation. The
+        auth key is compared with the stored SHA-256 in constant time.
+        Rate-limited per client IP.
       requestBody:
         required: true
         content:
@@ -629,7 +646,9 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: "`user_exists`: the chosen user id or the email already has an account."
+          description: |
+            `user_exists`: the chosen user id or the email already has an
+            account; `no_identity`: a signed-in caller without a pinned key.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -721,9 +740,13 @@ paths:
         streak public. The signature is verified with the caller's pinned
         identity key before parsing; `user` must be the caller and `seq`
         higher than the stored statement's for the practice. `current` and
-        `longest` count tracked days only. When the statement reports a new
-        practice day, friends get a "done today" push carrying only public
-        data.
+        `longest` count tracked days only; `day` is `YYYY-MM-DD` and `longest`
+        is at least `current`. When the statement reports a later practice
+        day than the stored one and `current` > 0, every friend with no block
+        either way gets a "done today" push: `loc-key` `DONE_TODAY` with
+        `loc-args` [display name, practice key, current], plus `practice` and
+        `day` as custom keys so the phone can name the practice in its own
+        language. Only public data travels.
       requestBody:
         required: true
         content:
@@ -848,9 +871,12 @@ paths:
       tags: [push]
       operationId: poke
       description: |
-        Pokes a friend: at most once per friend per UTC day from the same
-        sender, never across a block. The push carries a `loc-key` and the
-        sender's display name, localised on the friend's device.
+        Pokes a friend: at most once per (sender, friend) per UTC day, never
+        across a block (a block either way answers 404, like a stranger). The
+        push carries APNs `loc-key` `POKE` (FCM `body_loc_key`) with the
+        sender's display name as the only argument, so the text is rendered
+        in the friend's language on the friend's device. The server stores no
+        language preference.
       responses:
         "204": { description: Poked. }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1066,9 +1092,6 @@ components:
           allOf: [{ $ref: "#/components/schemas/Bytes" }]
           description: The exact signed `device-list` payload bytes (docs/crypto.md).
         signature: { $ref: "#/components/schemas/Signature" }
-        identityPk:
-          allOf: [{ $ref: "#/components/schemas/IdentityKey" }]
-          description: Required only when no identity key is pinned yet; must equal the pinned key otherwise.
 
     SignedDeviceList:
       type: object
@@ -1288,8 +1311,10 @@ components:
             `auth_identities`, `sessions`, `devices`, `device_lists`, `wraps`,
             `recovery_boxes`, `practice_logs`, `streak_statements`, `invites`,
             `invite_redemptions`, `friendships`, `blocks`, `reports`,
-            `push_tokens`, `nudges`), each an array of rows with the stored
-            column names; bytea columns are standard base64.
+            `push_tokens`, `nudges`), each an array of rows keyed by the stored
+            column names. bytea columns are standard base64 (padded), uuids
+            the usual hex form, timestamps RFC 3339 in UTC, `xid8` decimal
+            strings.
           additionalProperties:
             type: array
             items: { type: object }
