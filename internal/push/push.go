@@ -7,6 +7,8 @@ package push
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 )
 
 // Message is one notification, before it is shaped for a platform.
@@ -34,4 +36,14 @@ func (s Senders) Send(ctx context.Context, platform, token string, m Message) er
 		return nil
 	}
 	return sender.Send(ctx, platform, token, m)
+}
+
+// requestError drops the URL from a transport error: the APNs path holds the device
+// token, and tokens are never logged.
+func requestError(provider string, err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	return fmt.Errorf("%s: request failed: %w", provider, err)
 }

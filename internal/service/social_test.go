@@ -132,8 +132,9 @@ func TestBlocksAndReports(t *testing.T) {
 	if friends, _ := s.Friends(ctx, ana.ID); len(friends) != 0 {
 		t.Fatal("a block leaves the friendship")
 	}
-	// Blocked either way: the invite cannot bring them back together.
-	if _, err := s.Redeem(ctx, bo.User, "H4N8R2CJ", auth, p, sg); !isConflict(err) {
+	// Blocked either way: the invite cannot bring them back together, and the answer is
+	// the same as for any unusable invite, so nobody learns of the block.
+	if _, err := s.Redeem(ctx, bo.User, "H4N8R2CJ", auth, p, sg); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("redeeming the blocked person's invite: %v", err)
 	}
 	if _, err := s.Report(ctx, bo.ID, ana.ID, "followed me after the block"); err != nil {
@@ -219,7 +220,8 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	if _, err := f.logs.Put(ctx, ana.User, uuid.NewV7(), LogInput{Sealed: random(284), KeyVersion: 1, UpdatedAt: time.Now()}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.recovery.Put(ctx, ana.ID, 1, random(60)); err != nil {
+	box, boxSig := signedBox(ana.User, ana.identity, 1)
+	if err := f.recovery.Put(ctx, ana.User, 1, box, boxSig); err != nil {
 		f.t.Fatal(err)
 	}
 	auth := f.invite(s, ana, "Q9XA7K2M")
@@ -263,7 +265,7 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		f.t.Fatal(err)
 	}
 	nudges := NewNudges(f.pool, nil)
-	if err := nudges.PutToken(ctx, ana.ID, dev.ID, "apns", "ana-token"); err != nil {
+	if err := nudges.PutToken(ctx, ana.ID, dev.ID, "apns", boToken); err != nil {
 		f.t.Fatal(err)
 	}
 	if err := nudges.Poke(ctx, ana.User, bo.ID); err != nil {
@@ -305,8 +307,8 @@ func TestExportCoversEveryTable(t *testing.T) {
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
 	for _, table := range tables {
-		if table == "webauthn_sessions" {
-			continue // ceremonies in flight are exported as always empty (see ExportedTables)
+		if table == "webauthn_sessions" || table == "auth_nonces" || table == "purge_log" {
+			continue // exported as always empty (see ExportedTables)
 		}
 		v, ok := fields[table]
 		if !ok || string(v) == "null" || string(v) == "[]" {

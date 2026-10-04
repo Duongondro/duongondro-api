@@ -29,6 +29,18 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 	return i, err
 }
 
+const consumeNonce = `-- name: ConsumeNonce :execrows
+DELETE FROM auth_nonces WHERE nonce_hash = $1 AND created_at > now() - interval '10 minutes'
+`
+
+func (q *Queries) ConsumeNonce(ctx context.Context, nonceHash []byte) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeNonce, nonceHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const consumeWebauthnSession = `-- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
 RETURNING id, data, user_id, invite_id, created_at
@@ -108,6 +120,15 @@ type CreateMagicLinkParams struct {
 
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
 	_, err := q.db.Exec(ctx, createMagicLink, arg.TokenHash, arg.Email, arg.InviteID)
+	return err
+}
+
+const createNonce = `-- name: CreateNonce :exec
+INSERT INTO auth_nonces (nonce_hash) VALUES ($1)
+`
+
+func (q *Queries) CreateNonce(ctx context.Context, nonceHash []byte) error {
+	_, err := q.db.Exec(ctx, createNonce, nonceHash)
 	return err
 }
 
@@ -359,6 +380,16 @@ func (q *Queries) ListIdentities(ctx context.Context, userID uuid.UUID) ([]AuthI
 	return items, nil
 }
 
+const lockEmail = `-- name: LockEmail :exec
+SELECT pg_advisory_xact_lock(hashtextextended(lower($1::text), 0))
+`
+
+// Serialises magic-link requests for one address, so the per-address limit holds.
+func (q *Queries) LockEmail(ctx context.Context, email string) error {
+	_, err := q.db.Exec(ctx, lockEmail, email)
+	return err
+}
+
 const purgeExpiredMagicLinks = `-- name: PurgeExpiredMagicLinks :execrows
 DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes'
 `
@@ -369,6 +400,15 @@ func (q *Queries) PurgeExpiredMagicLinks(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const purgeExpiredNonces = `-- name: PurgeExpiredNonces :exec
+DELETE FROM auth_nonces WHERE created_at <= now() - interval '10 minutes'
+`
+
+func (q *Queries) PurgeExpiredNonces(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, purgeExpiredNonces)
+	return err
 }
 
 const purgeExpiredWebauthnSessions = `-- name: PurgeExpiredWebauthnSessions :execrows

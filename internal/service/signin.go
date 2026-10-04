@@ -15,6 +15,7 @@ import (
 
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/db"
+	"github.com/Duongondro/duongondro-api/internal/repository"
 )
 
 // SignIn holds the sign-in methods (design: From CodeShare › Sign-in). Three rules
@@ -86,12 +87,20 @@ type InviteProof struct {
 var ErrNoAccount = errors.New("no account uses this sign-in; an invitation is needed to create one")
 
 // createAccount makes a user (with id, when given) as a child of the inviter in the
-// invite tree, inside the caller's transaction.
+// invite tree, inside the caller's transaction. It locks the invite and checks it is
+// still live, so a revocation or the inviter's purge since the first check stops the
+// sign-up (ErrNotFound) rather than slipping through.
 func createAccount(ctx context.Context, q *db.Queries, inviteID string, id *uuid.UUID) (db.User, error) {
-	inviter, err := q.InviterOf(ctx, inviteID)
-	if err != nil {
-		return db.User{}, fmt.Errorf("inviter: %w", err)
+	inv, err := q.LockInvite(ctx, inviteID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.User{}, ErrNotFound
+	} else if err != nil {
+		return db.User{}, err
 	}
+	if inv.RevokedAt != nil || !inv.ExpiresAt.After(time.Now()) {
+		return db.User{}, ErrNotFound
+	}
+	inviter := inv.InviterID
 	var user db.User
 	if id != nil {
 		user, err = q.CreateUserWithID(ctx, *id)
@@ -253,18 +262,15 @@ func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession,
 		q := s.q.WithTx(tx)
 		if signUp {
 			// The invite may have been revoked or expired since the ceremony began.
-			if _, err := q.GetLiveInvite(ctx, *row.InviteID); errors.Is(err, pgx.ErrNoRows) {
-				return ErrNotFound
-			} else if err != nil {
-				return err
-			}
 			if _, err := createAccount(ctx, q, *row.InviteID, row.UserID); err != nil {
 				return err
 			}
 		}
 		return q.CreateCredential(ctx, db.CreateCredentialParams{ID: cred.ID, UserID: *row.UserID, Data: raw})
 	})
-	if err != nil {
+	if repository.IsUniqueViolation(err, "credentials_pkey") {
+		return Session{}, conflict("this passkey is already registered")
+	} else if err != nil {
 		return Session{}, err
 	}
 	if !signUp {
@@ -328,7 +334,7 @@ func (s *SignIn) finishSignIn(ctx context.Context, row db.WebauthnSession, data 
 func uuidFromBytes(b []byte) (uuid.UUID, error) {
 	var id uuid.UUID
 	if len(b) != len(id) {
-		return id, fmt.Errorf("a user handle is %d bytes, not %d", len(id), len(b))
+		return id, fmt.Errorf("a user handle is %d bytes, not %d", len(b), len(id))
 	}
 	copy(id[:], b)
 	return id, nil

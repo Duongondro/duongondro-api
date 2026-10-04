@@ -97,7 +97,7 @@ func (f *FCM) Send(ctx context.Context, _ string, deviceToken string, m Message)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := f.HTTP.Do(req)
 	if err != nil {
-		return err
+		return requestError("fcm", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {

@@ -19,6 +19,11 @@ type AuthIdentity struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
+type AuthNonce struct {
+	NonceHash []byte    `json:"nonceHash"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Block struct {
 	BlockerID uuid.UUID `json:"blockerId"`
 	BlockedID uuid.UUID `json:"blockedId"`
@@ -125,6 +130,11 @@ type PracticeLog struct {
 	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
+type PurgeLog struct {
+	UserHash []byte    `json:"userHash"`
+	PurgedAt time.Time `json:"purgedAt"`
+}
+
 type PushToken struct {
 	DeviceID  uuid.UUID `json:"deviceId"`
 	Platform  string    `json:"platform"`
@@ -137,20 +147,22 @@ type RecoveryBox struct {
 	Kind      int16     `json:"kind"`
 	Box       []byte    `json:"box"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	Signature []byte    `json:"signature"`
 }
 
 type Report struct {
-	ID         uuid.UUID `json:"id"`
-	ReporterID uuid.UUID `json:"reporterId"`
-	ReportedID uuid.UUID `json:"reportedId"`
-	Reason     string    `json:"reason"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID         uuid.UUID  `json:"id"`
+	ReporterID uuid.UUID  `json:"reporterId"`
+	ReportedID *uuid.UUID `json:"reportedId"`
+	Reason     string     `json:"reason"`
+	CreatedAt  time.Time  `json:"createdAt"`
 }
 
 type Session struct {
-	TokenHash []byte    `json:"tokenHash"`
-	UserID    uuid.UUID `json:"userId"`
-	CreatedAt time.Time `json:"createdAt"`
+	TokenHash []byte     `json:"tokenHash"`
+	UserID    uuid.UUID  `json:"userId"`
+	CreatedAt time.Time  `json:"createdAt"`
+	DeviceID  *uuid.UUID `json:"deviceId"`
 }
 
 type Streak struct {

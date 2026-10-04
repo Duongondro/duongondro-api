@@ -95,6 +95,14 @@ paths:
       responses:
         "204": {description: Signed out.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/sessions:
+    delete:
+      operationId: signOutOthers
+      description: Signs out every other session of this account ("sign out everywhere else").
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "204": {description: Signed out.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
   /api/me/identity:
     put:
       operationId: putIdentity
@@ -223,7 +231,7 @@ paths:
   /api/devices/{deviceId}:
     delete:
       operationId: deleteDevice
-      description: Removes one of this account's devices and its wraps.
+      description: Removes one of this account's devices, its wraps, its push token and the sessions it registered.
       parameters:
         - {$ref: "#/components/parameters/Authorization"}
         - {$ref: "#/components/parameters/DeviceId"}
@@ -571,6 +579,19 @@ paths:
               schema: {$ref: "#/components/schemas/SignInResult"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/auth/nonces:
+    post:
+      operationId: newNonce
+      description: |
+        A single-use nonce for an Apple or Google sign-in, valid ten minutes. The app
+        passes it to the provider (Apple takes its SHA-256 in hex) and back here.
+      responses:
+        "200":
+          description: The nonce.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Nonce"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/providers/{provider}:
     post:
@@ -938,9 +959,10 @@ components:
           items: {$ref: "#/components/schemas/RotationWrap"}
     RecoveryBoxInput:
       type: object
-      required: [box]
+      required: [box, signature]
       properties:
         box: {type: string, format: byte, description: 60 bytes}
+        signature: {type: string, format: byte, description: "Ed25519 by the identity key over recovery-sig ‖ user ‖ kind ‖ box (docs/crypto.md)"}
     RecoveryBox:
       type: object
       required: [kind, box, updatedAt]
@@ -957,16 +979,17 @@ components:
           items: {$ref: "#/components/schemas/RecoveryBox"}
     PracticeLogInput:
       type: object
-      required: [keyVersion, updatedAt]
+      required: [sealed, keyVersion, updatedAt]
       properties:
         sealed:
           type: string
           format: byte
           description: |
             nonce ‖ ciphertext ‖ tag over the padded session JSON (a multiple of 256
-            bytes, at most 16 KiB). Omitted, together with deleted: true, for a deletion.
+            bytes, at most 16 KiB). A deletion is sealed too: a tombstone whose json
+            carries deletedAt, sent with deleted: true.
         keyVersion: {type: integer, minimum: 1}
-        updatedAt: {type: string, format: date-time, description: The client's clock; the newer write wins}
+        updatedAt: {type: string, format: date-time, description: "The client's clock, at most 5 minutes ahead of the server's; the newer write wins"}
         deleted: {type: boolean}
     PracticeLog:
       type: object
@@ -1182,3 +1205,8 @@ components:
           type: object
           additionalProperties: {type: string, maxLength: 256}
           maxProperties: 20
+    Nonce:
+      type: object
+      required: [nonce]
+      properties:
+        nonce: {type: string}

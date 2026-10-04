@@ -1,3 +1,7 @@
+-- name: ReleasePushToken :exec
+-- A token reaches one device: drop it from any other before storing it.
+DELETE FROM push_tokens WHERE platform = $1 AND token = $2 AND device_id <> $3;
+
 -- name: PutPushToken :exec
 INSERT INTO push_tokens (device_id, platform, token) VALUES ($1, $2, $3)
 ON CONFLICT (device_id) DO UPDATE SET platform = EXCLUDED.platform, token = EXCLUDED.token, updated_at = now();

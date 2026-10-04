@@ -204,6 +204,22 @@ func (q *Queries) RecordNudge(ctx context.Context, arg RecordNudgeParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const releasePushToken = `-- name: ReleasePushToken :exec
+DELETE FROM push_tokens WHERE platform = $1 AND token = $2 AND device_id <> $3
+`
+
+type ReleasePushTokenParams struct {
+	Platform string    `json:"platform"`
+	Token    string    `json:"token"`
+	DeviceID uuid.UUID `json:"deviceId"`
+}
+
+// A token reaches one device: drop it from any other before storing it.
+func (q *Queries) ReleasePushToken(ctx context.Context, arg ReleasePushTokenParams) error {
+	_, err := q.db.Exec(ctx, releasePushToken, arg.Platform, arg.Token, arg.DeviceID)
+	return err
+}
+
 const setNotifyDone = `-- name: SetNotifyDone :execrows
 UPDATE friendships SET notify_done = $3 WHERE user_id = $1 AND friend_id = $2
 `

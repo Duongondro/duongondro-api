@@ -188,3 +188,11 @@ func (s *Server) RedeemMagicLink(ctx context.Context, req api.RedeemMagicLinkReq
 	}
 	return api.RedeemMagicLink200JSONResponse(signInResult(session)), nil
 }
+
+func (s *Server) NewNonce(ctx context.Context, _ api.NewNonceRequestObject) (api.NewNonceResponseObject, error) {
+	nonce, err := s.signIn.NewNonce(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return api.NewNonce200JSONResponse{Nonce: nonce}, nil
+}

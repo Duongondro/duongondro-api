@@ -297,13 +297,18 @@ func TestLogsAndSync(t *testing.T) {
 		t.Fatal("another user's sync sees the log")
 	}
 
-	// A deletion keeps a tombstone without content.
-	if _, err := f.logs.Put(ctx, u, id, LogInput{Sealed: random(284), Deleted: true, UpdatedAt: t0.Add(time.Minute)}); !isValidation(err) {
-		t.Fatalf("deletion with content: %v", err)
+	// A deletion is a sealed tombstone: without one it is refused.
+	if _, err := f.logs.Put(ctx, u, id, LogInput{Deleted: true, KeyVersion: 1, UpdatedAt: t0.Add(time.Minute)}); !isValidation(err) {
+		t.Fatalf("unsealed deletion: %v", err)
 	}
-	row, err = f.logs.Put(ctx, u, id, LogInput{Deleted: true, UpdatedAt: t0.Add(time.Minute)})
-	if err != nil || row.Sealed != nil || row.DeletedAt == nil {
+	tomb := random(284)
+	row, err = f.logs.Put(ctx, u, id, LogInput{Sealed: tomb, Deleted: true, KeyVersion: 1, UpdatedAt: t0.Add(time.Minute)})
+	if err != nil || string(row.Sealed) != string(tomb) || row.DeletedAt == nil {
 		t.Fatalf("deletion: %v %+v", err, row)
+	}
+	// A clock far ahead would block every later edit until then.
+	if _, err := f.logs.Put(ctx, u, id, LogInput{Sealed: tomb, KeyVersion: 1, UpdatedAt: time.Now().Add(time.Hour)}); !isValidation(err) {
+		t.Fatalf("updatedAt an hour ahead: %v", err)
 	}
 
 	// A cursor from another database generation means a full sync.
@@ -319,17 +324,27 @@ func TestLogsAndSync(t *testing.T) {
 	}
 }
 
+func signedBox(u db.User, identity ed25519.PrivateKey, kind int) ([]byte, []byte) {
+	box := random(60)
+	return box, e2ee.SignRecoveryBox(identity, e2ee.UUID(u.ID), e2ee.WrapKind(kind), box)
+}
+
 func TestRecovery(t *testing.T) {
 	f := setup(t)
 	u := f.user()
-	if err := f.recovery.Put(t.Context(), u.ID, 3, random(60)); !isValidation(err) {
+	if err := f.recovery.Put(t.Context(), u, 1, random(60), random(64)); !isConflict(err) {
+		t.Fatalf("without an identity key: %v", err)
+	}
+	u, identity := f.withIdentity(u)
+	if err := f.recovery.Put(t.Context(), u, 3, random(60), random(64)); !isValidation(err) {
 		t.Fatalf("share keys have no recovery box: %v", err)
 	}
-	if err := f.recovery.Put(t.Context(), u.ID, 1, random(59)); !isValidation(err) {
-		t.Fatalf("short box: %v", err)
+	if err := f.recovery.Put(t.Context(), u, 1, random(60), random(64)); !isValidation(err) {
+		t.Fatalf("a box a session made up: %v", err)
 	}
 	for kind := 1; kind <= 2; kind++ {
-		if err := f.recovery.Put(t.Context(), u.ID, kind, random(60)); err != nil {
+		b, sig := signedBox(u, identity, kind)
+		if err := f.recovery.Put(t.Context(), u, kind, b, sig); err != nil {
 			t.Fatal(err)
 		}
 	}

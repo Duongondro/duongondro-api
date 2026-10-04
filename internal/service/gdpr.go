@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"time"
 	"uuid"
@@ -48,6 +49,8 @@ type Export struct {
 	WebauthnSessions   []string                  `json:"webauthn_sessions"`
 	PushTokens         []db.ExportPushTokensRow  `json:"push_tokens"`
 	Nudges             []db.Nudge                `json:"nudges"`
+	AuthNonces         []string                  `json:"auth_nonces"`
+	PurgeLog           []string                  `json:"purge_log"`
 	DatabaseGeneration string                    `json:"database_generation"`
 }
 
@@ -55,13 +58,15 @@ type Export struct {
 // personal data; it is listed because the cursor in the apps refers to it.
 // webauthn_sessions are passkey ceremonies of the last five minutes: listed as
 // always empty, since one in flight is no stored data, and deleted by a purge.
+// auth_nonces are tied to nobody, and purge_log holds only hashes of purged ids:
+// both are listed as always empty.
 // Passkeys, identities and push tokens appear without their secrets (the public key,
 // Apple's refresh token and the device token stay out).
 var ExportedTables = []string{
-	"auth_identities", "blocks", "credentials", "database_generation", "device_lists", "devices",
-	"friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps", "magic_links",
-	"nudges", "practice_logs", "push_tokens", "recovery_boxes", "reports", "sessions", "streaks",
-	"users", "webauthn_sessions",
+	"auth_identities", "auth_nonces", "blocks", "credentials", "database_generation", "device_lists",
+	"devices", "friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps",
+	"magic_links", "nudges", "practice_logs", "purge_log", "push_tokens", "recovery_boxes", "reports",
+	"sessions", "streaks", "users", "webauthn_sessions",
 }
 
 // Export reads everything in one snapshot.
@@ -126,7 +131,7 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		if out.MagicLinks, err = q.ExportMagicLinks(ctx, userID); err != nil {
 			return err
 		}
-		out.WebauthnSessions = []string{}
+		out.WebauthnSessions, out.AuthNonces, out.PurgeLog = []string{}, []string{}, []string{}
 		if out.PushTokens, err = q.ExportPushTokens(ctx, userID); err != nil {
 			return err
 		}
@@ -163,10 +168,23 @@ func (g *GDPR) Purge(ctx context.Context, userID uuid.UUID) error {
 		if err := q.DeleteWebauthnSessionsForUser(ctx, &userID); err != nil {
 			return err
 		}
+		// Only a hash of the id, to delete the account again if a backup that predates
+		// the purge is ever restored (ReapplyPurges).
+		sum := sha256.Sum256(userID[:])
+		if err := q.RecordPurge(ctx, sum[:]); err != nil {
+			return err
+		}
 		n, err := q.DeleteUser(ctx, userID)
 		if err == nil && n == 0 {
 			return ErrNotFound
 		}
 		return err
 	})
+}
+
+// ReapplyPurges deletes again every account purged after the backup the database was
+// restored from (design: Data export and deletion › Backups). Run it after a restore,
+// with `duongondro-api reapply-purges`.
+func (g *GDPR) ReapplyPurges(ctx context.Context) (int64, error) {
+	return g.q.ReapplyPurges(ctx)
 }

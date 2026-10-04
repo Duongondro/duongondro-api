@@ -76,7 +76,7 @@ func (a *APNs) Send(ctx context.Context, platform, deviceToken string, m Message
 	req.Header.Set("apns-push-type", "alert")
 	resp, err := a.HTTP.Do(req)
 	if err != nil {
-		return err
+		return requestError("apns", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {

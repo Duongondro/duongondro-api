@@ -32,57 +32,64 @@ type LogInput struct {
 }
 
 type Logs struct {
+	pool *pgxpool.Pool
 	q    *db.Queries
 	sync *repository.Sync
 	now  func() time.Time
 }
 
 func NewLogs(pool *pgxpool.Pool) *Logs {
-	return &Logs{q: db.New(pool), sync: repository.NewSync(pool), now: time.Now}
+	return &Logs{pool: pool, q: db.New(pool), sync: repository.NewSync(pool), now: time.Now}
 }
 
 // Put stores a sealed log, or its deletion, if it is newer by the client's clock than
-// the stored one, and returns the stored row either way. A deletion keeps a tombstone
-// without content.
+// the stored one, and returns the stored row either way. A deletion is sealed too: a
+// tombstone whose json carries deletedAt (docs/crypto.md), so only a holder of the
+// practice key can delete; the server learns only that it is one.
+//
+// The key version is checked in the same transaction, against the user row held FOR
+// SHARE: a rotation, which locks the row FOR UPDATE, waits, so no log lands under a
+// version rotated away while the devices reseal.
 func (l *Logs) Put(ctx context.Context, user db.User, id uuid.UUID, in LogInput) (db.PracticeLog, error) {
 	if !isV7(id) {
 		return db.PracticeLog{}, invalid("the log id must be a UUIDv7")
 	}
-	if in.UpdatedAt.IsZero() || in.UpdatedAt.After(l.now().Add(24*time.Hour)) {
-		return db.PracticeLog{}, invalid("updatedAt must be set and not more than a day ahead")
+	// A clock running a little fast is fine; far ahead would block edits until then.
+	if in.UpdatedAt.IsZero() || in.UpdatedAt.After(l.now().Add(5*time.Minute)) {
+		return db.PracticeLog{}, invalid("updatedAt must be set and not ahead of the server's clock")
 	}
-	current := int(user.KeyVersion)
-	params := db.UpsertLogParams{ID: id, UserID: user.ID, ClientUpdatedAt: in.UpdatedAt}
+	n := len(in.Sealed)
+	if n < sealedOverhead+padBlock || n > sealedOverhead+maxPadded || (n-sealedOverhead)%padBlock != 0 {
+		return db.PracticeLog{}, invalid("sealed must be nonce, ciphertext and tag over a body padded to a multiple of %d bytes, at most %d", padBlock, maxPadded)
+	}
+	params := db.UpsertLogParams{ID: id, UserID: user.ID, Sealed: in.Sealed, KeyVersion: int32(in.KeyVersion), ClientUpdatedAt: in.UpdatedAt}
 	if in.Deleted {
-		if in.Sealed != nil {
-			return db.PracticeLog{}, invalid("a deletion carries no sealed content")
-		}
-		// No content, so no key: the tombstone takes the current version.
-		params.KeyVersion = int32(current)
 		at := in.UpdatedAt
 		params.DeletedAt = &at
-	} else {
-		n := len(in.Sealed)
-		if n < sealedOverhead+padBlock || n > sealedOverhead+maxPadded || (n-sealedOverhead)%padBlock != 0 {
-			return db.PracticeLog{}, invalid("sealed must be nonce, ciphertext and tag over a body padded to a multiple of %d bytes, at most %d", padBlock, maxPadded)
-		}
-		if in.KeyVersion > current || in.KeyVersion < 1 {
-			return db.PracticeLog{}, invalid("keyVersion must be between 1 and %d", current)
-		}
-		if in.KeyVersion < current {
-			return db.PracticeLog{}, &OldKeyError{Current: current}
-		}
-		params.Sealed = in.Sealed
-		params.KeyVersion = int32(in.KeyVersion)
 	}
-	row, err := l.q.UpsertLog(ctx, params)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Not newer, or another user's id: answer with the stored row, or 404.
-		row, err = l.q.GetLog(ctx, id)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.UserID != user.ID) {
-			return db.PracticeLog{}, ErrNotFound
+	var row db.PracticeLog
+	err := pgx.BeginTxFunc(ctx, l.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := l.q.WithTx(tx)
+		current, err := q.KeyVersionForShare(ctx, user.ID)
+		if err != nil {
+			return err
 		}
-	}
+		if in.KeyVersion > int(current) || in.KeyVersion < 1 {
+			return invalid("keyVersion must be between 1 and %d", current)
+		}
+		if in.KeyVersion < int(current) {
+			return &OldKeyError{Current: int(current)}
+		}
+		row, err = q.UpsertLog(ctx, params)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Not newer, or another user's id: answer with the stored row, or 404.
+			row, err = q.GetLog(ctx, id)
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.UserID != user.ID) {
+				return ErrNotFound
+			}
+		}
+		return err
+	})
 	return row, err
 }
 

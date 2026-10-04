@@ -98,10 +98,10 @@ SELECT id, reported_id, reason, created_at FROM reports WHERE reporter_id = $1 O
 `
 
 type ExportReportsRow struct {
-	ID         uuid.UUID `json:"id"`
-	ReportedID uuid.UUID `json:"reportedId"`
-	Reason     string    `json:"reason"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID         uuid.UUID  `json:"id"`
+	ReportedID *uuid.UUID `json:"reportedId"`
+	Reason     string     `json:"reason"`
+	CreatedAt  time.Time  `json:"createdAt"`
 }
 
 func (q *Queries) ExportReports(ctx context.Context, reporterID uuid.UUID) ([]ExportReportsRow, error) {

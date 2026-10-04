@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"time"
 	"uuid"
@@ -23,6 +24,8 @@ const (
 )
 
 var platforms = map[string]bool{"apns": true, "apns-sandbox": true, "fcm": true}
+
+var apnsToken = regexp.MustCompile(`^[0-9a-fA-F]{32,200}$`)
 
 // ErrAlreadyPoked answers a second poke to the same friend on one UTC day.
 var ErrAlreadyPoked = errors.New("you already poked this friend today")
@@ -52,6 +55,10 @@ func (n *Nudges) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Deliver what is queued before the process exits, within a few seconds.
+			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			n.drain(drainCtx)
+			cancel()
 			return
 		case d := <-n.queue:
 			n.deliver(ctx, d)
@@ -61,11 +68,13 @@ func (n *Nudges) Run(ctx context.Context) {
 	}
 }
 
-func (n *Nudges) enqueue(userID uuid.UUID, m push.Message) {
+func (n *Nudges) enqueue(userID uuid.UUID, m push.Message) bool {
 	select {
 	case n.queue <- delivery{userID: userID, msg: m}:
+		return true
 	default:
 		slog.Warn("Push queue full; nudge dropped", "user_id", userID.String(), "loc_key", m.LocKey)
+		return false
 	}
 }
 
@@ -102,13 +111,25 @@ func (n *Nudges) PutToken(ctx context.Context, userID, deviceID uuid.UUID, platf
 	if token == "" || len(token) > 4096 || !validText(token) {
 		return invalid("token must be 1 to 4096 characters")
 	}
+	if platform != "fcm" && !apnsToken.MatchString(token) {
+		return invalid("an APNs token is hexadecimal")
+	}
 	dev, err := n.q.GetDevice(ctx, deviceID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && dev.UserID != userID) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
 	}
+	// A token reaches one device: a phone signed in to another account before loses it.
+	if err := n.q.ReleasePushToken(ctx, db.ReleasePushTokenParams{Platform: platform, Token: token, DeviceID: deviceID}); err != nil {
+		return err
+	}
 	return n.q.PutPushToken(ctx, db.PutPushTokenParams{DeviceID: deviceID, Platform: platform, Token: token})
+}
+
+// DropDeviceToken removes a device's push token, as its session signs out.
+func (n *Nudges) DropDeviceToken(ctx context.Context, deviceID uuid.UUID) (int64, error) {
+	return n.q.DeletePushToken(ctx, deviceID)
 }
 
 func (n *Nudges) DeleteToken(ctx context.Context, userID, deviceID uuid.UUID) error {
@@ -178,13 +199,15 @@ func (n *Nudges) SweepAtRisk(ctx context.Context) {
 		return
 	}
 	for _, st := range streaks {
+		current, _ := statementCurrent(st.Payload)
+		// Marked only once queued: a full queue leaves it for the next sweep.
+		if !n.enqueue(st.UserID, push.Message{LocKey: LocStreakAtRisk, LocArgs: []string{st.Practice, strconv.Itoa(current)},
+			ThreadID: "streak-" + st.Practice}) {
+			return
+		}
 		if err := n.q.MarkAtRiskSent(ctx, db.MarkAtRiskSentParams{UserID: st.UserID, Practice: st.Practice, AtRiskSentSeq: st.Seq}); err != nil {
 			slog.WarnContext(ctx, "Marking a streak nudged failed", "error", err.Error())
-			continue
 		}
-		current, _ := statementCurrent(st.Payload)
-		n.enqueue(st.UserID, push.Message{LocKey: LocStreakAtRisk, LocArgs: []string{st.Practice, strconv.Itoa(current)},
-			ThreadID: "streak-" + st.Practice})
 	}
 }
 

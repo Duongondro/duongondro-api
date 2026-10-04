@@ -180,9 +180,10 @@ func build(t *testing.T) Vectors {
 		t.Fatal(err)
 	}
 	v.Recovery = map[string]any{
-		"recoveryKey":    hexBytes(rk),
-		"aad":            hexBytes(RecoveryAAD(user, KindPracticeKey)),
-		"practiceKeyBox": hexBytes(rbox),
+		"recoveryKey":             hexBytes(rk),
+		"aad":                     hexBytes(RecoveryAAD(user, KindPracticeKey)),
+		"practiceKeyBox":          hexBytes(rbox),
+		"practiceKeyBoxSignature": hexBytes(SignRecoveryBox(identity, user, KindPracticeKey, rbox)),
 	}
 	return v
 }

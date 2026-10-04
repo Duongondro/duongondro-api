@@ -70,3 +70,16 @@ WHERE lower(magic_links.email) IN (
 
 -- name: DeleteWebauthnSessionsForUser :exec
 DELETE FROM webauthn_sessions WHERE user_id = $1;
+
+-- name: CreateNonce :exec
+INSERT INTO auth_nonces (nonce_hash) VALUES ($1);
+
+-- name: ConsumeNonce :execrows
+DELETE FROM auth_nonces WHERE nonce_hash = $1 AND created_at > now() - interval '10 minutes';
+
+-- name: PurgeExpiredNonces :exec
+DELETE FROM auth_nonces WHERE created_at <= now() - interval '10 minutes';
+
+-- name: LockEmail :exec
+-- Serialises magic-link requests for one address, so the per-address limit holds.
+SELECT pg_advisory_xact_lock(hashtextextended(lower(sqlc.arg(email)::text), 0));

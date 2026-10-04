@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"uuid"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Duongondro/duongondro-api/internal/db"
@@ -31,7 +34,10 @@ func NewWraps(pool *pgxpool.Pool, devices *Devices) *Wraps {
 	return &Wraps{q: db.New(pool), repo: repository.NewWraps(pool), devices: devices}
 }
 
-// Put stores a wrap to one of the user's devices.
+// Put stores a wrap to one of the user's devices. What the server cannot verify is
+// limited to where the design needs it (design: Keys): an enrolment tag only for a
+// device that has no wraps yet (its first, from the QR secret), a self tag never over
+// a signed wrap. So a session alone cannot swap a verifiable wrap for a blob.
 func (w *Wraps) Put(ctx context.Context, user db.User, deviceID uuid.UUID, in WrapInput) error {
 	dev, err := w.devices.Owned(ctx, user.ID, deviceID)
 	if err != nil {
@@ -39,6 +45,20 @@ func (w *Wraps) Put(ctx context.Context, user db.User, deviceID uuid.UUID, in Wr
 	}
 	if err := validateWrap(user, dev, in, int(user.KeyVersion)); err != nil {
 		return err
+	}
+	if in.AuthType != "signature" {
+		existing, err := w.q.ListWraps(ctx, dev.ID)
+		if err != nil {
+			return err
+		}
+		for _, e := range existing {
+			if in.AuthType == "enrol" {
+				return conflict("an enrolment wrap is only for a device without wraps; sign it with the identity key")
+			}
+			if e.Kind == int16(in.Kind) && e.KeyVersion == int32(in.KeyVersion) && e.AuthType == "signature" {
+				return conflict("a signed wrap is never replaced by an unsigned one")
+			}
+		}
 	}
 	return w.q.PutWrap(ctx, wrapParams(dev.ID, in))
 }
@@ -67,9 +87,17 @@ func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps 
 		if newVersion != int(locked.KeyVersion)+1 {
 			return nil, conflict("newVersion must be %d", locked.KeyVersion+1)
 		}
+		// Only devices in the signed device list count: one a session registered and
+		// gave an unsigned wrap is not the user's, and must not block their rotation.
+		listed, err := w.listedDevices(ctx, locked)
+		if err != nil {
+			return nil, err
+		}
 		pending := map[uuid.UUID]db.PracticeKeyHoldersRow{}
 		for _, h := range holders {
-			pending[h.ID] = h
+			if listed == nil || listed[h.ID.String()] {
+				pending[h.ID] = h
+			}
 		}
 		params := make([]db.PutWrapParams, 0, len(wraps))
 		for _, rw := range wraps {
@@ -80,6 +108,11 @@ func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps 
 			delete(pending, rw.DeviceID)
 			if rw.Kind != int(e2ee.KindPracticeKey) || rw.KeyVersion != newVersion {
 				return nil, invalid("a rotation wraps the practice key (kind 1) at version %d", newVersion)
+			}
+			// The server can verify a signature only; a rotation from a session
+			// without the identity key would lock every device out.
+			if rw.AuthType != "signature" {
+				return nil, invalid("rotation wraps are signed by the identity key")
 			}
 			dev := db.Device{ID: h.ID, PublicKey: h.PublicKey}
 			if err := validateWrap(locked, dev, rw.WrapInput, newVersion); err != nil {
@@ -92,6 +125,26 @@ func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps 
 		}
 		return params, nil
 	})
+}
+
+// listedDevices returns the device ids in the user's signed device list, or nil when
+// none has been published yet.
+func (w *Wraps) listedDevices(ctx context.Context, user db.User) (map[string]bool, error) {
+	stored, err := w.q.GetDeviceList(ctx, user.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	var list e2ee.DeviceList
+	if err := json.Unmarshal(stored.Payload, &list); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, d := range list.Devices {
+		out[d.ID] = true
+	}
+	return out, nil
 }
 
 // validateWrap checks what the server can: kind and version, the ephemeral key on

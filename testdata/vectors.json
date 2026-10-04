@@ -82,6 +82,7 @@
   "recovery": {
     "aad": "b67fe412410871f1b85c4c0606f45a8a01",
     "practiceKeyBox": "f60c4852f0e48920ff8bb7baad16ce8e1a723ba45a2f291dd977f032a492e9339338658354a4a3dafbf566c8a3ac9f9afc5f4f989afa2911bb6b3ea2",
+    "practiceKeyBoxSignature": "1eb5a77536490f88f7c1dc24af7465b265a8efa5088901bf323bc6dc64d373eeaed8e10e1f0b618bd8fc3fe1ea38d8c868045e7f99130215bb6ba3af668aed0c",
     "recoveryKey": "cc8a67251adef89a3b4345a3722138fa33f1c133315938cb9290abbdade29b16"
   }
 }

@@ -12,7 +12,7 @@ import (
 )
 
 const listRecoveryBoxes = `-- name: ListRecoveryBoxes :many
-SELECT user_id, kind, box, updated_at FROM recovery_boxes WHERE user_id = $1 ORDER BY kind
+SELECT user_id, kind, box, updated_at, signature FROM recovery_boxes WHERE user_id = $1 ORDER BY kind
 `
 
 func (q *Queries) ListRecoveryBoxes(ctx context.Context, userID uuid.UUID) ([]RecoveryBox, error) {
@@ -29,6 +29,7 @@ func (q *Queries) ListRecoveryBoxes(ctx context.Context, userID uuid.UUID) ([]Re
 			&i.Kind,
 			&i.Box,
 			&i.UpdatedAt,
+			&i.Signature,
 		); err != nil {
 			return nil, err
 		}
@@ -41,17 +42,23 @@ func (q *Queries) ListRecoveryBoxes(ctx context.Context, userID uuid.UUID) ([]Re
 }
 
 const putRecoveryBox = `-- name: PutRecoveryBox :exec
-INSERT INTO recovery_boxes (user_id, kind, box) VALUES ($1, $2, $3)
-ON CONFLICT (user_id, kind) DO UPDATE SET box = EXCLUDED.box, updated_at = now()
+INSERT INTO recovery_boxes (user_id, kind, box, signature) VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, kind) DO UPDATE SET box = EXCLUDED.box, signature = EXCLUDED.signature, updated_at = now()
 `
 
 type PutRecoveryBoxParams struct {
-	UserID uuid.UUID `json:"userId"`
-	Kind   int16     `json:"kind"`
-	Box    []byte    `json:"box"`
+	UserID    uuid.UUID `json:"userId"`
+	Kind      int16     `json:"kind"`
+	Box       []byte    `json:"box"`
+	Signature []byte    `json:"signature"`
 }
 
 func (q *Queries) PutRecoveryBox(ctx context.Context, arg PutRecoveryBoxParams) error {
-	_, err := q.db.Exec(ctx, putRecoveryBox, arg.UserID, arg.Kind, arg.Box)
+	_, err := q.db.Exec(ctx, putRecoveryBox,
+		arg.UserID,
+		arg.Kind,
+		arg.Box,
+		arg.Signature,
+	)
 	return err
 }

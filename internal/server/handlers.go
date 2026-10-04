@@ -38,6 +38,12 @@ func (s *Server) SignOut(ctx context.Context, req api.SignOutRequestObject) (api
 	if !ok {
 		return api.SignOut401Response{}, nil
 	}
+	// A phone that signs out stops receiving this account's nudges.
+	if device, err := s.auth.SessionDevice(ctx, token); err == nil && device != nil {
+		if _, err := s.nudges.DropDeviceToken(ctx, *device); err != nil {
+			return nil, err
+		}
+	}
 	revoked, err := s.auth.RevokeToken(ctx, token)
 	if err != nil {
 		return nil, err
@@ -158,11 +164,12 @@ func (s *Server) PutRecoveryBox(ctx context.Context, req api.PutRecoveryBoxReque
 	} else if !ok {
 		return api.PutRecoveryBox401Response{}, nil
 	}
-	err = s.recovery.Put(ctx, user.ID, int(req.Kind), req.Body.Box)
+	err = s.recovery.Put(ctx, user, int(req.Kind), req.Body.Box, req.Body.Signature)
 	if err == nil {
 		return api.PutRecoveryBox204Response{}, nil
 	}
-	if kind, body, ok := clientError(err); ok && kind == http.StatusBadRequest {
+	// A missing identity key is something the client fixes first: 400 here.
+	if kind, body, ok := clientError(err); ok && (kind == http.StatusBadRequest || kind == http.StatusConflict) {
 		return api.PutRecoveryBox400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 	}
 	return nil, err
@@ -195,6 +202,12 @@ func (s *Server) RegisterDevice(ctx context.Context, req api.RegisterDeviceReque
 			return api.RegisterDevice400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		}
 		return nil, err
+	}
+	// The session now belongs to this device, and ends when it is removed.
+	if token, ok := auth.BearerPrefix(req.Params.Authorization); ok {
+		if err := s.auth.BindDevice(ctx, token, dev.ID); err != nil {
+			return nil, err
+		}
 	}
 	if created {
 		return api.RegisterDevice201JSONResponse(deviceDTO(dev)), nil
@@ -275,10 +288,7 @@ func (s *Server) PutPracticeLog(ctx context.Context, req api.PutPracticeLogReque
 		return api.PutPracticeLog401Response{}, nil
 	}
 	b := req.Body
-	in := service.LogInput{KeyVersion: b.KeyVersion, UpdatedAt: b.UpdatedAt, Deleted: b.Deleted != nil && *b.Deleted}
-	if b.Sealed != nil {
-		in.Sealed = *b.Sealed
-	}
+	in := service.LogInput{Sealed: b.Sealed, KeyVersion: b.KeyVersion, UpdatedAt: b.UpdatedAt, Deleted: b.Deleted != nil && *b.Deleted}
 	row, err := s.logs.Put(ctx, user, req.LogId, in)
 	if old, is := errors.AsType[*service.OldKeyError](err); is {
 		return api.PutPracticeLog422JSONResponse{Error: old.Error(), CurrentKeyVersion: old.Current}, nil
@@ -338,4 +348,18 @@ func logDTO(l db.PracticeLog) api.PracticeLog {
 		out.Sealed = &l.Sealed
 	}
 	return out
+}
+
+func (s *Server) SignOutOthers(ctx context.Context, req api.SignOutOthersRequestObject) (api.SignOutOthersResponseObject, error) {
+	user, ok, err := s.authenticate(ctx, req.Params.Authorization)
+	if err != nil {
+		return nil, err
+	} else if !ok {
+		return api.SignOutOthers401Response{}, nil
+	}
+	token, _ := auth.BearerPrefix(req.Params.Authorization)
+	if _, err := s.auth.RevokeOthers(ctx, user.ID, token); err != nil {
+		return nil, err
+	}
+	return api.SignOutOthers204Response{}, nil
 }

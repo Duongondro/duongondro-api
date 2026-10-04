@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/mail"
 	"strings"
+	"time"
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
@@ -40,24 +41,32 @@ var ErrMailRateLimited = errors.New("too many sign-in links to this address; try
 
 const magicLinksPerWindow = 3
 
+// NewNonce issues a single-use nonce for an Apple or Google sign-in, valid for ten
+// minutes. The app passes it to the provider (Apple takes its SHA-256 in hex), and
+// the token is accepted only with it, once: a token taken from elsewhere cannot be
+// replayed for a session.
+func (s *SignIn) NewNonce(ctx context.Context) (string, error) {
+	nonce, err := auth.RandomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.q.PurgeExpiredNonces(ctx); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(nonce))
+	return nonce, s.q.CreateNonce(ctx, sum[:])
+}
+
 // ProviderSignIn signs in with an Apple or Google ID token, or, with an invite and no
-// account for that provider subject, creates one. nonce is the raw value the app
-// passed to the provider: Google echoes it, Apple its SHA-256 in hex; it binds the
-// token to this sign-in so a token taken from elsewhere cannot be replayed.
+// account for that provider subject, creates one.
 func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, authCode string, invite *InviteProof) (Session, error) {
 	claims, err := s.verify(ctx, provider, idToken, nonce)
 	if err != nil {
 		return Session{}, err
 	}
-	refresh := s.exchangeApple(ctx, provider, authCode)
 	identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
 	if err == nil {
-		if refresh != nil || verifiedEmail(claims) != nil {
-			if err := s.q.UpdateIdentity(ctx, db.UpdateIdentityParams{Provider: provider, Subject: claims.Subject,
-				Email: verifiedEmail(claims), RefreshToken: refresh}); err != nil {
-				return Session{}, err
-			}
-		}
+		s.updateIdentity(ctx, provider, claims, authCode)
 		return s.session(ctx, identity.UserID, false)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, err
@@ -76,15 +85,38 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 			return err
 		}
 		return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider, Subject: claims.Subject, UserID: user.ID,
-			Email: verifiedEmail(claims), RefreshToken: refresh})
+			Email: verifiedEmail(claims)})
 	})
 	if repository.IsUniqueViolation(err, "") {
-		// The same token signed up twice at once; the other request made the account.
-		return s.ProviderSignIn(ctx, provider, idToken, nonce, "", nil)
+		// The same account signed up twice at once; the other request made it.
+		identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
+		if err != nil {
+			return Session{}, err
+		}
+		return s.session(ctx, identity.UserID, false)
 	} else if err != nil {
 		return Session{}, err
 	}
+	// Only now that an account exists is Apple's refresh token worth keeping.
+	s.updateIdentity(ctx, provider, claims, authCode)
 	return s.session(ctx, user.ID, true)
+}
+
+// updateIdentity refreshes the stored e-mail and, for Apple, exchanges the code for
+// the refresh token kept for revocation. Signing in does not depend on either.
+func (s *SignIn) updateIdentity(ctx context.Context, provider string, claims oidc.Claims, authCode string) {
+	refresh := s.exchangeApple(ctx, provider, authCode)
+	if refresh == nil && verifiedEmail(claims) == nil {
+		return
+	}
+	err := s.q.UpdateIdentity(ctx, db.UpdateIdentityParams{Provider: provider, Subject: claims.Subject,
+		Email: verifiedEmail(claims), RefreshToken: refresh})
+	if err != nil {
+		slog.WarnContext(ctx, "Updating a sign-in identity failed", "provider", provider, "error", err.Error())
+		if refresh != nil {
+			_ = s.apple.Revoke(ctx, *refresh)
+		}
+	}
 }
 
 // LinkProvider adds an Apple or Google account to a signed-in user. Linking is only
@@ -103,31 +135,51 @@ func (s *SignIn) LinkProvider(ctx context.Context, userID uuid.UUID, provider, i
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	return s.q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider, Subject: claims.Subject, UserID: userID,
-		Email: verifiedEmail(claims), RefreshToken: s.exchangeApple(ctx, provider, authCode)})
+	err = s.q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider, Subject: claims.Subject, UserID: userID,
+		Email: verifiedEmail(claims)})
+	if repository.IsUniqueViolation(err, "") {
+		return conflict("this %s account was just linked; try again", provider)
+	} else if err != nil {
+		return err
+	}
+	s.updateIdentity(ctx, provider, claims, authCode)
+	return nil
 }
 
+// verify checks the ID token and consumes the server-issued nonce it was bound to:
+// Google echoes the nonce, Apple its SHA-256 in hex.
 func (s *SignIn) verify(ctx context.Context, provider, idToken, nonce string) (oidc.Claims, error) {
 	v, ok := s.oidc[provider]
 	if !ok {
 		return oidc.Claims{}, invalid("sign-in with %q is not configured on this server", provider)
 	}
 	if nonce == "" || len(nonce) > 256 {
-		return oidc.Claims{}, invalid("a nonce is required")
+		return oidc.Claims{}, invalid("a nonce from POST /api/auth/nonces is required")
 	}
 	claims, err := v.Verify(ctx, idToken)
 	if err != nil {
 		return oidc.Claims{}, invalid("the identity token is not valid")
 	}
-	hashed := sha256.Sum256([]byte(nonce))
-	if claims.Nonce != nonce && claims.Nonce != hex.EncodeToString(hashed[:]) {
+	sum := sha256.Sum256([]byte(nonce))
+	want := nonce
+	if provider == "apple" {
+		want = hex.EncodeToString(sum[:])
+	}
+	if claims.Nonce != want {
 		return oidc.Claims{}, invalid("the identity token was issued for another sign-in")
+	}
+	n, err := s.q.ConsumeNonce(ctx, sum[:])
+	if err != nil {
+		return oidc.Claims{}, err
+	}
+	if n == 0 {
+		return oidc.Claims{}, invalid("the nonce expired or was already used; start again")
 	}
 	return claims, nil
 }
 
-// exchangeApple keeps Apple's refresh token for revocation, when the server has the
-// Sign in with Apple key. Signing in does not depend on it.
+// exchangeApple trades Sign in with Apple's code for the refresh token kept to revoke
+// the authorisation later, when the server has the Sign in with Apple key.
 func (s *SignIn) exchangeApple(ctx context.Context, provider, code string) *string {
 	if provider != "apple" || code == "" || s.apple == nil {
 		return nil
@@ -179,11 +231,12 @@ func normalizeEmail(email string) (string, error) {
 	return strings.ToLower(email), nil
 }
 
-// RequestMagicLink mails a single-use sign-in link valid for 15 minutes. Without an
-// account for the address and without an invite it sends nothing but answers the
-// same, so the endpoint does not reveal who has an account. A magic link proves
-// control of an inbox, not ownership of the practice data, which still needs an
-// enrolled device or the recovery code.
+// RequestMagicLink mails a single-use sign-in link valid for 15 minutes. Every
+// address is treated alike, so the answer and its timing never reveal who has an
+// account: the per-address limit applies to all of them, a link is recorded either
+// way, and the mail goes out in the background, but only to an address with an
+// account or with an invite. A magic link proves control of an inbox, not ownership
+// of the practice data, which still needs an enrolled device or the recovery code.
 func (s *SignIn) RequestMagicLink(ctx context.Context, email string, invite *InviteProof, linkBase string) error {
 	if s.mailer == nil {
 		return invalid("magic links are not configured on this server")
@@ -199,28 +252,44 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, invite *Inv
 			return err
 		}
 		inviteID = &inv.ID
-	} else if _, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: email}); errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if _, err := s.q.PurgeExpiredMagicLinks(ctx); err != nil {
-		return err
-	}
-	if n, err := s.q.CountRecentMagicLinks(ctx, email); err != nil {
-		return err
-	} else if n >= magicLinksPerWindow {
-		return ErrMailRateLimited
 	}
 	token, err := auth.RandomToken()
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256([]byte(token))
-	if err := s.q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: inviteID}); err != nil {
+	send := false
+	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if err := q.LockEmail(ctx, email); err != nil {
+			return err
+		}
+		if _, err := q.PurgeExpiredMagicLinks(ctx); err != nil {
+			return err
+		}
+		if n, err := q.CountRecentMagicLinks(ctx, email); err != nil {
+			return err
+		} else if n >= magicLinksPerWindow {
+			return ErrMailRateLimited
+		}
+		_, err := q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: email})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		send = err == nil || inviteID != nil
+		sum := sha256.Sum256([]byte(token))
+		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: inviteID})
+	})
+	if err != nil || !send {
 		return err
 	}
-	return s.mailer.SendMagicLink(ctx, email, linkBase+token)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := s.mailer.SendMagicLink(ctx, email, linkBase+token); err != nil {
+			slog.WarnContext(ctx, "Sending a magic link failed", "error", err.Error())
+		}
+	}()
+	return nil
 }
 
 // RedeemMagicLink signs in with a link's token, creating the account when the link
@@ -245,18 +314,20 @@ func (s *SignIn) RedeemMagicLink(ctx context.Context, token string) (Session, er
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if _, err := q.GetLiveInvite(ctx, *link.InviteID); errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		} else if err != nil {
-			return err
-		}
 		if user, err = createAccount(ctx, q, *link.InviteID, nil); err != nil {
 			return err
 		}
 		email := link.Email
 		return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: "email", Subject: link.Email, UserID: user.ID, Email: &email})
 	})
-	if err != nil {
+	if repository.IsUniqueViolation(err, "") {
+		// Two links for one address redeemed at once: the other made the account.
+		identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: link.Email})
+		if err != nil {
+			return Session{}, err
+		}
+		return s.session(ctx, identity.UserID, false)
+	} else if err != nil {
 		return Session{}, err
 	}
 	return s.session(ctx, user.ID, true)

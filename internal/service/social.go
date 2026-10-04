@@ -157,7 +157,8 @@ func (s *Social) Redeem(ctx context.Context, user db.User, id string, auth, payl
 			return err
 		}
 		if blocked {
-			return conflict("this invite cannot be redeemed")
+			// The same answer as any unusable invite, so nobody learns of a block.
+			return ErrNotFound
 		}
 		if err := q.RecordRedemption(ctx, db.RecordRedemptionParams{InviteID: id, InviteeID: user.ID, Payload: payload, Signature: signature}); err != nil {
 			return err
@@ -257,7 +258,7 @@ func (s *Social) Report(ctx context.Context, userID, otherID uuid.UUID, reason s
 			return uuid.UUID{}, ErrNotFound
 		}
 	}
-	return s.q.CreateReport(ctx, db.CreateReportParams{ReporterID: userID, ReportedID: otherID, Reason: reason})
+	return s.q.CreateReport(ctx, db.CreateReportParams{ReporterID: userID, ReportedID: &otherID, Reason: reason})
 }
 
 // PutStreak stores a signed public streak statement for one practice. current and
@@ -277,11 +278,20 @@ func (s *Social) PutStreak(ctx context.Context, user db.User, practice string, p
 	if st.User != user.ID.String() || st.Practice != practice {
 		return st, false, invalid("the statement names another user or practice")
 	}
-	if st.Seq < 1 || st.Current < 0 || st.Longest < st.Current || st.Deadline <= 0 {
-		return st, false, invalid("seq must be positive, 0 <= current <= longest, and a deadline set")
+	if st.Seq < 1 || st.Current < 0 || st.Longest < st.Current {
+		return st, false, invalid("seq must be positive and 0 <= current <= longest")
 	}
-	if _, err := streak.ParseDate(st.Day); err != nil {
+	day, err := streak.ParseDate(st.Day)
+	if err != nil {
 		return st, false, invalid("day must be YYYY-MM-DD")
+	}
+	// The deadline is midnight after the next day in some time zone (docs/streaks.md):
+	// between the day's start, west of every zone, and three days on. Anything else
+	// is not a streak, and would only confuse the at-risk sweep.
+	dayStart := time.Date(day.Year, time.Month(day.Month), day.Day, 0, 0, 0, 0, time.UTC)
+	deadline := time.UnixMilli(st.Deadline)
+	if deadline.Before(dayStart) || deadline.After(dayStart.Add(72*time.Hour)) {
+		return st, false, invalid("deadline must fall within three days of day")
 	}
 	newDay = st.Current > 0
 	if old, err := s.q.GetStreak(ctx, db.GetStreakParams{UserID: user.ID, Practice: practice}); err == nil {

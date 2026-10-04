@@ -12,6 +12,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-webauthn/webauthn/protocol"
@@ -109,10 +110,11 @@ func (v fakeVerifier) Verify(_ context.Context, raw string) (oidc.Claims, error)
 	return c, nil
 }
 
-type fakeMailer struct{ sent []string }
+// fakeMailer collects mail, which RequestMagicLink sends in the background.
+type fakeMailer struct{ sent chan string }
 
 func (m *fakeMailer) SendMagicLink(_ context.Context, to, link string) error {
-	m.sent = append(m.sent, to+" "+link)
+	m.sent <- to + " " + link
 	return nil
 }
 
@@ -202,43 +204,71 @@ func TestPasskeys(t *testing.T) {
 
 func TestProviders(t *testing.T) {
 	f := setup(t)
-	nonceHash := sha256.Sum256([]byte("raw-nonce"))
-	verifier := fakeVerifier{claims: map[string]oidc.Claims{
-		"apple-token":  {Subject: "001.ana", Email: "Ana@privaterelay.appleid.com", EmailVerified: true, Nonce: b64hex(nonceHash[:])},
-		"google-token": {Subject: "g-ana", Nonce: "raw-nonce"},
-	}}
+	verifier := fakeVerifier{claims: map[string]oidc.Claims{}}
 	apple := &fakeApple{}
 	s, social := f.signIn(map[string]TokenVerifier{"apple": verifier, "google": verifier}, nil, apple)
 	ctx := t.Context()
 	inviter := f.member()
 	auth := f.invite(social, inviter, "APP1EGGG")
 
-	if _, err := s.ProviderSignIn(ctx, "apple", "apple-token", "raw-nonce", "code", nil); !errors.Is(err, ErrNoAccount) {
+	// token mints an ID token bound to a fresh server nonce, as the provider would:
+	// Apple puts the nonce's SHA-256 in hex into the token, Google the nonce itself.
+	token := func(provider, subject string) (string, string) {
+		nonce, err := s.NewNonce(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim := nonce
+		if provider == "apple" {
+			sum := sha256.Sum256([]byte(nonce))
+			claim = b64hex(sum[:])
+		}
+		raw := provider + "-" + subject + "-" + nonce
+		verifier.claims[raw] = oidc.Claims{Subject: subject, Email: "Ana@privaterelay.appleid.com", EmailVerified: true, Nonce: claim}
+		return raw, nonce
+	}
+
+	tok, nonce := token("apple", "001.ana")
+	if _, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "code", nil); !errors.Is(err, ErrNoAccount) {
 		t.Fatalf("sign-in without an account or invite: %v", err)
 	}
-	if _, err := s.ProviderSignIn(ctx, "apple", "apple-token", "other-nonce", "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
-		t.Fatalf("a token for another sign-in: %v", err)
+	if len(apple.revoked) != 0 {
+		t.Fatal("a code was exchanged for a sign-in that made no account")
 	}
-	created, err := s.ProviderSignIn(ctx, "apple", "apple-token", "raw-nonce", "code", &InviteProof{ID: "APP1EGGG", Auth: auth})
+	// The nonce was used up by that attempt; a replay of the token is refused.
+	if _, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
+		t.Fatalf("a replayed token: %v", err)
+	}
+	// A nonce the server never issued is refused, even when the token carries it.
+	verifier.claims["forged"] = oidc.Claims{Subject: "001.ana", Nonce: "made-up"}
+	if _, err := s.ProviderSignIn(ctx, "google", "forged", "made-up", "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
+		t.Fatalf("a nonce never issued: %v", err)
+	}
+	tok, nonce = token("apple", "001.ana")
+	created, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "code", &InviteProof{ID: "APP1EGGG", Auth: auth})
 	if err != nil || !created.Created {
 		t.Fatalf("sign-up with Apple: %v", err)
 	}
-	again, err := s.ProviderSignIn(ctx, "apple", "apple-token", "raw-nonce", "", nil)
+	tok, nonce = token("apple", "001.ana")
+	again, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "", nil)
 	if err != nil || again.UserID != created.UserID || again.Created {
 		t.Fatalf("sign-in with Apple: %v", err)
 	}
-	if _, err := s.ProviderSignIn(ctx, "facebook", "x", "raw-nonce", "", nil); !isValidation(err) {
+	if _, err := s.ProviderSignIn(ctx, "facebook", "x", "n", "", nil); !isValidation(err) {
 		t.Fatalf("unconfigured provider: %v", err)
 	}
 
 	// Google is linked explicitly from the signed-in account, then signs in to it.
-	if err := s.LinkProvider(ctx, created.UserID, "google", "google-token", "raw-nonce", ""); err != nil {
+	tok, nonce = token("google", "g-ana")
+	if err := s.LinkProvider(ctx, created.UserID, "google", tok, nonce, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.LinkProvider(ctx, inviter.ID, "google", "google-token", "raw-nonce", ""); !isConflict(err) {
+	tok, nonce = token("google", "g-ana")
+	if err := s.LinkProvider(ctx, inviter.ID, "google", tok, nonce, ""); !isConflict(err) {
 		t.Fatalf("linking an account already linked elsewhere: %v", err)
 	}
-	viaGoogle, err := s.ProviderSignIn(ctx, "google", "google-token", "raw-nonce", "", nil)
+	tok, nonce = token("google", "g-ana")
+	viaGoogle, err := s.ProviderSignIn(ctx, "google", tok, nonce, "", nil)
 	if err != nil || viaGoogle.UserID != created.UserID {
 		t.Fatalf("sign-in with Google: %v", err)
 	}
@@ -260,46 +290,55 @@ func b64hex(b []byte) string {
 
 func TestMagicLinks(t *testing.T) {
 	f := setup(t)
-	mailer := &fakeMailer{}
+	mailer := &fakeMailer{sent: make(chan string, 16)}
 	s, social := f.signIn(nil, mailer, nil)
 	ctx := t.Context()
 	inviter := f.member()
 	auth := f.invite(social, inviter, "MAG1CK1N")
 	token := func() string {
-		last := mailer.sent[len(mailer.sent)-1]
-		return last[strings.LastIndex(last, "/")+1:]
+		select {
+		case last := <-mailer.sent:
+			return last[strings.LastIndex(last, "/")+1:]
+		case <-time.After(5 * time.Second):
+			t.Fatal("no mail was sent")
+			return ""
+		}
 	}
+	const base = "https://duongondro.app/m/"
 
-	// No account and no invite: nothing is sent, and the answer gives nothing away.
-	if err := s.RequestMagicLink(ctx, "nobody@example.com", nil, "https://duongondro.app/m/"); err != nil || len(mailer.sent) != 0 {
-		t.Fatalf("unknown address: %v %v", err, mailer.sent)
+	// No account and no invite: the same answer, nothing sent, and the same limit.
+	for i := 0; i < magicLinksPerWindow; i++ {
+		if err := s.RequestMagicLink(ctx, "nobody@example.com", nil, base); err != nil {
+			t.Fatalf("unknown address: %v", err)
+		}
 	}
-	if err := s.RequestMagicLink(ctx, "not an address", nil, "https://duongondro.app/m/"); !isValidation(err) {
+	if err := s.RequestMagicLink(ctx, "nobody@example.com", nil, base); !errors.Is(err, ErrMailRateLimited) {
+		t.Fatalf("the limit must hold for unknown addresses too, or it tells them apart: %v", err)
+	}
+	if len(mailer.sent) != 0 {
+		t.Fatal("mail went to an address without an account or invite")
+	}
+	if err := s.RequestMagicLink(ctx, "not an address", nil, base); !isValidation(err) {
 		t.Fatalf("bad address: %v", err)
 	}
-	if err := s.RequestMagicLink(ctx, "Bo@Example.com", &InviteProof{ID: "MAG1CK1N", Auth: auth}, "https://duongondro.app/m/"); err != nil {
+	if err := s.RequestMagicLink(ctx, "Bo@Example.com", &InviteProof{ID: "MAG1CK1N", Auth: auth}, base); err != nil {
 		t.Fatal(err)
 	}
-	created, err := s.RedeemMagicLink(ctx, token())
+	signUp := token()
+	created, err := s.RedeemMagicLink(ctx, signUp)
 	if err != nil || !created.Created {
 		t.Fatalf("sign-up by link: %v", err)
 	}
-	if _, err := s.RedeemMagicLink(ctx, token()); !isValidation(err) {
+	if _, err := s.RedeemMagicLink(ctx, signUp); !isValidation(err) {
 		t.Fatalf("a link used twice: %v", err)
 	}
 
 	// Now the address has an account: a link without an invite signs in.
-	if err := s.RequestMagicLink(ctx, "bo@example.com", nil, "https://duongondro.app/m/"); err != nil {
+	if err := s.RequestMagicLink(ctx, "bo@example.com", nil, base); err != nil {
 		t.Fatal(err)
 	}
 	session, err := s.RedeemMagicLink(ctx, token())
 	if err != nil || session.UserID != created.UserID || session.Created {
 		t.Fatalf("sign-in by link: %v", err)
-	}
-	for i := 0; i < magicLinksPerWindow; i++ {
-		_ = s.RequestMagicLink(ctx, "bo@example.com", nil, "https://duongondro.app/m/")
-	}
-	if err := s.RequestMagicLink(ctx, "bo@example.com", nil, "https://duongondro.app/m/"); !errors.Is(err, ErrMailRateLimited) {
-		t.Fatalf("too many links: %v", err)
 	}
 }

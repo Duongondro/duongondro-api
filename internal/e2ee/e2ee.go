@@ -21,22 +21,23 @@ import (
 
 // Labels, fixed by the format version.
 const (
-	LabelSeal       = "duongondro/v1/seal"
-	LabelWrap       = "duongondro/v1/wrap"
-	LabelWrapSig    = "duongondro/v1/wrap-sig"
-	LabelEnrolAuth  = "duongondro/v1/enrol-auth"
-	LabelSelfAuth   = "duongondro/v1/self-auth"
-	LabelInviteAuth = "duongondro/v1/invite-auth"
-	LabelInvitePin  = "duongondro/v1/invite-pin"
-	LabelRecovery   = "duongondro/v1/recovery"
-	statementPrefix = "duongondro/v1/"
-	keySize         = 32
-	padBlock        = 256
-	NonceSize       = chacha20poly1305.NonceSize
-	PublicKeySize   = 65
-	SessionAADSize  = 36
-	WrapAADSize     = 37
-	WrappedBoxSize  = NonceSize + keySize + chacha20poly1305.Overhead
+	LabelSeal        = "duongondro/v1/seal"
+	LabelWrap        = "duongondro/v1/wrap"
+	LabelWrapSig     = "duongondro/v1/wrap-sig"
+	LabelEnrolAuth   = "duongondro/v1/enrol-auth"
+	LabelSelfAuth    = "duongondro/v1/self-auth"
+	LabelInviteAuth  = "duongondro/v1/invite-auth"
+	LabelInvitePin   = "duongondro/v1/invite-pin"
+	LabelRecovery    = "duongondro/v1/recovery"
+	LabelRecoverySig = "duongondro/v1/recovery-sig"
+	statementPrefix  = "duongondro/v1/"
+	keySize          = 32
+	padBlock         = 256
+	NonceSize        = chacha20poly1305.NonceSize
+	PublicKeySize    = 65
+	SessionAADSize   = 36
+	WrapAADSize      = 37
+	WrappedBoxSize   = NonceSize + keySize + chacha20poly1305.Overhead
 )
 
 // WrapKind says what a wrap carries.
@@ -282,6 +283,22 @@ func RecoveryAAD(user UUID, kind WrapKind) []byte {
 // SealRecovery seals a secret under the recovery key.
 func SealRecovery(recoveryKey []byte, user UUID, kind WrapKind, secret, nonce []byte) ([]byte, error) {
 	return seal(recoveryKey, nonce, secret, RecoveryAAD(user, kind))
+}
+
+// RecoveryBoxMessage is what the identity key signs for a recovery box, so the
+// server can refuse a box from a session that holds no key.
+func RecoveryBoxMessage(user UUID, kind WrapKind, box []byte) []byte {
+	msg := append([]byte(LabelRecoverySig), user[:]...)
+	msg = append(msg, byte(kind))
+	return append(msg, box...)
+}
+
+func SignRecoveryBox(identity ed25519.PrivateKey, user UUID, kind WrapKind, box []byte) []byte {
+	return ed25519.Sign(identity, RecoveryBoxMessage(user, kind, box))
+}
+
+func VerifyRecoveryBox(identity ed25519.PublicKey, user UUID, kind WrapKind, box, sig []byte) bool {
+	return len(identity) == ed25519.PublicKeySize && ed25519.Verify(identity, RecoveryBoxMessage(user, kind, box), sig)
 }
 
 // OpenRecovery opens a recovery box.

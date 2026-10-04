@@ -2,6 +2,9 @@
 //
 //	duongondro-api [serve]   serve on LISTEN_ADDR (default 127.0.0.1:8080, behind Caddy)
 //	duongondro-api migrate   apply the database migrations and exit
+//	duongondro-api reapply-purges
+//	                         after restoring a backup, delete again every account
+//	                         purged since (only hashes of their ids are kept)
 //
 // DATABASE_URL is required for both. Migrations are not applied by serve: the
 // service script runs migrate first, as in CodeShare.
@@ -69,8 +72,10 @@ func main() {
 		err = serve(ctx)
 	case "migrate":
 		err = runMigrate(ctx)
+	case "reapply-purges":
+		err = reapplyPurges(ctx)
 	default:
-		err = fmt.Errorf("unknown command %q (serve or migrate)", command)
+		err = fmt.Errorf("unknown command %q (serve, migrate or reapply-purges)", command)
 	}
 	if err != nil {
 		slog.Error("fatal", "error", err.Error())
@@ -94,6 +99,30 @@ func runMigrate(ctx context.Context) error {
 	}
 	defer pool.Close()
 	return migrate.Up(ctx, pool)
+}
+
+func reapplyPurges(ctx context.Context) error {
+	pool, err := openPool(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	n, err := service.NewGDPR(pool).ReapplyPurges(ctx)
+	if err == nil {
+		slog.Info("reapplied purges", "accounts", n)
+	}
+	return err
+}
+
+// required fails startup when a key file is configured without the ids it needs, so a
+// misconfiguration shows at once rather than as a warning on every push or revoke.
+func required(names ...string) error {
+	for _, n := range names {
+		if os.Getenv(n) == "" {
+			return fmt.Errorf("%s is required with the key file", n)
+		}
+	}
+	return nil
 }
 
 func serve(ctx context.Context) error {
@@ -146,6 +175,9 @@ func loadConfig() (server.Config, error) {
 	if ids := list("APPLE_CLIENT_IDS"); len(ids) > 0 {
 		verifiers["apple"] = oidc.Apple(ids)
 		if file := os.Getenv("APPLE_PRIVATE_KEY_FILE"); file != "" {
+			if err := required("APPLE_TEAM_ID", "APPLE_KEY_ID"); err != nil {
+				return server.Config{}, err
+			}
 			p8, err := os.ReadFile(file)
 			if err != nil {
 				return server.Config{}, err
@@ -184,6 +216,9 @@ func pushSenders() (push.Senders, error) {
 	senders := push.Senders{}
 	client := &http.Client{Timeout: 15 * time.Second}
 	if file := os.Getenv("APNS_PRIVATE_KEY_FILE"); file != "" {
+		if err := required("APPLE_TEAM_ID", "APNS_KEY_ID", "APNS_TOPIC"); err != nil {
+			return nil, err
+		}
 		p8, err := os.ReadFile(file)
 		if err != nil {
 			return nil, err

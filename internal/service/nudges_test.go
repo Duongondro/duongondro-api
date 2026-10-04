@@ -39,6 +39,9 @@ func (f *fakeSender) take() []sent {
 	return out
 }
 
+// boToken is an APNs device token: hexadecimal.
+const boToken = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+
 func TestNudges(t *testing.T) {
 	f := setup(t)
 	social := NewSocial(f.pool)
@@ -55,10 +58,13 @@ func TestNudges(t *testing.T) {
 	}
 	boPhone, _ := f.device(bo.User, "hardware")
 	anaPhone, _ := f.device(ana.User, "tee")
-	if err := n.PutToken(ctx, bo.ID, boPhone.ID, "apns", "bo-token"); err != nil {
+	if err := n.PutToken(ctx, bo.ID, boPhone.ID, "apns", "not hex"); !isValidation(err) {
+		t.Fatalf("a malformed APNs token: %v", err)
+	}
+	if err := n.PutToken(ctx, bo.ID, boPhone.ID, "apns", boToken); err != nil {
 		t.Fatal(err)
 	}
-	if err := n.PutToken(ctx, ana.ID, boPhone.ID, "apns", "x"); !errors.Is(err, ErrNotFound) {
+	if err := n.PutToken(ctx, ana.ID, boPhone.ID, "apns", boToken); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a token for someone else's device: %v", err)
 	}
 	if err := n.PutToken(ctx, ana.ID, anaPhone.ID, "fcm", "gone"); err != nil {
@@ -77,7 +83,7 @@ func TestNudges(t *testing.T) {
 	n.DoneToday(ctx, ana.User, "dorje-sempa", 42)
 	n.drain(ctx)
 	got := sender.take()
-	if len(got) != 1 || got[0].token != "bo-token" || got[0].msg.LocKey != LocFriendDone ||
+	if len(got) != 1 || got[0].token != boToken || got[0].msg.LocKey != LocFriendDone ||
 		got[0].msg.LocArgs[0] != "Ana" || got[0].msg.LocArgs[2] != "42" {
 		t.Fatalf("done today: %+v", got)
 	}

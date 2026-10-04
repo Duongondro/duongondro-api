@@ -67,6 +67,27 @@ func (s *Service) RevokeToken(ctx context.Context, token string) (bool, error) {
 	return n > 0, err
 }
 
+// BindDevice ties the session to the device it registered: removing the device then
+// ends the session, so a lost or removed phone stays signed out.
+func (s *Service) BindDevice(ctx context.Context, token string, deviceID uuid.UUID) error {
+	return s.q.BindSessionDevice(ctx, db.BindSessionDeviceParams{TokenHash: hashToken(token), DeviceID: &deviceID})
+}
+
+// SessionDevice returns the device a session is bound to, if any.
+func (s *Service) SessionDevice(ctx context.Context, token string) (*uuid.UUID, error) {
+	row, err := s.q.GetSession(ctx, hashToken(token))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrInvalidToken
+	}
+	return row.DeviceID, err
+}
+
+// RevokeOthers ends every session of the user but this one ("sign out everywhere
+// else"), reporting how many.
+func (s *Service) RevokeOthers(ctx context.Context, userID uuid.UUID, token string) (int64, error) {
+	return s.q.DeleteOtherSessions(ctx, db.DeleteOtherSessionsParams{UserID: userID, TokenHash: hashToken(token)})
+}
+
 // RandomToken returns 32 random bytes, base64url-encoded.
 func RandomToken() (string, error) {
 	buf := make([]byte, 32)

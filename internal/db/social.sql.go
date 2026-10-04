@@ -107,9 +107,9 @@ INSERT INTO reports (reporter_id, reported_id, reason) VALUES ($1, $2, $3) RETUR
 `
 
 type CreateReportParams struct {
-	ReporterID uuid.UUID `json:"reporterId"`
-	ReportedID uuid.UUID `json:"reportedId"`
-	Reason     string    `json:"reason"`
+	ReporterID uuid.UUID  `json:"reporterId"`
+	ReportedID *uuid.UUID `json:"reportedId"`
+	Reason     string     `json:"reason"`
 }
 
 func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (uuid.UUID, error) {

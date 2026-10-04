@@ -11,6 +11,21 @@ import (
 	"uuid"
 )
 
+const bindSessionDevice = `-- name: BindSessionDevice :exec
+UPDATE sessions SET device_id = $2 WHERE token_hash = $1 AND device_id IS NULL
+`
+
+type BindSessionDeviceParams struct {
+	TokenHash []byte     `json:"tokenHash"`
+	DeviceID  *uuid.UUID `json:"deviceId"`
+}
+
+// The device a session registered; the session ends when the device is removed.
+func (q *Queries) BindSessionDevice(ctx context.Context, arg BindSessionDeviceParams) error {
+	_, err := q.db.Exec(ctx, bindSessionDevice, arg.TokenHash, arg.DeviceID)
+	return err
+}
+
 const createSession = `-- name: CreateSession :exec
 INSERT INTO sessions (token_hash, user_id) VALUES ($1, $2)
 `
@@ -42,6 +57,23 @@ func (q *Queries) CreateUser(ctx context.Context) (User, error) {
 	return i, err
 }
 
+const deleteOtherSessions = `-- name: DeleteOtherSessions :execrows
+DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2
+`
+
+type DeleteOtherSessionsParams struct {
+	UserID    uuid.UUID `json:"userId"`
+	TokenHash []byte    `json:"tokenHash"`
+}
+
+func (q *Queries) DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOtherSessions, arg.UserID, arg.TokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSession = `-- name: DeleteSession :execrows
 DELETE FROM sessions WHERE token_hash = $1
 `
@@ -64,6 +96,22 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getSession = `-- name: GetSession :one
+SELECT token_hash, user_id, created_at, device_id FROM sessions WHERE token_hash = $1
+`
+
+func (q *Queries) GetSession(ctx context.Context, tokenHash []byte) (Session, error) {
+	row := q.db.QueryRow(ctx, getSession, tokenHash)
+	var i Session
+	err := row.Scan(
+		&i.TokenHash,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.DeviceID,
+	)
+	return i, err
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
@@ -101,6 +149,19 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const keyVersionForShare = `-- name: KeyVersionForShare :one
+SELECT key_version FROM users WHERE id = $1 FOR SHARE
+`
+
+// Taken in the transaction that stores a log: a rotation, which locks the row FOR
+// UPDATE, waits for it, so no log lands under a version rotated away meanwhile.
+func (q *Queries) KeyVersionForShare(ctx context.Context, id uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, keyVersionForShare, id)
+	var key_version int32
+	err := row.Scan(&key_version)
+	return key_version, err
+}
+
 const lockInvite = `-- name: LockInvite :one
 SELECT id, inviter_id, auth_hash, payload, signature, mac, expires_at, revoked_at, created_at FROM invites WHERE id = $1 FOR UPDATE
 `
@@ -120,6 +181,28 @@ func (q *Queries) LockInvite(ctx context.Context, id string) (Invite, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const reapplyPurges = `-- name: ReapplyPurges :execrows
+DELETE FROM users WHERE sha256(uuid_send(id)) IN (SELECT user_hash FROM purge_log)
+`
+
+// After restoring a backup: delete again every account purged since.
+func (q *Queries) ReapplyPurges(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, reapplyPurges)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordPurge = `-- name: RecordPurge :exec
+INSERT INTO purge_log (user_hash) VALUES ($1) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) RecordPurge(ctx context.Context, userHash []byte) error {
+	_, err := q.db.Exec(ctx, recordPurge, userHash)
+	return err
 }
 
 const setIdentityKey = `-- name: SetIdentityKey :execrows

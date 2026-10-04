@@ -24,7 +24,7 @@ aad       = uuid(session) ‖ uuid(user) ‖ u32be(keyVersion)          36 bytes
 sealed    = nonce(12) ‖ ChaCha20-Poly1305(seal_key, nonce, padded, aad)   (ciphertext ‖ tag)
 ```
 
-`json` is the session as UTF-8 JSON (practice id, count, day, start, time zone, minutes, note, deletedAt, updatedAt). Padding hides the length of notes from the server; unpadding strips trailing zero bytes and then exactly one `0x80`, and fails if that byte is missing. The AAD binds a blob to one session id, one user and one key version, so the server cannot move or replay it under another identity.
+`json` is the session as UTF-8 JSON (practice id, count, day, start, time zone, minutes, note, deletedAt, updatedAt). A deletion is sealed like any other write, as a tombstone whose json carries `deletedAt` (and may omit the rest), so only a holder of the practice key can delete a session. Padding hides the length of notes from the server; unpadding strips trailing zero bytes and then exactly one `0x80`, and fails if that byte is missing. The AAD binds a blob to one session id, one user and one key version, so the server cannot move or replay it under another identity.
 
 ## Wraps
 
@@ -82,7 +82,11 @@ aad          = uuid(user) ‖ u8(kind)
 box          = nonce(12) ‖ ChaCha20-Poly1305(recovery_key, nonce, secret, aad)
 ```
 
-One box per kind (practice key, identity seed), stored by the server.
+One box per kind (practice key, identity seed), stored by the server. Each box is signed by the identity key, so a session alone (one got through someone else's inbox) cannot replace it:
+
+```
+signature    = Ed25519(identity, "duongondro/v1/recovery-sig" ‖ uuid(user) ‖ u8(kind) ‖ box)
+```
 
 ## Test vectors
 
