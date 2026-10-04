@@ -1,0 +1,1295 @@
+openapi: 3.1.0
+info:
+  title: Duongöndro API
+  version: 0.1.0
+  summary: Relay for sealed practice logs, key wraps and signed public statements.
+  description: |
+    The server never receives a plaintext count, round or key. It stores sealed
+    blobs and signed statements and checks only sizes, P-256 points and Ed25519
+    signatures over the exact bytes received. Byte formats: `docs/crypto.md`.
+
+    Conventions:
+
+    - Byte strings are unpadded base64url (`Bytes`), as in `docs/crypto.md`.
+    - Times are Unix milliseconds (`Millis`).
+    - Signed payloads travel as `Bytes`, so the exact bytes that were signed
+      reach every verifier; nobody re-serialises JSON to verify.
+    - Every error body is `Error`; `error` is a stable machine-readable code.
+    - Request bodies are capped at 64 KiB (413 beyond).
+    - Authenticated routes take `Authorization: Bearer <token>` and answer 401
+      `unauthorized` without a valid session.
+
+    A development-only `POST /api/dev/session` exists only in binaries built
+    with `-tags DEV` and is deliberately not part of this contract.
+
+    The handlers follow this file by hand (no code generation for now; see
+    `docs/stack.md`).
+  license:
+    name: AGPL-3.0-only
+servers:
+  - url: https://api.duongondro.app
+security:
+  - bearer: []
+
+tags:
+  - name: meta
+  - name: auth
+  - name: account
+  - name: keys
+  - name: sync
+  - name: social
+  - name: push
+
+paths:
+  /healthz:
+    get:
+      tags: [meta]
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Plain-text `ok`.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/version:
+    get:
+      tags: [meta]
+      operationId: getVersion
+      security: []
+      responses:
+        "200":
+          description: The commit the binary was built from.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+
+  /api/auth/magic-link:
+    post:
+      tags: [auth]
+      operationId: requestMagicLink
+      security: []
+      description: |
+        Sends a single-use sign-in link (15 minutes) to the address. Always
+        answers 202 for a well-formed address, whether or not an account
+        exists, so the endpoint cannot be used to enumerate members.
+        Rate-limited per address and per client IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MagicLinkRequest" }
+      responses:
+        "202": { description: Accepted; a link is sent if the limits allow. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/auth/magic-link/verify:
+    post:
+      tags: [auth]
+      operationId: verifyMagicLink
+      security: []
+      description: |
+        Exchanges the token from the link. For a known address the result is a
+        session. For an unknown address the result is a pending-signup token
+        (1 hour), usable only with `POST /api/invites/{id}/redeem`: an account
+        is created only with a valid invitation. Signing in never grants keys.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: The token from the link. }
+      responses:
+        "200":
+          description: Signed in, or sign-up required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MagicLinkResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`invalid_token`: unknown, expired or already used."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/me:
+    get:
+      tags: [account]
+      operationId: getMe
+      responses:
+        "200":
+          description: The caller's account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [account]
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountUpdate" }
+      responses:
+        "200":
+          description: The updated account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [account]
+      operationId: deleteMe
+      description: |
+        GDPR Art. 17. In one transaction deletes every row of the caller:
+        account, identities, sessions, devices, device lists, wraps (received
+        and sent), recovery boxes, sealed practice logs, streak statements,
+        invites, friendships both ways, blocks both ways, reports filed, push
+        tokens and nudges. The caller's place in the invite tree, and as the
+        subject of others' reports, is taken by an anonymous placeholder with
+        no name. A purge log keeps only SHA-256 of the user id, so a restored
+        backup can re-apply the purge. Revokes the Sign in with Apple token.
+        Returns only when all of that is done.
+      responses:
+        "204": { description: Purged. The bearer token no longer works. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/me/export:
+    get:
+      tags: [account]
+      operationId: exportMe
+      description: |
+        GDPR Art. 15 and 20: everything the server holds about the caller,
+        exactly as stored, with bytes as standard base64. `tables` has one key
+        per database table that references a user, so the shape follows the
+        schema. Session token hashes and invite auth-key hashes are omitted.
+        The phone decrypts the sealed logs locally and merges them in.
+      responses:
+        "200":
+          description: The export.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/me/session:
+    delete:
+      tags: [auth]
+      operationId: signOut
+      description: Revokes the bearer token used for this request.
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/me/key-version:
+    put:
+      tags: [keys]
+      operationId: setKeyVersion
+      description: |
+        Advances the practice key version after a rotation (for example after
+        removing a device). The new version must be exactly one more than the
+        current one; wraps of the new key should be uploaded first. Practice
+        logs sealed under an older version are then refused with 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keyVersion]
+              properties:
+                keyVersion: { type: integer, format: int32, minimum: 2 }
+      responses:
+        "200":
+          description: The updated account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: "`key_version_conflict`: not current + 1."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KeyVersionError" }
+
+  /api/devices:
+    get:
+      tags: [keys]
+      operationId: listDevices
+      responses:
+        "200":
+          description: The caller's registered devices.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RegisteredDevice" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [keys]
+      operationId: registerDevice
+      description: |
+        Registers this device's P-256 public key and binds the current session
+        to it. Registering does not make the device trusted: friends and the
+        user's own devices wrap keys only to devices in the newest signed
+        device list. Idempotent for the same id and key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceRegistration" }
+      responses:
+        "201":
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisteredDevice" }
+        "200":
+          description: Already registered with the same key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisteredDevice" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: "`device_conflict`: the id or the key is already registered differently."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/devices/{deviceId}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    delete:
+      tags: [keys]
+      operationId: deleteDevice
+      description: |
+        Removes one of the caller's devices with its wraps, push token and
+        sessions. The client should then publish a device list without it and
+        rotate the practice key.
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/device-list:
+    put:
+      tags: [keys]
+      operationId: publishDeviceList
+      description: |
+        Publishes a signed `device-list` statement. The server verifies the
+        Ed25519 signature over `"duongondro/v1/device-list\n" ‖ payload` with
+        the caller's identity key before parsing, then checks that `user` is
+        the caller, that `version` is higher than the stored one, and that
+        every listed device is registered to the caller with the same key.
+        The first publication (or the sign-up acceptance) pins the identity
+        key; later ones must use the same key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceListUpload" }
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignedDeviceList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: |
+            `stale_version` (with `currentVersion`) or `identity_mismatch`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionError" }
+        "422":
+          description: "`bad_signature`, `wrong_user` or `unknown_device`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/users/{userId}/device-list:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [keys]
+      operationId: getDeviceList
+      description: The newest signed device list of the caller or of a friend (no block either way).
+      responses:
+        "200":
+          description: The newest list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignedDeviceList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/wraps:
+    get:
+      tags: [keys]
+      operationId: listWraps
+      description: Wraps addressed to one of the caller's devices.
+      parameters:
+        - name: device
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/UUID" }
+        - name: kind
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/WrapKind" }
+      responses:
+        "200":
+          description: The wraps.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Wrap" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [keys]
+      operationId: putWrap
+      description: |
+        Stores a wrap. `user`, `keyVersion`, `recipientDevice` and `kind` are
+        the AAD fields; the recipient device must belong to `user`. Kinds 1
+        and 2 may be put only by `user` itself; kind 3 (share key) by `user`
+        or by a friend with no block either way. Sizes and the ephemeral point
+        are checked; the authenticator is stored as received. The server
+        cannot verify enrolment or self tags and does not try; recipients
+        verify every authenticator before decrypting. Replaces an existing
+        wrap with the same user, device, kind, key version and sender.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WrapUpload" }
+      responses:
+        "204": { description: Stored. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: "`forbidden`: not allowed to wrap to this user."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: "`unknown_device`: the recipient device is not registered to `user`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/recovery-boxes:
+    get:
+      tags: [keys]
+      operationId: listRecoveryBoxes
+      description: The caller's recovery boxes, opened on a new phone with the recovery code.
+      responses:
+        "200":
+          description: The boxes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RecoveryBox" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/recovery-boxes/{kind}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        description: 1 = practice key, 2 = identity seed.
+        schema: { type: integer, enum: [1, 2] }
+    put:
+      tags: [keys]
+      operationId: putRecoveryBox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [box]
+              properties:
+                box: { $ref: "#/components/schemas/Box60" }
+      responses:
+        "204": { description: Stored, replacing any earlier box of this kind. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/practice-logs/{logId}:
+    parameters:
+      - name: logId
+        in: path
+        required: true
+        description: A UUIDv7 chosen by the phone.
+        schema: { $ref: "#/components/schemas/UUID" }
+    put:
+      tags: [sync]
+      operationId: putPracticeLog
+      description: |
+        Last write wins on `updatedAt` (the client's clock, whole
+        milliseconds): the stored row is replaced only by a strictly newer
+        one. The response is the row the server holds afterwards, which the
+        phone adopts. Deletes are soft (`deleted: true`, still sealed).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PracticeLogUpload" }
+      responses:
+        "200":
+          description: The stored row (the upload, or a newer one already held).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PracticeLog" }
+        "400":
+          description: |
+            `bad_request`: not a UUIDv7, a sealed size outside the padded
+            sizes, or `updatedAt` more than 24 hours in the future.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: "`not_found`: the id belongs to another user."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: "`old_key_version`: sealed under another key version; reseal and retry."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KeyVersionError" }
+
+  /api/sync:
+    get:
+      tags: [sync]
+      operationId: sync
+      description: |
+        Rows changed since the cursor, tombstones included, read in one
+        REPEATABLE READ read-only transaction. `cursor` is the snapshot's
+        xmin: every transaction below it had finished, every later commit has
+        an id at or above it, so nothing is missed and some rows repeat
+        (harmless under last write wins). A cursor of another database
+        generation, or one ahead of the transaction counter (a restore),
+        yields every row with `full: true`; the phone then re-pushes rows the
+        server lost.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: "`<generation>:<xid8>` from the previous response; omit for a first sync."
+          schema: { type: string, pattern: "^[0-9a-f-]{36}:[0-9]+$" }
+      responses:
+        "200":
+          description: Changes and the next cursor.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/invites:
+    get:
+      tags: [social]
+      operationId: listInvites
+      description: Invites the caller created, newest first.
+      responses:
+        "200":
+          description: The invites.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InviteSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [social]
+      operationId: createInvite
+      description: |
+        Stores a signed `invite` record. The server verifies the signature with
+        the caller's pinned identity key, then checks `inviter` = caller,
+        `inviterIdentityPk` = the pinned key, an 8-character Crockford base32
+        `inviteId` and an `expiresAt` in the future (at most 30 days). Stores
+        SHA-256 of `authKey` only; `mac` is stored for invitees to check.
+        Invites are reusable until they expire or are revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteUpload" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InviteSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: "`invite_exists` or `no_identity` (publish a device list first)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: "`bad_signature` or `wrong_user`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/invites/{inviteId}:
+    parameters:
+      - $ref: "#/components/parameters/InviteId"
+    get:
+      tags: [social]
+      operationId: getInvite
+      security: []
+      description: |
+        The signed record for anyone holding the link. The invitee's app
+        verifies the signature and `mac = HMAC(pin, inviterIdentityPk)` before
+        redeeming. Rate-limited per client IP.
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InviteRecord" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: "`invite_expired` or `invite_revoked`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    delete:
+      tags: [social]
+      operationId: revokeInvite
+      description: Revokes one of the caller's invites. Friendships it created stay.
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/invites/{inviteId}/redeem:
+    parameters:
+      - $ref: "#/components/parameters/InviteId"
+    post:
+      tags: [social]
+      operationId: redeemInvite
+      security: [{}, { bearer: [] }]
+      description: |
+        Redeems an invite with its auth key and the invitee's signed
+        `acceptance`, making invitee and inviter friends.
+
+        - **Signed in** (bearer token): the acceptance is verified with the
+          caller's pinned identity key; `invitee` must be the caller.
+        - **Sign-up** (no bearer token, `signup` present): the pending-signup
+          token from a magic link creates the account with the phone-chosen
+          UUIDv7 `userId`, pins `inviteeIdentityPk` from the acceptance after
+          verifying the signature with it, and returns a session.
+
+        Each redemption is recorded for the invite tree. Rate-limited per
+        client IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RedeemRequest" }
+      responses:
+        "200":
+          description: Redeemed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedeemResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized` (bad bearer), `invalid_token` (bad signup token) or `bad_auth_key`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: "`blocked` or `own_invite`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`user_exists`: the chosen user id or the email already has an account."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: "`invite_expired` or `invite_revoked`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: "`bad_signature` or `wrong_user`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/invites/{inviteId}/redemptions:
+    parameters:
+      - $ref: "#/components/parameters/InviteId"
+    get:
+      tags: [social]
+      operationId: listRedemptions
+      description: |
+        Who redeemed one of the caller's invites, with each invitee's signed
+        acceptance so the inviter's phone can pin their identity key.
+      responses:
+        "200":
+          description: The redemptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Redemption" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/friends:
+    get:
+      tags: [social]
+      operationId: listFriends
+      description: |
+        The caller's friends. A friend missing from a later response (unfriended
+        or purged) is a tombstone: the phone drops the cached profile and
+        streaks.
+      responses:
+        "200":
+          description: The friends.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Friend" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/friends/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    delete:
+      tags: [social]
+      operationId: unfriend
+      responses:
+        "204": { description: No longer friends, both ways. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/friends/streaks:
+    get:
+      tags: [social]
+      operationId: listFriendStreaks
+      description: |
+        The newest signed streak statement per friend and practice, hiding
+        anyone blocked in either direction. Phones verify each statement
+        against the friend's pinned identity key.
+      responses:
+        "200":
+          description: The statements.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SignedStreak" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/streaks:
+    put:
+      tags: [social]
+      operationId: publishStreak
+      description: |
+        Publishes a signed `streak` statement for one practice, making that
+        streak public. The signature is verified with the caller's pinned
+        identity key before parsing; `user` must be the caller and `seq`
+        higher than the stored statement's for the practice. `current` and
+        `longest` count tracked days only. When the statement reports a new
+        practice day, friends get a "done today" push carrying only public
+        data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignedStatementUpload" }
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignedStreak" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: "`stale_seq` (with `currentVersion` = stored seq) or `no_identity`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionError" }
+        "422":
+          description: "`bad_signature` or `wrong_user`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/streaks/{practice}:
+    parameters:
+      - name: practice
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/PracticeKey" }
+    delete:
+      tags: [social]
+      operationId: unpublishStreak
+      description: Makes a practice's streak private again by deleting its statement.
+      responses:
+        "204": { description: Deleted (also when there was none). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/blocks:
+    get:
+      tags: [social]
+      operationId: listBlocks
+      responses:
+        "200":
+          description: Users the caller blocked.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Block" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/blocks/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    put:
+      tags: [social]
+      operationId: block
+      description: Hides streaks and stops nudges in both directions. Idempotent.
+      responses:
+        "204": { description: Blocked. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [social]
+      operationId: unblock
+      responses:
+        "204": { description: Unblocked (also when there was no block). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/reports:
+    post:
+      tags: [social]
+      operationId: report
+      description: Reports a user's name or avatar for moderation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportUpload" }
+      responses:
+        "201": { description: Filed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/push-tokens:
+    put:
+      tags: [push]
+      operationId: putPushToken
+      description: Registers the push token of the device bound to this session, replacing any earlier one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushTokenUpload" }
+      responses:
+        "204": { description: Stored. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: "`no_device`: register the device first."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [push]
+      operationId: deletePushToken
+      responses:
+        "204": { description: Deleted (also when there was none). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/nudges/poke/{friendId}:
+    parameters:
+      - name: friendId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/UUID" }
+    post:
+      tags: [push]
+      operationId: poke
+      description: |
+        Pokes a friend: at most once per friend per UTC day from the same
+        sender, never across a block. The push carries a `loc-key` and the
+        sender's display name, localised on the friend's device.
+      responses:
+        "204": { description: Poked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429":
+          description: "`already_poked`: one poke per friend per day."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: A random 32-byte token, base64url; the server stores only its SHA-256.
+
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/UUID" }
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/UUID" }
+    InviteId:
+      name: inviteId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/InviteId" }
+
+  responses:
+    BadRequest:
+      description: "`bad_request`: malformed body or parameter."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: "`unauthorized`: missing or invalid bearer token."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: "`not_found`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: "`rate_limited`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Stable machine-readable code, e.g. `bad_request`, `old_key_version`.
+        message:
+          type: string
+          description: Fixed English text for developers; never shown to users.
+
+    KeyVersionError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [currentKeyVersion]
+          properties:
+            currentKeyVersion: { type: integer, format: int32 }
+
+    VersionError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          properties:
+            currentVersion: { type: integer, format: int64 }
+
+    UUID:
+      type: string
+      format: uuid
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    Bytes:
+      type: string
+      description: Unpadded base64url.
+      pattern: "^[A-Za-z0-9_-]*$"
+
+    PublicKey:
+      allOf: [{ $ref: "#/components/schemas/Bytes" }]
+      description: 65-byte uncompressed P-256 point `0x04 ‖ X ‖ Y`.
+
+    IdentityKey:
+      allOf: [{ $ref: "#/components/schemas/Bytes" }]
+      description: 32-byte Ed25519 public key.
+
+    Signature:
+      allOf: [{ $ref: "#/components/schemas/Bytes" }]
+      description: 64-byte Ed25519 signature.
+
+    Box60:
+      allOf: [{ $ref: "#/components/schemas/Bytes" }]
+      description: "60 bytes: nonce(12) ‖ ciphertext(32) ‖ tag(16)."
+
+    Millis:
+      type: integer
+      format: int64
+      description: Unix time in milliseconds.
+
+    InviteId:
+      type: string
+      description: 8 characters of Crockford base32 (uppercase; lowercase is accepted and normalised).
+      pattern: "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{8}$"
+
+    PracticeKey:
+      type: string
+      description: A practice identifier such as `dorje-sempa` or a custom practice's UUID.
+      pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+
+    KeyTier:
+      type: string
+      enum: [hardware, tee, software]
+
+    WrapKind:
+      type: integer
+      enum: [1, 2, 3]
+      description: 1 = practice key, 2 = identity seed, 3 = share key.
+
+    Version:
+      type: object
+      required: [revision, short, modified, go]
+      properties:
+        revision: { type: string }
+        short: { type: string, description: "7 characters, plus `-dirty` for development builds." }
+        modified: { type: boolean }
+        time: { type: string }
+        go: { type: string }
+
+    MagicLinkRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+
+    MagicLinkResult:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [signed_in, signup_required] }
+        session:
+          $ref: "#/components/schemas/Session"
+        signupToken:
+          type: string
+          description: Present with `signup_required`; valid for 1 hour, once.
+
+    Session:
+      type: object
+      required: [token, userId]
+      properties:
+        token: { type: string, description: The bearer token. Shown once. }
+        userId: { $ref: "#/components/schemas/UUID" }
+
+    Account:
+      type: object
+      required: [id, displayName, keyVersion, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        displayName: { type: string }
+        avatarRef: { type: [string, "null"] }
+        identityPk:
+          oneOf:
+            - $ref: "#/components/schemas/IdentityKey"
+            - type: "null"
+        keyVersion: { type: integer, format: int32 }
+        createdAt: { $ref: "#/components/schemas/Millis" }
+
+    AccountUpdate:
+      type: object
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 64 }
+        avatarRef:
+          type: [string, "null"]
+          maxLength: 128
+          description: Reference to an avatar blob (resized and stripped on the phone).
+
+    DeviceRegistration:
+      type: object
+      required: [id, publicKey, tier]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        publicKey: { $ref: "#/components/schemas/PublicKey" }
+        tier: { $ref: "#/components/schemas/KeyTier" }
+
+    RegisteredDevice:
+      type: object
+      required: [id, publicKey, tier, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        publicKey: { $ref: "#/components/schemas/PublicKey" }
+        tier: { $ref: "#/components/schemas/KeyTier" }
+        createdAt: { $ref: "#/components/schemas/Millis" }
+
+    DeviceListUpload:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload:
+          allOf: [{ $ref: "#/components/schemas/Bytes" }]
+          description: The exact signed `device-list` payload bytes (docs/crypto.md).
+        signature: { $ref: "#/components/schemas/Signature" }
+        identityPk:
+          allOf: [{ $ref: "#/components/schemas/IdentityKey" }]
+          description: Required only when no identity key is pinned yet; must equal the pinned key otherwise.
+
+    SignedDeviceList:
+      type: object
+      required: [user, version, payload, signature, identityPk]
+      properties:
+        user: { $ref: "#/components/schemas/UUID" }
+        version: { type: integer, format: int64 }
+        payload: { $ref: "#/components/schemas/Bytes" }
+        signature: { $ref: "#/components/schemas/Signature" }
+        identityPk: { $ref: "#/components/schemas/IdentityKey" }
+
+    WrapUpload:
+      type: object
+      required: [user, keyVersion, recipientDevice, kind, epk, box, authenticatorKind, authenticator]
+      properties:
+        user: { $ref: "#/components/schemas/UUID" }
+        keyVersion: { type: integer, format: int32, minimum: 1 }
+        recipientDevice: { $ref: "#/components/schemas/UUID" }
+        kind: { $ref: "#/components/schemas/WrapKind" }
+        epk: { $ref: "#/components/schemas/PublicKey" }
+        box: { $ref: "#/components/schemas/Box60" }
+        authenticatorKind: { type: string, enum: [signature, enrol, self] }
+        authenticator:
+          allOf: [{ $ref: "#/components/schemas/Bytes" }]
+          description: 64 bytes for `signature`, 32 for `enrol` and `self`.
+
+    Wrap:
+      allOf:
+        - $ref: "#/components/schemas/WrapUpload"
+        - type: object
+          required: [sender, createdAt]
+          properties:
+            sender: { $ref: "#/components/schemas/UUID" }
+            createdAt: { $ref: "#/components/schemas/Millis" }
+
+    RecoveryBox:
+      type: object
+      required: [kind, box, updatedAt]
+      properties:
+        kind: { type: integer, enum: [1, 2] }
+        box: { $ref: "#/components/schemas/Box60" }
+        updatedAt: { $ref: "#/components/schemas/Millis" }
+
+    PracticeLogUpload:
+      type: object
+      required: [sealed, keyVersion, updatedAt, deleted]
+      properties:
+        sealed:
+          allOf: [{ $ref: "#/components/schemas/Bytes" }]
+          description: |
+            nonce(12) ‖ ciphertext ‖ tag(16) of the padded session JSON: 28 + 256·k
+            bytes, 1 ≤ k ≤ 63 (at most 16 KiB).
+        keyVersion: { type: integer, format: int32, minimum: 1 }
+        updatedAt: { $ref: "#/components/schemas/Millis" }
+        deleted: { type: boolean }
+
+    PracticeLog:
+      allOf:
+        - type: object
+          required: [id]
+          properties:
+            id: { $ref: "#/components/schemas/UUID" }
+        - $ref: "#/components/schemas/PracticeLogUpload"
+
+    SyncResponse:
+      type: object
+      required: [cursor, full, logs, keyVersion]
+      properties:
+        cursor: { type: string, description: "`<generation>:<xid8>` for the next sync." }
+        full: { type: boolean, description: "The response holds every row; re-push rows missing from it." }
+        keyVersion: { type: integer, format: int32, description: The current practice key version. }
+        logs:
+          type: array
+          items: { $ref: "#/components/schemas/PracticeLog" }
+
+    InviteUpload:
+      type: object
+      required: [payload, signature, mac, authKey]
+      properties:
+        payload:
+          allOf: [{ $ref: "#/components/schemas/Bytes" }]
+          description: The exact signed `invite` payload bytes.
+        signature: { $ref: "#/components/schemas/Signature" }
+        mac:
+          allOf: [{ $ref: "#/components/schemas/Bytes" }]
+          description: "32 bytes: HMAC(pin, inviterIdentityPk)."
+        authKey:
+          allOf: [{ $ref: "#/components/schemas/Bytes" }]
+          description: "32 bytes: HKDF(secret, info = duongondro/v1/invite-auth). Stored hashed."
+
+    InviteRecord:
+      type: object
+      required: [inviteId, payload, signature, mac, inviterDisplayName]
+      properties:
+        inviteId: { $ref: "#/components/schemas/InviteId" }
+        payload: { $ref: "#/components/schemas/Bytes" }
+        signature: { $ref: "#/components/schemas/Signature" }
+        mac: { $ref: "#/components/schemas/Bytes" }
+        inviterDisplayName: { type: string }
+
+    InviteSummary:
+      type: object
+      required: [inviteId, expiresAt, createdAt, redemptions]
+      properties:
+        inviteId: { $ref: "#/components/schemas/InviteId" }
+        expiresAt: { $ref: "#/components/schemas/Millis" }
+        createdAt: { $ref: "#/components/schemas/Millis" }
+        revokedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Millis"
+            - type: "null"
+        redemptions: { type: integer }
+
+    SignedStatement:
+      type: object
+      required: [payload, signature]
+      properties:
+        payload: { $ref: "#/components/schemas/Bytes" }
+        signature: { $ref: "#/components/schemas/Signature" }
+
+    SignedStatementUpload:
+      $ref: "#/components/schemas/SignedStatement"
+
+    RedeemRequest:
+      type: object
+      required: [authKey, acceptance]
+      properties:
+        authKey: { $ref: "#/components/schemas/Bytes" }
+        acceptance:
+          allOf: [{ $ref: "#/components/schemas/SignedStatement" }]
+          description: A signed `acceptance` statement for this invite.
+        signup:
+          type: object
+          description: Only without a bearer token.
+          required: [signupToken, userId, displayName]
+          properties:
+            signupToken: { type: string }
+            userId:
+              allOf: [{ $ref: "#/components/schemas/UUID" }]
+              description: A UUIDv7 chosen by the phone, already used in the acceptance.
+            displayName: { type: string, minLength: 1, maxLength: 64 }
+
+    RedeemResult:
+      type: object
+      required: [userId, inviter]
+      properties:
+        userId: { $ref: "#/components/schemas/UUID" }
+        inviter: { $ref: "#/components/schemas/UUID" }
+        session:
+          allOf: [{ $ref: "#/components/schemas/Session" }]
+          description: Present for a sign-up.
+
+    Redemption:
+      type: object
+      required: [invitee, redeemedAt, acceptance]
+      properties:
+        invitee: { $ref: "#/components/schemas/UUID" }
+        redeemedAt: { $ref: "#/components/schemas/Millis" }
+        acceptance: { $ref: "#/components/schemas/SignedStatement" }
+
+    Friend:
+      type: object
+      required: [userId, displayName, since]
+      properties:
+        userId: { $ref: "#/components/schemas/UUID" }
+        displayName: { type: string }
+        avatarRef: { type: [string, "null"] }
+        identityPk:
+          oneOf:
+            - $ref: "#/components/schemas/IdentityKey"
+            - type: "null"
+        since: { $ref: "#/components/schemas/Millis" }
+        blocked: { type: boolean, description: The caller blocked this friend. }
+
+    SignedStreak:
+      type: object
+      required: [user, practice, seq, payload, signature]
+      properties:
+        user: { $ref: "#/components/schemas/UUID" }
+        practice: { $ref: "#/components/schemas/PracticeKey" }
+        seq: { type: integer, format: int64 }
+        payload: { $ref: "#/components/schemas/Bytes" }
+        signature: { $ref: "#/components/schemas/Signature" }
+
+    Block:
+      type: object
+      required: [userId, createdAt]
+      properties:
+        userId: { $ref: "#/components/schemas/UUID" }
+        createdAt: { $ref: "#/components/schemas/Millis" }
+
+    ReportUpload:
+      type: object
+      required: [userId, reason]
+      properties:
+        userId: { $ref: "#/components/schemas/UUID" }
+        reason: { type: string, enum: [name, avatar, spam, other] }
+        note: { type: string, maxLength: 1000 }
+
+    PushTokenUpload:
+      type: object
+      required: [platform, token]
+      properties:
+        platform: { type: string, enum: [apns, fcm] }
+        token: { type: string, minLength: 1, maxLength: 4096 }
+
+    Export:
+      type: object
+      required: [userId, exportedAt, tables]
+      properties:
+        userId: { $ref: "#/components/schemas/UUID" }
+        exportedAt: { $ref: "#/components/schemas/Millis" }
+        tables:
+          type: object
+          description: |
+            One key per table that references a user (`users`,
+            `auth_identities`, `sessions`, `devices`, `device_lists`, `wraps`,
+            `recovery_boxes`, `practice_logs`, `streak_statements`, `invites`,
+            `invite_redemptions`, `friendships`, `blocks`, `reports`,
+            `push_tokens`, `nudges`), each an array of rows with the stored
+            column names; bytea columns are standard base64.
+          additionalProperties:
+            type: array
+            items: { type: object }
