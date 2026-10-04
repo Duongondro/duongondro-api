@@ -55,9 +55,10 @@ type DeviceList struct {
 }
 
 type Friendship struct {
-	UserID    uuid.UUID `json:"userId"`
-	FriendID  uuid.UUID `json:"friendId"`
-	CreatedAt time.Time `json:"createdAt"`
+	UserID     uuid.UUID `json:"userId"`
+	FriendID   uuid.UUID `json:"friendId"`
+	CreatedAt  time.Time `json:"createdAt"`
+	NotifyDone bool      `json:"notifyDone"`
 }
 
 type Invite struct {
@@ -105,6 +106,13 @@ type MagicLink struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type Nudge struct {
+	SenderID    uuid.UUID `json:"senderId"`
+	RecipientID uuid.UUID `json:"recipientId"`
+	Day         time.Time `json:"day"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 type PracticeLog struct {
 	ID              uuid.UUID  `json:"id"`
 	UserID          uuid.UUID  `json:"userId"`
@@ -115,6 +123,13 @@ type PracticeLog struct {
 	Xid             uint64     `json:"xid"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
+}
+
+type PushToken struct {
+	DeviceID  uuid.UUID `json:"deviceId"`
+	Platform  string    `json:"platform"`
+	Token     string    `json:"token"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type RecoveryBox struct {
@@ -139,13 +154,14 @@ type Session struct {
 }
 
 type Streak struct {
-	UserID     uuid.UUID `json:"userId"`
-	Practice   string    `json:"practice"`
-	Seq        int64     `json:"seq"`
-	Payload    []byte    `json:"payload"`
-	Signature  []byte    `json:"signature"`
-	DeadlineAt time.Time `json:"deadlineAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	UserID        uuid.UUID `json:"userId"`
+	Practice      string    `json:"practice"`
+	Seq           int64     `json:"seq"`
+	Payload       []byte    `json:"payload"`
+	Signature     []byte    `json:"signature"`
+	DeadlineAt    time.Time `json:"deadlineAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	AtRiskSentSeq int64     `json:"atRiskSentSeq"`
 }
 
 type User struct {

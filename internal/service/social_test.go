@@ -154,23 +154,36 @@ func TestStreaks(t *testing.T) {
 
 	st := e2ee.Streak{Current: 42, Day: "2026-10-04", Deadline: time.Now().Add(30 * time.Hour).UnixMilli(), Longest: 42, Practice: "dorje-sempa", Seq: 1, User: ana.ID.String()}
 	payload, sig := sign(ana, e2ee.TypeStreak, st)
-	if err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); !isValidation(err) {
+	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); !isValidation(err) {
 		t.Fatalf("path and statement disagree: %v", err)
 	}
-	if err := s.PutStreak(ctx, bo.User, "dorje-sempa", payload, sig); !isValidation(err) {
+	if _, _, err := s.PutStreak(ctx, bo.User, "dorje-sempa", payload, sig); !isValidation(err) {
 		t.Fatalf("someone else's statement: %v", err)
 	}
-	if err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); err != nil {
-		t.Fatal(err)
+	if _, newDay, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); err != nil || !newDay {
+		t.Fatalf("first statement: %v newDay=%v", err, newDay)
 	}
-	if err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); !isConflict(err) {
+	if _, _, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); !isConflict(err) {
 		t.Fatalf("same seq: %v", err)
 	}
 	bad := st
 	bad.Seq, bad.Longest = 2, 3
 	payload, sig = sign(ana, e2ee.TypeStreak, bad)
-	if err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); !isValidation(err) {
+	if _, _, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); !isValidation(err) {
 		t.Fatalf("longest below current: %v", err)
+	}
+	// Later the same day: a newer statement, but no new day, so no "done today".
+	same := st
+	same.Seq = 2
+	payload, sig = sign(ana, e2ee.TypeStreak, same)
+	if _, newDay, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); err != nil || newDay {
+		t.Fatalf("same day again: %v newDay=%v", err, newDay)
+	}
+	next := st
+	next.Seq, next.Day, next.Current, next.Longest = 3, "2026-10-05", 43, 43
+	payload, sig = sign(ana, e2ee.TypeStreak, next)
+	if _, newDay, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); err != nil || !newDay {
+		t.Fatalf("next day: %v newDay=%v", err, newDay)
 	}
 
 	if got, _ := s.FriendsStreaks(ctx, bo.ID); len(got) != 1 {
@@ -229,7 +242,7 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	}
 	st := e2ee.Streak{Current: 1, Day: "2026-10-04", Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 1, Practice: "mandala", Seq: 1, User: ana.ID.String()}
 	payload, sig = sign(ana, e2ee.TypeStreak, st)
-	if err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); err != nil {
+	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); err != nil {
 		f.t.Fatal(err)
 	}
 	if err := s.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
@@ -247,6 +260,13 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		f.t.Fatal(err)
 	}
 	if _, err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: []byte(`{}`), UserID: &ana.ID}); err != nil {
+		f.t.Fatal(err)
+	}
+	nudges := NewNudges(f.pool, nil)
+	if err := nudges.PutToken(ctx, ana.ID, dev.ID, "apns", "ana-token"); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := nudges.Poke(ctx, ana.User, bo.ID); err != nil {
 		f.t.Fatal(err)
 	}
 	return ana

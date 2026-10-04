@@ -137,7 +137,7 @@ func (q *Queries) DeleteStreak(ctx context.Context, arg DeleteStreakParams) (int
 }
 
 const friendsStreaks = `-- name: FriendsStreaks :many
-SELECT streaks.user_id, streaks.practice, streaks.seq, streaks.payload, streaks.signature, streaks.deadline_at, streaks.updated_at FROM streaks
+SELECT streaks.user_id, streaks.practice, streaks.seq, streaks.payload, streaks.signature, streaks.deadline_at, streaks.updated_at, streaks.at_risk_sent_seq FROM streaks
 JOIN friendships ON friendships.friend_id = streaks.user_id
 WHERE friendships.user_id = $1
 ORDER BY streaks.user_id, streaks.practice
@@ -160,6 +160,7 @@ func (q *Queries) FriendsStreaks(ctx context.Context, userID uuid.UUID) ([]Strea
 			&i.Signature,
 			&i.DeadlineAt,
 			&i.UpdatedAt,
+			&i.AtRiskSentSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -188,6 +189,31 @@ func (q *Queries) GetLiveInvite(ctx context.Context, id string) (Invite, error) 
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getStreak = `-- name: GetStreak :one
+SELECT user_id, practice, seq, payload, signature, deadline_at, updated_at, at_risk_sent_seq FROM streaks WHERE user_id = $1 AND practice = $2
+`
+
+type GetStreakParams struct {
+	UserID   uuid.UUID `json:"userId"`
+	Practice string    `json:"practice"`
+}
+
+func (q *Queries) GetStreak(ctx context.Context, arg GetStreakParams) (Streak, error) {
+	row := q.db.QueryRow(ctx, getStreak, arg.UserID, arg.Practice)
+	var i Streak
+	err := row.Scan(
+		&i.UserID,
+		&i.Practice,
+		&i.Seq,
+		&i.Payload,
+		&i.Signature,
+		&i.DeadlineAt,
+		&i.UpdatedAt,
+		&i.AtRiskSentSeq,
 	)
 	return i, err
 }
@@ -235,7 +261,7 @@ func (q *Queries) ListBlocks(ctx context.Context, blockerID uuid.UUID) ([]Block,
 }
 
 const listFriends = `-- name: ListFriends :many
-SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at
+SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id
@@ -246,6 +272,7 @@ type ListFriendsRow struct {
 	DisplayName       string    `json:"displayName"`
 	IdentityPublicKey []byte    `json:"identityPublicKey"`
 	CreatedAt         time.Time `json:"createdAt"`
+	NotifyDone        bool      `json:"notifyDone"`
 }
 
 func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFriendsRow, error) {
@@ -262,6 +289,7 @@ func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFrie
 			&i.DisplayName,
 			&i.IdentityPublicKey,
 			&i.CreatedAt,
+			&i.NotifyDone,
 		); err != nil {
 			return nil, err
 		}
@@ -308,7 +336,7 @@ func (q *Queries) ListInvites(ctx context.Context, inviterID uuid.UUID) ([]Invit
 }
 
 const ownStreaks = `-- name: OwnStreaks :many
-SELECT user_id, practice, seq, payload, signature, deadline_at, updated_at FROM streaks WHERE user_id = $1 ORDER BY practice
+SELECT user_id, practice, seq, payload, signature, deadline_at, updated_at, at_risk_sent_seq FROM streaks WHERE user_id = $1 ORDER BY practice
 `
 
 func (q *Queries) OwnStreaks(ctx context.Context, userID uuid.UUID) ([]Streak, error) {
@@ -328,6 +356,7 @@ func (q *Queries) OwnStreaks(ctx context.Context, userID uuid.UUID) ([]Streak, e
 			&i.Signature,
 			&i.DeadlineAt,
 			&i.UpdatedAt,
+			&i.AtRiskSentSeq,
 		); err != nil {
 			return nil, err
 		}

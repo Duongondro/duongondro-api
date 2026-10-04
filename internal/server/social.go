@@ -166,7 +166,7 @@ func (s *Server) ListFriends(ctx context.Context, req api.ListFriendsRequestObje
 	}
 	out := api.ListFriends200JSONResponse{Friends: make([]api.Friend, len(friends))}
 	for i, f := range friends {
-		out.Friends[i] = api.Friend{UserId: f.ID, DisplayName: f.DisplayName, Since: f.CreatedAt}
+		out.Friends[i] = api.Friend{UserId: f.ID, DisplayName: f.DisplayName, Since: f.CreatedAt, NotifyDone: f.NotifyDone}
 		if f.IdentityPublicKey != nil {
 			key := f.IdentityPublicKey
 			out.Friends[i].IdentityPublicKey = &key
@@ -300,8 +300,12 @@ func (s *Server) PutStreak(ctx context.Context, req api.PutStreakRequestObject) 
 	} else if !ok {
 		return api.PutStreak401Response{}, nil
 	}
-	err = s.social.PutStreak(ctx, user, req.Practice, req.Body.Payload, req.Body.Signature)
+	st, newDay, err := s.social.PutStreak(ctx, user, req.Practice, req.Body.Payload, req.Body.Signature)
 	if err == nil {
+		if newDay {
+			// The first statement of a practice day: friends who opted in hear of it.
+			s.nudges.DoneToday(ctx, user, st.Practice, st.Current)
+		}
 		return api.PutStreak204Response{}, nil
 	}
 	switch kind, body, ok := clientError(err); {

@@ -674,6 +674,61 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "409": {$ref: "#/components/responses/Conflict"}
 
+  /api/devices/{deviceId}/push-token:
+    put:
+      operationId: putPushToken
+      description: Stores this device's APNs or FCM token; the server drops it when the provider reports it unregistered.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/DeviceId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PushTokenInput"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      operationId: deletePushToken
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/DeviceId"}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/friends/{userId}/settings:
+    put:
+      operationId: putFriendSettings
+      description: Opts in or out of "done today" pushes from this friend.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/UserId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FriendSettings"}
+      responses:
+        "204": {description: Stored.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/friends/{userId}/pokes:
+    post:
+      operationId: poke
+      description: A manual nudge, one per friend per UTC day; the phone writes it in the mascot's voice.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/UserId"}
+      responses:
+        "204": {description: Sent.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
 components:
   parameters:
     Authorization:
@@ -970,10 +1025,11 @@ components:
         inviterId: {$ref: "#/components/schemas/UUID"}
     Friend:
       type: object
-      required: [userId, displayName, since]
+      required: [userId, displayName, since, notifyDone]
       properties:
         userId: {$ref: "#/components/schemas/UUID"}
         displayName: {type: string}
+        notifyDone: {type: boolean, description: This account hears when the friend practises}
         identityPublicKey: {type: string, format: byte}
         since: {type: string, format: date-time}
     FriendList:
@@ -1084,3 +1140,14 @@ components:
       required: [token]
       properties:
         token: {type: string, maxLength: 128}
+    PushTokenInput:
+      type: object
+      required: [platform, token]
+      properties:
+        platform: {type: string, enum: [apns, apns-sandbox, fcm]}
+        token: {type: string, maxLength: 4096}
+    FriendSettings:
+      type: object
+      required: [notifyDone]
+      properties:
+        notifyDone: {type: boolean}

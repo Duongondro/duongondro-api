@@ -32,7 +32,7 @@ ON CONFLICT DO NOTHING;
 DELETE FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1);
 
 -- name: ListFriends :many
-SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at
+SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id;
@@ -77,3 +77,6 @@ ORDER BY streaks.user_id, streaks.practice;
 
 -- name: OwnStreaks :many
 SELECT * FROM streaks WHERE user_id = $1 ORDER BY practice;
+
+-- name: GetStreak :one
+SELECT * FROM streaks WHERE user_id = $1 AND practice = $2;

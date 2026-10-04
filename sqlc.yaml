@@ -24,3 +24,5 @@ sql:
             go_type: {import: time, type: Time, pointer: true}
           - db_type: xid8
             go_type: uint64
+          - db_type: date
+            go_type: time.Time

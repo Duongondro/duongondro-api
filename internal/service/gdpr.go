@@ -46,6 +46,8 @@ type Export struct {
 	AuthIdentities     []db.ExportIdentitiesRow  `json:"auth_identities"`
 	MagicLinks         []db.ExportMagicLinksRow  `json:"magic_links"`
 	WebauthnSessions   []string                  `json:"webauthn_sessions"`
+	PushTokens         []db.ExportPushTokensRow  `json:"push_tokens"`
+	Nudges             []db.Nudge                `json:"nudges"`
 	DatabaseGeneration string                    `json:"database_generation"`
 }
 
@@ -53,12 +55,13 @@ type Export struct {
 // personal data; it is listed because the cursor in the apps refers to it.
 // webauthn_sessions are passkey ceremonies of the last five minutes: listed as
 // always empty, since one in flight is no stored data, and deleted by a purge.
-// Passkeys and identities appear without their secrets (the public key and Apple's
-// refresh token stay out).
+// Passkeys, identities and push tokens appear without their secrets (the public key,
+// Apple's refresh token and the device token stay out).
 var ExportedTables = []string{
 	"auth_identities", "blocks", "credentials", "database_generation", "device_lists", "devices",
 	"friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps", "magic_links",
-	"practice_logs", "recovery_boxes", "reports", "sessions", "streaks", "users", "webauthn_sessions",
+	"nudges", "practice_logs", "push_tokens", "recovery_boxes", "reports", "sessions", "streaks",
+	"users", "webauthn_sessions",
 }
 
 // Export reads everything in one snapshot.
@@ -124,6 +127,12 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 			return err
 		}
 		out.WebauthnSessions = []string{}
+		if out.PushTokens, err = q.ExportPushTokens(ctx, userID); err != nil {
+			return err
+		}
+		if out.Nudges, err = q.ExportNudges(ctx, userID); err != nil {
+			return err
+		}
 		state, err := q.SyncState(ctx)
 		if err != nil {
 			return err

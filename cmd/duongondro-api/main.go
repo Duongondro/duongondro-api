@@ -18,10 +18,15 @@
 //	APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY_FILE
 //	                   the Sign in with Apple key (.p8), to revoke authorisations when
 //	                   an account is deleted; the first APPLE_CLIENT_IDS is the client
+//	APNS_KEY_ID, APNS_PRIVATE_KEY_FILE, APNS_TOPIC
+//	                   push to iOS (team: APPLE_TEAM_ID; topic: the bundle id)
+//	FCM_SERVICE_ACCOUNT_FILE
+//	                   push to Android: the Firebase service account's JSON key
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,6 +36,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 
@@ -38,6 +44,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/buildinfo"
 	"github.com/Duongondro/duongondro-api/internal/migrate"
 	"github.com/Duongondro/duongondro-api/internal/oidc"
+	"github.com/Duongondro/duongondro-api/internal/push"
 	"github.com/Duongondro/duongondro-api/internal/server"
 	"github.com/Duongondro/duongondro-api/internal/service"
 )
@@ -98,10 +105,11 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	e, err := server.New(pool, cfg)
+	e, nudges, err := server.New(pool, cfg)
 	if err != nil {
 		return err
 	}
+	go nudges.Run(ctx)
 	info := buildinfo.Read()
 	slog.Info("listening", "addr", addr, "revision", info.Short)
 	sc := echo.StartConfig{
@@ -152,9 +160,55 @@ func config() (server.Config, error) {
 	if base == "" {
 		base = "https://duongondro.app/m/"
 	}
+	senders, err := pushSenders()
+	if err != nil {
+		return server.Config{}, err
+	}
 	return server.Config{
 		SignIn: service.SignInConfig{RPID: rpID, RPOrigins: origins, Verifiers: verifiers, Mailer: mailer(),
 			Apple: revoker},
 		MagicLinkBase: base,
+		Push:          senders,
 	}, nil
+}
+
+// pushSenders configures APNs and FCM from the environment; either may be absent.
+func pushSenders() (push.Senders, error) {
+	senders := push.Senders{}
+	client := &http.Client{Timeout: 15 * time.Second}
+	if file := os.Getenv("APNS_PRIVATE_KEY_FILE"); file != "" {
+		p8, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		key, err := apple.ParseKey(p8)
+		if err != nil {
+			return nil, err
+		}
+		apns := &push.APNs{TeamID: os.Getenv("APPLE_TEAM_ID"), KeyID: os.Getenv("APNS_KEY_ID"), Topic: os.Getenv("APNS_TOPIC"),
+			Key: key, HTTP: client, Now: time.Now,
+			BaseURL: map[string]string{"apns": push.APNsProduction, "apns-sandbox": push.APNsSandbox}}
+		senders["apns"], senders["apns-sandbox"] = apns, apns
+	}
+	if file := os.Getenv("FCM_SERVICE_ACCOUNT_FILE"); file != "" {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		var account struct {
+			ProjectID   string `json:"project_id"`
+			ClientEmail string `json:"client_email"`
+			PrivateKey  string `json:"private_key"`
+		}
+		if err := json.Unmarshal(raw, &account); err != nil {
+			return nil, err
+		}
+		key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(account.PrivateKey))
+		if err != nil {
+			return nil, err
+		}
+		senders["fcm"] = &push.FCM{ProjectID: account.ProjectID, ClientEmail: account.ClientEmail, Key: key,
+			TokenURL: push.GoogleTokenURL, BaseURL: push.FCMBaseURL, HTTP: client, Now: time.Now}
+	}
+	return senders, nil
 }

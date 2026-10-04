@@ -21,7 +21,7 @@ import (
 
 func newTestServer(t *testing.T, schema string) *echo.Echo {
 	t.Helper()
-	e, err := New(dbtest.Fresh(t, schema), Config{
+	e, _, err := New(dbtest.Fresh(t, schema), Config{
 		SignIn:        service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
 		MagicLinkBase: "https://duongondro.app/m/",
 	})

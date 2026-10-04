@@ -264,31 +264,47 @@ func (s *Social) Report(ctx context.Context, userID, otherID uuid.UUID, reason s
 // longest count tracked days only (imported seeds never reach the server in the
 // clear), the seq must go up, and the deadline lets the server time streak-at-risk
 // pushes without knowing where the user is.
-func (s *Social) PutStreak(ctx context.Context, user db.User, practice string, payload, signature []byte) error {
+//
+// newDay reports a statement for a later practice day than the stored one (or the
+// first): the moment friends who opted in hear "done today".
+func (s *Social) PutStreak(ctx context.Context, user db.User, practice string, payload, signature []byte) (st e2ee.Streak, newDay bool, err error) {
 	if !practicePattern.MatchString(practice) {
-		return invalid("practice must be a lowercase id of letters, digits and hyphens")
+		return st, false, invalid("practice must be a lowercase id of letters, digits and hyphens")
 	}
-	var st e2ee.Streak
 	if err := decodeStatement(user.IdentityPublicKey, e2ee.TypeStreak, payload, signature, &st); err != nil {
-		return err
+		return st, false, err
 	}
 	if st.User != user.ID.String() || st.Practice != practice {
-		return invalid("the statement names another user or practice")
+		return st, false, invalid("the statement names another user or practice")
 	}
 	if st.Seq < 1 || st.Current < 0 || st.Longest < st.Current || st.Deadline <= 0 {
-		return invalid("seq must be positive, 0 <= current <= longest, and a deadline set")
+		return st, false, invalid("seq must be positive, 0 <= current <= longest, and a deadline set")
 	}
 	if _, err := streak.ParseDate(st.Day); err != nil {
-		return invalid("day must be YYYY-MM-DD")
+		return st, false, invalid("day must be YYYY-MM-DD")
+	}
+	newDay = st.Current > 0
+	if old, err := s.q.GetStreak(ctx, db.GetStreakParams{UserID: user.ID, Practice: practice}); err == nil {
+		var prev e2ee.Streak
+		newDay = newDay && json.Unmarshal(old.Payload, &prev) == nil && prev.Day < st.Day
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return st, false, err
 	}
 	n, err := s.q.PutStreak(ctx, db.PutStreakParams{
 		UserID: user.ID, Practice: practice, Seq: st.Seq, Payload: payload, Signature: signature,
 		DeadlineAt: time.UnixMilli(st.Deadline),
 	})
 	if err == nil && n == 0 {
-		return conflict("seq %d is not above the stored statement's", st.Seq)
+		return st, false, conflict("seq %d is not above the stored statement's", st.Seq)
 	}
-	return err
+	return st, newDay && err == nil, err
+}
+
+// statementCurrent reads current from a stored streak payload.
+func statementCurrent(payload []byte) (int, error) {
+	var st e2ee.Streak
+	err := json.Unmarshal(payload, &st)
+	return st.Current, err
 }
 
 // DeleteStreak makes a practice's streak private again.

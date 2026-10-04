@@ -16,6 +16,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/buildinfo"
 	"github.com/Duongondro/duongondro-api/internal/db"
+	"github.com/Duongondro/duongondro-api/internal/push"
 	"github.com/Duongondro/duongondro-api/internal/service"
 )
 
@@ -32,6 +33,7 @@ type Server struct {
 	social   *service.Social
 	gdpr     *service.GDPR
 	signIn   *service.SignIn
+	nudges   *service.Nudges
 	version  buildinfo.Info
 
 	magicLinkBase string
@@ -43,12 +45,15 @@ type Config struct {
 	// MagicLinkBase is prefixed to a magic link's token: an App Link and Universal
 	// Link on duongondro.app that opens the app.
 	MagicLinkBase string
+	// Push delivers nudges (APNs and FCM); nil sends nothing.
+	Push push.Sender
 }
 
 var _ api.StrictServerInterface = (*Server)(nil)
 
-// New returns an Echo instance serving the API.
-func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, error) {
+// New returns an Echo instance serving the API, and the nudge sender, whose Run the
+// caller starts alongside it.
+func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 	e := echo.NewWithConfig(echo.Config{
 		Logger: slog.Default(),
 		// Caddy, on loopback, appends the client's address to X-Forwarded-For;
@@ -72,7 +77,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, error) {
 	social := service.NewSocial(pool)
 	signIn, err := service.NewSignIn(pool, authSvc, social, cfg.SignIn)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	s := &Server{
 		auth:     authSvc,
@@ -84,6 +89,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, error) {
 		social:   social,
 		gdpr:     service.NewGDPR(pool),
 		signIn:   signIn,
+		nudges:   service.NewNudges(pool, cfg.Push),
 		version:  buildinfo.Read(),
 
 		magicLinkBase: cfg.MagicLinkBase,
@@ -95,7 +101,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, error) {
 	// Sign-in without any method; only in DEV builds.
 	registerDevSession(e, s.auth)
 	api.RegisterHandlers(e, api.NewStrictHandler(s, nil))
-	return e, nil
+	return e, s.nudges, nil
 }
 
 // authenticate resolves the Authorization header to its user. ok is false for a
