@@ -32,6 +32,11 @@ func TestRoutes(t *testing.T) {
 		}
 	}
 
+	res, err = http.Get(srv.URL + "/.well-known/apple-app-site-association")
+	if err != nil || res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("aasa: %v %v", err, res)
+	}
+
 	res, err = http.Post(srv.URL+"/api/version", "application/json", nil)
 	if err != nil || res.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("POST version should be 405: %v %v", err, res.StatusCode)

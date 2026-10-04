@@ -4,10 +4,7 @@ go 1.24.0
 
 require golang.org/x/crypto v0.42.0
 
-require (
-	github.com/jackc/pgx/v5 v5.8.0
-	golang.org/x/sys v0.36.0 // indirect
-)
+require golang.org/x/sys v0.36.0 // indirect
 
 replace golang.org/x/crypto => github.com/golang/crypto v0.42.0
 

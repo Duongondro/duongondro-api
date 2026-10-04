@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Duongondro/duongondro-api/internal/buildinfo"
+	"github.com/Duongondro/duongondro-api/internal/web"
 )
 
 // MaxBodyBytes caps every request body, as CodeShare does.
@@ -25,6 +26,9 @@ func New(log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, info)
 	})
+	// Everything else is the public website: landing page, invite and
+	// add-friend link pages, privacy policy, .well-known files.
+	mux.Handle("/", web.Handler())
 	return withBasics(log, mux)
 }
 

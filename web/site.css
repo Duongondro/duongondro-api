@@ -1,6 +1,50 @@
-@font-face{font-family:"Bricolage Grotesque";font-weight:700;font-style:normal;font-display:swap;src:url("/fonts/bricolage-grotesque-700-latin.woff") format("woff")}
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-regular-latin1.woff2") format("woff2");unicode-range:U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02
+}
+/* Subset: Latin2 */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-regular-latin2.woff2") format("woff2");unicode-range:U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF
+}
+/* Subset: Latin3 */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-regular-cyrillic.woff2") format("woff2");unicode-range:U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525
+}
+/* Subset: Greek */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-semibold-latin1.woff2") format("woff2");unicode-range:U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02
+}
+/* Subset: Latin2 */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-semibold-latin2.woff2") format("woff2");unicode-range:U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF
+}
+/* Subset: Latin3 */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-semibold-cyrillic.woff2") format("woff2");unicode-range:U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525
+}
+/* Subset: Greek */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:700;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-bold-latin1.woff2") format("woff2");unicode-range:U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02
+}
+/* Subset: Latin2 */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:700;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-bold-latin2.woff2") format("woff2");unicode-range:U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192, U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259, U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF
+}
+/* Subset: Latin3 */
+@font-face {
+	font-family: 'IBM Plex Sans'}
+@font-face{font-family:"IBM Plex Sans";font-weight:700;font-style:normal;font-display:swap;src:url("/fonts/ibm-plex-sans-bold-cyrillic.woff2") format("woff2");unicode-range:U+0400-045F, U+0462-0463, U+046A-046B, U+0472-0475, U+0490-04C2, U+04CF-04D9, U+04DC-04E9, U+04EE-04F9, U+0524-0525
+}
+/* Subset: Greek */
+@font-face {
+	font-family: 'IBM Plex Sans'}
 :root{--ground:#F7F3F1;--card:#FFFFFF;--border:#E4D9D6;--ink:#22151A;--muted:#6B5A60;--accent:#7A1F2E;--on-accent:#FFFFFF;--gold:#C9952B;--gold-text:#7A5410;--vajra:#D4A72C;--focus:#7A1F2E;
---display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--text:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+--display:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--text:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
 @media (prefers-color-scheme:dark){:root{--ground:#120A0C;--card:#2B1C20;--border:#46323A;--ink:#F4ECEE;--muted:#C2B2B7;--accent:#E8909C;--on-accent:#22151A;--gold:#E3B341;--gold-text:#E3B341;--vajra:#D4A72C;--focus:#E8909C}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -11,7 +55,7 @@ a:focus-visible,button:focus-visible,code:focus-visible{outline:3px solid var(--
 header.top{padding:20px 0}
 .brand{display:flex;align-items:center;gap:12px;color:var(--ink);text-decoration:none;font:700 1.25rem/1 var(--display)}
 .mark{flex:none;width:36px;height:36px;border-radius:6px;background:#7A1F2E}
-h1,h2{font-family:var(--display);font-weight:700;line-height:1.15;margin:0}
+h1,h2{font-family:var(--display);font-weight:600;line-height:1.15;margin:0}
 h1{font-size:clamp(2rem,7vw,3rem);color:var(--accent);margin-bottom:16px}
 h2{font-size:1.5rem;margin:0 0 12px}
 h3{font-size:1.0625rem;margin:0 0 4px}

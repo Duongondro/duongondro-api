@@ -37,13 +37,7 @@ python3 -m http.server -d web 8000
 
 ## Fonts
 
-Self-hosted only, no requests to Google. The brief was Bricolage Grotesque for display and Figtree for text, fetched from `@fontsource`. The npm registry returned 403 for both packages in the build session, so:
-
-- Display: `fonts/bricolage-grotesque-700-latin.woff`, a Latin and Latin Extended-A subset (34 KB, WOFF rather than WOFF2 because no Brotli encoder was available) of the OFL-licensed Bold already on the build machine. The licence is `fonts/BricolageGrotesque-OFL.txt`. It has no Cyrillic, and only the Bold weight.
-- Text: the system font stack (`system-ui`). Figtree is not included.
-- Cyrillic (Russian, Ukrainian) therefore falls back to `system-ui` for headings and body text.
-
-To use the intended fonts, fetch `@fontsource/bricolage-grotesque` and `@fontsource/figtree`, copy the latin, latin-ext and cyrillic woff2 files for the weights used into `fonts/` with their licences, and add `@font-face` rules to `site.css`. Keep the total under about 300 KB.
+Self-hosted only, no requests to Google or any other font service. IBM Plex Sans throughout, in Regular, SemiBold and Bold, split by script (Latin 1, Latin Extended and Cyrillic, which covers all eight launch languages) and loaded per `unicode-range`, so an English page downloads only the Latin 1 files. Taken from IBM's repository (github.com/IBM/plex, `packages/plex-sans/fonts/split/woff2`); licence in `fonts/IBMPlexSans-OFL.txt` (SIL OFL 1.1).
 
 ## Languages
 

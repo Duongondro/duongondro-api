@@ -43,7 +43,7 @@ func TestRoutes(t *testing.T) {
 		{"/invite.js", "location.hash", "public, max-age=604800"},
 		{"/favicon.svg", "<svg", "public, max-age=604800"},
 		{"/robots.txt", "Disallow: /i/", "public, max-age=604800"},
-		{"/fonts/bricolage-grotesque-700-latin.woff", "", "public, max-age=31536000, immutable"},
+		{"/fonts/ibm-plex-sans-regular-latin1.woff2", "", "public, max-age=31536000, immutable"},
 		{"/.well-known/assetlinks.json", "app.duongondro.android", "public, max-age=3600"},
 	}
 	for _, tc := range tests {
