@@ -23,7 +23,7 @@ func newTestServer(t *testing.T, schema string) *echo.Echo {
 	t.Helper()
 	e, _, err := New(dbtest.Fresh(t, schema), Config{
 		SignIn:        service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
-		MagicLinkBase: "https://duongondro.app/m/",
+		MagicLinkBase: "https://duongondro.app/m#",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,5 +124,45 @@ func TestWellKnown(t *testing.T) {
 	rec := serve(t, e, http.MethodPost, "/api/client-errors", "bogus", map[string]any{"kind": "error", "message": "x"})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("client error without a session: %d", rec.Code)
+	}
+}
+
+// The apex serves the website and the association files and nothing of the API;
+// www redirects to the apex; the API host never serves the website.
+func TestWebsiteHosts(t *testing.T) {
+	e, _, err := New(dbtest.Fresh(t, "server_website_tests"), Config{
+		SignIn:    service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
+		WellKnown: WellKnown{AppleAppIDs: []string{"TEAM.app.duongondro.ios"}},
+		WebHosts:  []string{"duongondro.app", "www.duongondro.app"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(host, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("duongondro.app", "/I/7K2MQ9XA"); rec.Code != http.StatusOK || rec.Header().Get("Content-Security-Policy") == "" {
+		t.Fatalf("invite page on the apex: %d", rec.Code)
+	}
+	if rec := get("duongondro.app", "/.well-known/apple-app-site-association"); rec.Code != http.StatusOK ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`{"/":"/m"}`)) {
+		t.Fatalf("association file on the apex: %d %s", rec.Code, rec.Body)
+	}
+	if rec := get("duongondro.app", "/api/version"); rec.Code != http.StatusNotFound {
+		t.Fatalf("API on the apex: %d", rec.Code)
+	}
+	if rec := get("www.duongondro.app:443", "/privacy/?x=1"); rec.Code != http.StatusMovedPermanently ||
+		rec.Header().Get("Location") != "https://duongondro.app/privacy/?x=1" {
+		t.Fatalf("www: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec := get("api.duongondro.app", "/api/version"); rec.Code != http.StatusOK {
+		t.Fatalf("API host: %d", rec.Code)
+	}
+	if rec := get("api.duongondro.app", "/privacy/"); rec.Code != http.StatusNotFound {
+		t.Fatalf("website on the API host: %d", rec.Code)
 	}
 }

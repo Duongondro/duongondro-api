@@ -298,13 +298,13 @@ func TestMagicLinks(t *testing.T) {
 	token := func() string {
 		select {
 		case last := <-mailer.sent:
-			return last[strings.LastIndex(last, "/")+1:]
+			return last[strings.LastIndexAny(last, "/#")+1:]
 		case <-time.After(5 * time.Second):
 			t.Fatal("no mail was sent")
 			return ""
 		}
 	}
-	const base = "https://duongondro.app/m/"
+	const base = "https://duongondro.app/m#"
 
 	// No account and no invite: the same answer, nothing sent, and the same limit.
 	for i := 0; i < magicLinksPerWindow; i++ {

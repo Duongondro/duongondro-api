@@ -18,7 +18,10 @@
 //	APPLE_CLIENT_IDS   bundle ids Sign in with Apple tokens may be for (optional)
 //	GOOGLE_CLIENT_IDS  OAuth client ids Google tokens may be for (optional)
 //	MAGIC_LINK_BASE    URL a magic link's token is appended to
-//	                   (default https://duongondro.app/m/)
+//	                   (default https://duongondro.app/m#, so the token stays in
+//	                   the fragment and never reaches a server log)
+//	WEB_HOSTS          hosts that serve the public website instead of the API,
+//	                   canonical first: duongondro.app,www.duongondro.app
 //	APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY_FILE
 //	                   the Sign in with Apple key (.p8), to revoke authorisations when
 //	                   an account is deleted; the first APPLE_CLIENT_IDS is the client
@@ -200,7 +203,7 @@ func loadConfig() (server.Config, error) {
 	}
 	base := os.Getenv("MAGIC_LINK_BASE")
 	if base == "" {
-		base = "https://duongondro.app/m/"
+		base = "https://duongondro.app/m#"
 	}
 	senders, err := pushSenders()
 	if err != nil {
@@ -213,6 +216,7 @@ func loadConfig() (server.Config, error) {
 		Push:          senders,
 		WellKnown: server.WellKnown{AppleAppIDs: list("APPLE_APP_IDS"), AndroidPackage: os.Getenv("ANDROID_PACKAGE"),
 			AndroidFingerprints: list("ANDROID_CERT_SHA256")},
+		WebHosts: list("WEB_HOSTS"),
 	}, nil
 }
 

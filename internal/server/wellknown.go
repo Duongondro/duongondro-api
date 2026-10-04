@@ -18,9 +18,10 @@ type WellKnown struct {
 	AndroidFingerprints []string
 }
 
-// Link paths: invites (/I/), friend codes (/F/), magic links (/m/). The QR codes are
-// upper-case to stay in alphanumeric mode (design: Social › Codes), so both cases.
-var appLinkPaths = []string{"/I/*", "/i/*", "/F/*", "/f/*", "/m/*"}
+// Link paths: invites (/I/), friend codes (/F/), magic links (/m#<token>, and /m/
+// for safety). The QR codes are upper-case to stay in alphanumeric mode (design:
+// Social › Codes), so both cases.
+var appLinkPaths = []string{"/I/*", "/i/*", "/F/*", "/f/*", "/m", "/m/*"}
 
 func registerWellKnown(e *echo.Echo, w WellKnown) {
 	if len(w.AppleAppIDs) > 0 {

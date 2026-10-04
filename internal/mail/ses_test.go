@@ -18,10 +18,10 @@ func (f *fakeSES) SendEmail(_ context.Context, in *sesv2.SendEmailInput, _ ...fu
 func TestSendMagicLink(t *testing.T) {
 	fake := &fakeSES{}
 	s := &SES{Client: fake, From: "Duongöndro <hello@duongondro.app>"}
-	if err := s.SendMagicLink(t.Context(), "bo@example.com", "https://duongondro.app/m/TOKEN"); err != nil {
+	if err := s.SendMagicLink(t.Context(), "bo@example.com", "https://duongondro.app/m#TOKEN"); err != nil {
 		t.Fatal(err)
 	}
-	if fake.in.Destination.ToAddresses[0] != "bo@example.com" || !strings.Contains(*fake.in.Content.Simple.Body.Text.Data, "https://duongondro.app/m/TOKEN") {
+	if fake.in.Destination.ToAddresses[0] != "bo@example.com" || !strings.Contains(*fake.in.Content.Simple.Body.Text.Data, "https://duongondro.app/m#TOKEN") {
 		t.Fatalf("message %+v", fake.in)
 	}
 }
