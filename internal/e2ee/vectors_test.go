@@ -118,6 +118,15 @@ func build(t *testing.T) Vectors {
 		"padded": hexBytes(Pad(sessionJSON)),
 		"sealed": hexBytes(sealed),
 	}
+	// A tombstone carries only the times (docs/crypto.md), sealed under the same
+	// session id with a nonce of its own.
+	tombstoneJSON := []byte(`{"deletedAt":1791183600000,"updatedAt":1791183600000}`)
+	tombstone, err := SealSession(sealKey, session, user, 1, tombstoneJSON, fixed("tombstone nonce", 12))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Session["tombstoneJson"] = string(tombstoneJSON)
+	v.Session["tombstoneSealed"] = hexBytes(tombstone)
 
 	for _, w := range []struct {
 		name   string

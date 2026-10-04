@@ -24,7 +24,23 @@ aad       = uuid(session) ‖ uuid(user) ‖ u32be(keyVersion)          36 bytes
 sealed    = nonce(12) ‖ ChaCha20-Poly1305(seal_key, nonce, padded, aad)   (ciphertext ‖ tag)
 ```
 
-`json` is the session as UTF-8 JSON (practice id, count, day, start, time zone, minutes, note, deletedAt, updatedAt). A deletion is sealed like any other write, as a tombstone whose json carries `deletedAt` (and may omit the rest), so only a holder of the practice key can delete a session. Padding hides the length of notes from the server; unpadding strips trailing zero bytes and then exactly one `0x80`, and fails if that byte is missing. The AAD binds a blob to one session id, one user and one key version, so the server cannot move or replay it under another identity.
+`json` is the session as one UTF-8 JSON object. Times are Unix milliseconds; days are `YYYY-MM-DD`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `practice` | string | Catalogue id (`dorje-sempa`) or a custom practice's id |
+| `count` | integer | Repetitions in this sitting (a mala's worth, or 0 for streak-only) |
+| `day` | string | The civil day the session counts for |
+| `chosenDay` | string, optional | Present when the user picked the day (the after-midnight choice) |
+| `start` | integer | When the sitting started |
+| `exact` | boolean, optional | Whether `start` was recorded (true) or estimated; default false |
+| `tz` | string | IANA time zone the session was logged in |
+| `loggedAt` | integer, optional | When it was logged; default `start` |
+| `updatedAt` | integer | Last change; must equal the outer `updatedAt`, which a client checks, so the server cannot replay an old blob under a newer time |
+| `deletedAt` | integer, optional | Present on a tombstone |
+| `practiceName` | string, optional | A custom practice's name, so another phone can show it |
+
+Readers ignore unknown fields (`minutes` and `note` are reserved for later versions). A deletion is sealed like any other write, as a tombstone whose json carries `deletedAt` and `updatedAt` and may omit the rest, so only a holder of the practice key can delete a session. Padding hides the length of notes and names from the server; unpadding strips trailing zero bytes and then exactly one `0x80`, and fails if that byte is missing. The AAD binds a blob to one session id, one user and one key version, so the server cannot move or replay it under another identity.
 
 ## Wraps
 
