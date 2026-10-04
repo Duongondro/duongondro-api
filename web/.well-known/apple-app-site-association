@@ -5,7 +5,9 @@
         "appIDs": ["TEAMID.app.duongondro.ios"],
         "components": [
           { "/": "/i/*" },
-          { "/": "/f/*" }
+          { "/": "/f/*" },
+          { "/": "/m" },
+          { "/": "/m/*" }
         ]
       }
     ]

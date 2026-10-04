@@ -1,6 +1,6 @@
 # Website for duongondro.app
 
-Static site for the apex and `www` hosts: landing page, privacy policy draft, the invite and add-friend pages shown when the app is not installed, and the app-link association files. Plain HTML and CSS; the only JavaScript is `invite.js`, used by `/i/` and `/f/`. It is licensed AGPL-3.0 like the rest of this repository.
+Static site for the apex and `www` hosts: landing page, privacy policy draft, the invite and add-friend pages shown when the app is not installed, and the app-link association files. Plain HTML and CSS; the only JavaScript is `invite.js`, used by `/i/` and `/f/`, and `magic.js`, which strips the token from the address bar on `/m`. It is licensed AGPL-3.0 like the rest of this repository.
 
 ## How it is served
 
@@ -8,7 +8,7 @@ The files are embedded into the API binary (`web/embed.go`, package `webfs`) and
 
 The handler:
 
-- serves `/` and `/privacy/`, and the same invite page for every `/i/<id>` and the same add-friend page for every `/f/<id>`, with `Cache-Control: no-store`;
+- serves `/` and `/privacy/`, and the same invite page for every `/i/<id>` and the same add-friend page for every `/f/<id>`, with `Cache-Control: no-store`, and the sign-in fallback page at `/m` (magic links are `https://duongondro.app/m#<token>` and normally open in the app);
 - serves `/.well-known/apple-app-site-association` as `application/json` with no redirect;
 - caches fonts for a year, CSS, JS and icons for a week, pages for five minutes;
 - sets a strict `Content-Security-Policy` (`default-src 'self'`), `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` on every response.

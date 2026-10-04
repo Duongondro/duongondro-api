@@ -39,6 +39,9 @@ func TestRoutes(t *testing.T) {
 		{"/i/7K2MQ9XA", "You have been invited", "no-store"},
 		{"/i/", "You have been invited", "no-store"},
 		{"/f/7K2MQ9XA", "Add a friend", "no-store"},
+		{"/m", "Open this link on your phone", "no-store"},
+		{"/m/", "Open this link on your phone", "no-store"},
+		{"/magic.js", "replaceState", "public, max-age=604800"},
 		{"/site.css", "--ground", "public, max-age=604800"},
 		{"/invite.js", "location.hash", "public, max-age=604800"},
 		{"/favicon.svg", "<svg", "public, max-age=604800"},
@@ -63,7 +66,7 @@ func TestRoutes(t *testing.T) {
 }
 
 func TestInvitePagesDoNotLeak(t *testing.T) {
-	for _, p := range []string{"/i/3Q8W5E7R", "/f/3Q8W5E7R"} {
+	for _, p := range []string{"/i/3Q8W5E7R", "/f/3Q8W5E7R", "/m/3Q8W5E7R"} {
 		rec := get(t, http.MethodGet, p)
 		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 			t.Errorf("%s: Content-Type = %q", p, ct)
@@ -107,7 +110,7 @@ func TestAppSiteAssociation(t *testing.T) {
 	for _, c := range v.Applinks.Details[0].Components {
 		paths = append(paths, c["/"])
 	}
-	if strings.Join(paths, ",") != "/i/*,/f/*" {
+	if strings.Join(paths, ",") != "/i/*,/f/*,/m,/m/*" {
 		t.Errorf("paths = %v", paths)
 	}
 	if len(v.Webcredentials.Apps) != 1 {

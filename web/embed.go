@@ -7,5 +7,5 @@ import "embed"
 // FS holds the site. The patterns name .well-known explicitly: a plain
 // "//go:embed web" or a glob would skip dot-directories.
 //
-//go:embed index.html site.css invite.js favicon.svg robots.txt fonts i f privacy .well-known
+//go:embed index.html site.css invite.js magic.js favicon.svg robots.txt fonts i f m privacy .well-known
 var FS embed.FS

@@ -59,6 +59,12 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Magic sign-in links (/m#<token>) open in the app; the page is the
+	// fallback when they reach a browser.
+	if p == "/m" || p == "/m/" || strings.HasPrefix(p, "/m/") {
+		h.serve(w, r, "m/index.html", cacheNone)
+		return
+	}
 	if p == "/privacy" {
 		http.Redirect(w, r, "/privacy/", http.StatusMovedPermanently)
 		return
