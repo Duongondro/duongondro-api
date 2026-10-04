@@ -9,6 +9,8 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Duongondro/duongondro-api/internal/db"
 )
 
 // ErrNoSuchUser answers a DEV sign-in as an id that does not exist.
@@ -25,6 +27,10 @@ func (s *Service) DevSession(ctx context.Context, id string) (token string, user
 		user, err := s.q.CreateUser(ctx)
 		if err != nil {
 			return "", uuid.UUID{}, fmt.Errorf("create user: %w", err)
+		}
+		// A root of the invite tree: DEV accounts skip the invite gate.
+		if err := s.q.CreateInviteNode(ctx, db.CreateInviteNodeParams{UserID: &user.ID}); err != nil {
+			return "", uuid.UUID{}, fmt.Errorf("create invite node: %w", err)
 		}
 		userID = user.ID
 	} else {

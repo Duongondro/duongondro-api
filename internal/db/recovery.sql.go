@@ -46,9 +46,9 @@ ON CONFLICT (user_id, kind) DO UPDATE SET box = EXCLUDED.box, updated_at = now()
 `
 
 type PutRecoveryBoxParams struct {
-	UserID uuid.UUID
-	Kind   int16
-	Box    []byte
+	UserID uuid.UUID `json:"userId"`
+	Kind   int16     `json:"kind"`
+	Box    []byte    `json:"box"`
 }
 
 func (q *Queries) PutRecoveryBox(ctx context.Context, arg PutRecoveryBoxParams) error {

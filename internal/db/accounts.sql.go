@@ -16,8 +16,8 @@ INSERT INTO sessions (token_hash, user_id) VALUES ($1, $2)
 `
 
 type CreateSessionParams struct {
-	TokenHash []byte
-	UserID    uuid.UUID
+	TokenHash []byte    `json:"tokenHash"`
+	UserID    uuid.UUID `json:"userId"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
@@ -26,7 +26,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users DEFAULT VALUES RETURNING id, identity_public_key, key_version, created_at
+INSERT INTO users DEFAULT VALUES RETURNING id, identity_public_key, key_version, created_at, display_name
 `
 
 func (q *Queries) CreateUser(ctx context.Context) (User, error) {
@@ -37,6 +37,7 @@ func (q *Queries) CreateUser(ctx context.Context) (User, error) {
 		&i.IdentityPublicKey,
 		&i.KeyVersion,
 		&i.CreatedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }
@@ -66,7 +67,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT users.id, users.identity_public_key, users.key_version, users.created_at FROM sessions JOIN users ON users.id = sessions.user_id
+SELECT users.id, users.identity_public_key, users.key_version, users.created_at, users.display_name FROM sessions JOIN users ON users.id = sessions.user_id
 WHERE sessions.token_hash = $1
 `
 
@@ -78,12 +79,13 @@ func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (User, e
 		&i.IdentityPublicKey,
 		&i.KeyVersion,
 		&i.CreatedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, identity_public_key, key_version, created_at FROM users WHERE id = $1
+SELECT id, identity_public_key, key_version, created_at, display_name FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -93,6 +95,28 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.ID,
 		&i.IdentityPublicKey,
 		&i.KeyVersion,
+		&i.CreatedAt,
+		&i.DisplayName,
+	)
+	return i, err
+}
+
+const lockInvite = `-- name: LockInvite :one
+SELECT id, inviter_id, auth_hash, payload, signature, mac, expires_at, revoked_at, created_at FROM invites WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockInvite(ctx context.Context, id string) (Invite, error) {
+	row := q.db.QueryRow(ctx, lockInvite, id)
+	var i Invite
+	err := row.Scan(
+		&i.ID,
+		&i.InviterID,
+		&i.AuthHash,
+		&i.Payload,
+		&i.Signature,
+		&i.Mac,
+		&i.ExpiresAt,
+		&i.RevokedAt,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -104,8 +128,8 @@ WHERE id = $2 AND identity_public_key IS NULL
 `
 
 type SetIdentityKeyParams struct {
-	IdentityPublicKey []byte
-	ID                uuid.UUID
+	IdentityPublicKey []byte    `json:"identityPublicKey"`
+	ID                uuid.UUID `json:"id"`
 }
 
 // Set once: a second, different key is refused (the service reports a conflict).

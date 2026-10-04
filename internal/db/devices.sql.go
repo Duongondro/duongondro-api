@@ -18,9 +18,9 @@ RETURNING id, user_id, public_key, tier, created_at
 `
 
 type CreateDeviceParams struct {
-	UserID    uuid.UUID
-	PublicKey []byte
-	Tier      string
+	UserID    uuid.UUID `json:"userId"`
+	PublicKey []byte    `json:"publicKey"`
+	Tier      string    `json:"tier"`
 }
 
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error) {
@@ -41,8 +41,8 @@ DELETE FROM devices WHERE id = $1 AND user_id = $2
 `
 
 type DeleteDeviceParams struct {
-	ID     uuid.UUID
-	UserID uuid.UUID
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"userId"`
 }
 
 func (q *Queries) DeleteDevice(ctx context.Context, arg DeleteDeviceParams) (int64, error) {
@@ -75,8 +75,8 @@ SELECT id, user_id, public_key, tier, created_at FROM devices WHERE user_id = $1
 `
 
 type GetDeviceByKeyParams struct {
-	UserID    uuid.UUID
-	PublicKey []byte
+	UserID    uuid.UUID `json:"userId"`
+	PublicKey []byte    `json:"publicKey"`
 }
 
 func (q *Queries) GetDeviceByKey(ctx context.Context, arg GetDeviceByKeyParams) (Device, error) {
@@ -148,10 +148,10 @@ WHERE device_lists.version < EXCLUDED.version
 `
 
 type PutDeviceListParams struct {
-	UserID    uuid.UUID
-	Version   int64
-	Payload   []byte
-	Signature []byte
+	UserID    uuid.UUID `json:"userId"`
+	Version   int64     `json:"version"`
+	Payload   []byte    `json:"payload"`
+	Signature []byte    `json:"signature"`
 }
 
 // Only a higher version replaces the stored list.

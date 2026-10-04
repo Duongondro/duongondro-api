@@ -29,6 +29,8 @@ type Server struct {
 	wraps    *service.Wraps
 	logs     *service.Logs
 	recovery *service.Recovery
+	social   *service.Social
+	gdpr     *service.GDPR
 	version  buildinfo.Info
 }
 
@@ -62,8 +64,13 @@ func New(pool *pgxpool.Pool) *echo.Echo {
 		wraps:    service.NewWraps(pool, devices),
 		logs:     service.NewLogs(pool),
 		recovery: service.NewRecovery(pool),
+		social:   service.NewSocial(pool),
+		gdpr:     service.NewGDPR(pool),
 		version:  buildinfo.Read(),
 	}
+	// Invites are the one thing reachable without a session: limit them per address,
+	// so ids cannot be guessed and redemptions cannot be scripted (design: Social).
+	e.Use(rateLimitPrefix("/api/invites", inviteRateLimit))
 	// Sign-in without any method; only in DEV builds.
 	registerDevSession(e, s.auth)
 	api.RegisterHandlers(e, api.NewStrictHandler(s, nil))

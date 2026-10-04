@@ -69,6 +69,17 @@ func (e Tier) Valid() bool {
 // HMAC from the device's own ECDH (docs/crypto.md, Wraps).
 type AuthType string
 
+// BlockEntry defines model for BlockEntry.
+type BlockEntry struct {
+	CreatedAt time.Time `json:"createdAt"`
+	UserId    UUID      `json:"userId"`
+}
+
+// BlockList defines model for BlockList.
+type BlockList struct {
+	Blocks []BlockEntry `json:"blocks"`
+}
+
 // Device defines model for Device.
 type Device struct {
 	CreatedAt time.Time `json:"createdAt"`
@@ -94,10 +105,60 @@ type Error struct {
 	Error string `json:"error"`
 }
 
+// Friend defines model for Friend.
+type Friend struct {
+	DisplayName       string    `json:"displayName"`
+	IdentityPublicKey *[]byte   `json:"identityPublicKey,omitempty"`
+	Since             time.Time `json:"since"`
+	UserId            UUID      `json:"userId"`
+}
+
+// FriendList defines model for FriendList.
+type FriendList struct {
+	Friends []Friend `json:"friends"`
+}
+
 // IdentityKey defines model for IdentityKey.
 type IdentityKey struct {
 	// PublicKey Ed25519
 	PublicKey []byte `json:"publicKey"`
+}
+
+// InviteInput defines model for InviteInput.
+type InviteInput struct {
+	// Auth HKDF(secret, invite-auth), 32 bytes
+	Auth      []byte    `json:"auth"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Id        string    `json:"id"`
+
+	// Mac HMAC(pin, inviterIdentityPk), 32 bytes
+	Mac []byte `json:"mac"`
+
+	// Payload The signed invite statement
+	Payload   []byte `json:"payload"`
+	Signature []byte `json:"signature"`
+}
+
+// InviteList defines model for InviteList.
+type InviteList struct {
+	Invites []InviteSummary `json:"invites"`
+}
+
+// InviteRecord defines model for InviteRecord.
+type InviteRecord struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+	Id        string    `json:"id"`
+	Mac       []byte    `json:"mac"`
+	Payload   []byte    `json:"payload"`
+	Signature []byte    `json:"signature"`
+}
+
+// InviteSummary defines model for InviteSummary.
+type InviteSummary struct {
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt time.Time  `json:"expiresAt"`
+	Id        string     `json:"id"`
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
 // KeyRotation defines model for KeyRotation.
@@ -108,14 +169,20 @@ type KeyRotation struct {
 
 // Me defines model for Me.
 type Me struct {
-	Devices []Device `json:"devices"`
-	Id      UUID     `json:"id"`
+	Devices     []Device `json:"devices"`
+	DisplayName string   `json:"displayName"`
+	Id          UUID     `json:"id"`
 
 	// IdentityPublicKey Ed25519
 	IdentityPublicKey *[]byte `json:"identityPublicKey,omitempty"`
 
 	// KeyVersion Current version of the practice key
 	KeyVersion int `json:"keyVersion"`
+}
+
+// MeUpdate defines model for MeUpdate.
+type MeUpdate struct {
+	DisplayName string `json:"displayName"`
 }
 
 // OldKeyError defines model for OldKeyError.
@@ -164,6 +231,29 @@ type RecoveryBoxList struct {
 	Boxes []RecoveryBox `json:"boxes"`
 }
 
+// Redemption defines model for Redemption.
+type Redemption struct {
+	// Acceptance Exact payload bytes (compact JSON, sorted keys) and their Ed25519 signature.
+	Acceptance SignedStatement `json:"acceptance"`
+	Auth       []byte          `json:"auth"`
+}
+
+// RedemptionResult defines model for RedemptionResult.
+type RedemptionResult struct {
+	InviterId UUID `json:"inviterId"`
+}
+
+// ReportInput defines model for ReportInput.
+type ReportInput struct {
+	Reason string `json:"reason"`
+	UserId UUID   `json:"userId"`
+}
+
+// ReportResult defines model for ReportResult.
+type ReportResult struct {
+	Id UUID `json:"id"`
+}
+
 // RotationWrap defines model for RotationWrap.
 type RotationWrap struct {
 	// AuthType signature: Ed25519 by the identity key; enrol: HMAC from the QR secret; self:
@@ -187,6 +277,19 @@ type RotationWrap struct {
 type SignedStatement struct {
 	Payload   []byte `json:"payload"`
 	Signature []byte `json:"signature"`
+}
+
+// StreakList defines model for StreakList.
+type StreakList struct {
+	Streaks []StreakStatement `json:"streaks"`
+}
+
+// StreakStatement defines model for StreakStatement.
+type StreakStatement struct {
+	Payload   []byte `json:"payload"`
+	Practice  string `json:"practice"`
+	Signature []byte `json:"signature"`
+	UserId    UUID   `json:"userId"`
 }
 
 // SyncResponse defines model for SyncResponse.
@@ -263,8 +366,17 @@ type Authorization = string
 // DeviceId defines model for DeviceId.
 type DeviceId = UUID
 
+// InviteId defines model for InviteId.
+type InviteId = string
+
 // Kind defines model for Kind.
 type Kind = int
+
+// Practice defines model for Practice.
+type Practice = string
+
+// UserId defines model for UserId.
+type UserId = UUID
 
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
@@ -274,6 +386,27 @@ type Conflict = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
+
+// TooManyRequests defines model for TooManyRequests.
+type TooManyRequests = Error
+
+// ListBlocksParams defines parameters for ListBlocks.
+type ListBlocksParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// UnblockParams defines parameters for Unblock.
+type UnblockParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// BlockParams defines parameters for Block.
+type BlockParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
 
 // ListDevicesParams defines parameters for ListDevices.
 type ListDevicesParams struct {
@@ -305,8 +438,62 @@ type PutWrapParams struct {
 	Authorization Authorization `json:"Authorization"`
 }
 
+// ListFriendsParams defines parameters for ListFriends.
+type ListFriendsParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// FriendsStreaksParams defines parameters for FriendsStreaks.
+type FriendsStreaksParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// UnfriendParams defines parameters for Unfriend.
+type UnfriendParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// ListInvitesParams defines parameters for ListInvites.
+type ListInvitesParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// CreateInviteParams defines parameters for CreateInvite.
+type CreateInviteParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// RevokeInviteParams defines parameters for RevokeInvite.
+type RevokeInviteParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// RedeemInviteParams defines parameters for RedeemInvite.
+type RedeemInviteParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// DeleteMeParams defines parameters for DeleteMe.
+type DeleteMeParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
 // GetMeParams defines parameters for GetMe.
 type GetMeParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// UpdateMeParams defines parameters for UpdateMe.
+type UpdateMeParams struct {
 	// Authorization Bearer <session token>
 	Authorization Authorization `json:"Authorization"`
 }
@@ -319,6 +506,12 @@ type GetDeviceListParams struct {
 
 // PutDeviceListParams defines parameters for PutDeviceList.
 type PutDeviceListParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// ExportMeParams defines parameters for ExportMe.
+type ExportMeParams struct {
 	// Authorization Bearer <session token>
 	Authorization Authorization `json:"Authorization"`
 }
@@ -359,6 +552,30 @@ type PutPracticeLogParams struct {
 	Authorization Authorization `json:"Authorization"`
 }
 
+// ReportParams defines parameters for Report.
+type ReportParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// OwnStreaksParams defines parameters for OwnStreaks.
+type OwnStreaksParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// DeleteStreakParams defines parameters for DeleteStreak.
+type DeleteStreakParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// PutStreakParams defines parameters for PutStreak.
+type PutStreakParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
 // SyncParams defines parameters for Sync.
 type SyncParams struct {
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
@@ -372,6 +589,15 @@ type RegisterDeviceJSONRequestBody = DeviceInput
 
 // PutWrapJSONRequestBody defines body for PutWrap for application/json ContentType.
 type PutWrapJSONRequestBody = WrapInput
+
+// CreateInviteJSONRequestBody defines body for CreateInvite for application/json ContentType.
+type CreateInviteJSONRequestBody = InviteInput
+
+// RedeemInviteJSONRequestBody defines body for RedeemInvite for application/json ContentType.
+type RedeemInviteJSONRequestBody = Redemption
+
+// UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
+type UpdateMeJSONRequestBody = MeUpdate
 
 // PutDeviceListJSONRequestBody defines body for PutDeviceList for application/json ContentType.
 type PutDeviceListJSONRequestBody = SignedStatement
@@ -388,8 +614,23 @@ type PutRecoveryBoxJSONRequestBody = RecoveryBoxInput
 // PutPracticeLogJSONRequestBody defines body for PutPracticeLog for application/json ContentType.
 type PutPracticeLogJSONRequestBody = PracticeLogInput
 
+// ReportJSONRequestBody defines body for Report for application/json ContentType.
+type ReportJSONRequestBody = ReportInput
+
+// PutStreakJSONRequestBody defines body for PutStreak for application/json ContentType.
+type PutStreakJSONRequestBody = SignedStatement
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+
+	// (GET /api/blocks)
+	ListBlocks(ctx *echo.Context, params ListBlocksParams) error
+
+	// (DELETE /api/blocks/{userId})
+	Unblock(ctx *echo.Context, userId UserId, params UnblockParams) error
+
+	// (PUT /api/blocks/{userId})
+	Block(ctx *echo.Context, userId UserId, params BlockParams) error
 
 	// (GET /api/devices)
 	ListDevices(ctx *echo.Context, params ListDevicesParams) error
@@ -406,14 +647,47 @@ type ServerInterface interface {
 	// (POST /api/devices/{deviceId}/wraps)
 	PutWrap(ctx *echo.Context, deviceId DeviceId, params PutWrapParams) error
 
+	// (GET /api/friends)
+	ListFriends(ctx *echo.Context, params ListFriendsParams) error
+
+	// (GET /api/friends/streaks)
+	FriendsStreaks(ctx *echo.Context, params FriendsStreaksParams) error
+
+	// (DELETE /api/friends/{userId})
+	Unfriend(ctx *echo.Context, userId UserId, params UnfriendParams) error
+
+	// (GET /api/invites)
+	ListInvites(ctx *echo.Context, params ListInvitesParams) error
+
+	// (POST /api/invites)
+	CreateInvite(ctx *echo.Context, params CreateInviteParams) error
+
+	// (DELETE /api/invites/{inviteId})
+	RevokeInvite(ctx *echo.Context, inviteId InviteId, params RevokeInviteParams) error
+
+	// (GET /api/invites/{inviteId})
+	GetInvite(ctx *echo.Context, inviteId InviteId) error
+
+	// (POST /api/invites/{inviteId}/redemptions)
+	RedeemInvite(ctx *echo.Context, inviteId InviteId, params RedeemInviteParams) error
+
+	// (DELETE /api/me)
+	DeleteMe(ctx *echo.Context, params DeleteMeParams) error
+
 	// (GET /api/me)
 	GetMe(ctx *echo.Context, params GetMeParams) error
+
+	// (PATCH /api/me)
+	UpdateMe(ctx *echo.Context, params UpdateMeParams) error
 
 	// (GET /api/me/device-list)
 	GetDeviceList(ctx *echo.Context, params GetDeviceListParams) error
 
 	// (PUT /api/me/device-list)
 	PutDeviceList(ctx *echo.Context, params PutDeviceListParams) error
+
+	// (GET /api/me/export)
+	ExportMe(ctx *echo.Context, params ExportMeParams) error
 
 	// (PUT /api/me/identity)
 	PutIdentity(ctx *echo.Context, params PutIdentityParams) error
@@ -433,6 +707,18 @@ type ServerInterface interface {
 	// (PUT /api/practice-logs/{logId})
 	PutPracticeLog(ctx *echo.Context, logId UUID, params PutPracticeLogParams) error
 
+	// (POST /api/reports)
+	Report(ctx *echo.Context, params ReportParams) error
+
+	// (GET /api/streaks)
+	OwnStreaks(ctx *echo.Context, params OwnStreaksParams) error
+
+	// (DELETE /api/streaks/{practice})
+	DeleteStreak(ctx *echo.Context, practice Practice, params DeleteStreakParams) error
+
+	// (PUT /api/streaks/{practice})
+	PutStreak(ctx *echo.Context, practice Practice, params PutStreakParams) error
+
 	// (GET /api/sync)
 	Sync(ctx *echo.Context, params SyncParams) error
 
@@ -446,6 +732,113 @@ type ServerInterface interface {
 // ServerInterfaceWrapper converts echo contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler ServerInterface
+}
+
+// ListBlocks converts echo context to params.
+func (w *ServerInterfaceWrapper) ListBlocks(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListBlocksParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListBlocks(ctx, params)
+	return err
+}
+
+// Unblock converts echo context to params.
+func (w *ServerInterfaceWrapper) Unblock(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "userId" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", ctx.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter userId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UnblockParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.Unblock(ctx, userId, params)
+	return err
+}
+
+// Block converts echo context to params.
+func (w *ServerInterfaceWrapper) Block(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "userId" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", ctx.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter userId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params BlockParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.Block(ctx, userId, params)
+	return err
 }
 
 // ListDevices converts echo context to params.
@@ -624,6 +1017,291 @@ func (w *ServerInterfaceWrapper) PutWrap(ctx *echo.Context) error {
 	return err
 }
 
+// ListFriends converts echo context to params.
+func (w *ServerInterfaceWrapper) ListFriends(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListFriendsParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListFriends(ctx, params)
+	return err
+}
+
+// FriendsStreaks converts echo context to params.
+func (w *ServerInterfaceWrapper) FriendsStreaks(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FriendsStreaksParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.FriendsStreaks(ctx, params)
+	return err
+}
+
+// Unfriend converts echo context to params.
+func (w *ServerInterfaceWrapper) Unfriend(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "userId" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", ctx.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter userId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UnfriendParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.Unfriend(ctx, userId, params)
+	return err
+}
+
+// ListInvites converts echo context to params.
+func (w *ServerInterfaceWrapper) ListInvites(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListInvitesParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListInvites(ctx, params)
+	return err
+}
+
+// CreateInvite converts echo context to params.
+func (w *ServerInterfaceWrapper) CreateInvite(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateInviteParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.CreateInvite(ctx, params)
+	return err
+}
+
+// RevokeInvite converts echo context to params.
+func (w *ServerInterfaceWrapper) RevokeInvite(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "inviteId" -------------
+	var inviteId InviteId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "inviteId", ctx.Param("inviteId"), &inviteId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter inviteId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeInviteParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.RevokeInvite(ctx, inviteId, params)
+	return err
+}
+
+// GetInvite converts echo context to params.
+func (w *ServerInterfaceWrapper) GetInvite(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "inviteId" -------------
+	var inviteId InviteId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "inviteId", ctx.Param("inviteId"), &inviteId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter inviteId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetInvite(ctx, inviteId)
+	return err
+}
+
+// RedeemInvite converts echo context to params.
+func (w *ServerInterfaceWrapper) RedeemInvite(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "inviteId" -------------
+	var inviteId InviteId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "inviteId", ctx.Param("inviteId"), &inviteId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter inviteId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RedeemInviteParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.RedeemInvite(ctx, inviteId, params)
+	return err
+}
+
+// DeleteMe converts echo context to params.
+func (w *ServerInterfaceWrapper) DeleteMe(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteMeParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.DeleteMe(ctx, params)
+	return err
+}
+
 // GetMe converts echo context to params.
 func (w *ServerInterfaceWrapper) GetMe(ctx *echo.Context) error {
 	var err error
@@ -652,6 +1330,37 @@ func (w *ServerInterfaceWrapper) GetMe(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.GetMe(ctx, params)
+	return err
+}
+
+// UpdateMe converts echo context to params.
+func (w *ServerInterfaceWrapper) UpdateMe(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateMeParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.UpdateMe(ctx, params)
 	return err
 }
 
@@ -714,6 +1423,37 @@ func (w *ServerInterfaceWrapper) PutDeviceList(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.PutDeviceList(ctx, params)
+	return err
+}
+
+// ExportMe converts echo context to params.
+func (w *ServerInterfaceWrapper) ExportMe(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportMeParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ExportMe(ctx, params)
 	return err
 }
 
@@ -917,6 +1657,144 @@ func (w *ServerInterfaceWrapper) PutPracticeLog(ctx *echo.Context) error {
 	return err
 }
 
+// Report converts echo context to params.
+func (w *ServerInterfaceWrapper) Report(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReportParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.Report(ctx, params)
+	return err
+}
+
+// OwnStreaks converts echo context to params.
+func (w *ServerInterfaceWrapper) OwnStreaks(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OwnStreaksParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.OwnStreaks(ctx, params)
+	return err
+}
+
+// DeleteStreak converts echo context to params.
+func (w *ServerInterfaceWrapper) DeleteStreak(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "practice" -------------
+	var practice Practice
+
+	err = runtime.BindStyledParameterWithOptions("simple", "practice", ctx.Param("practice"), &practice, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter practice: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteStreakParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.DeleteStreak(ctx, practice, params)
+	return err
+}
+
+// PutStreak converts echo context to params.
+func (w *ServerInterfaceWrapper) PutStreak(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "practice" -------------
+	var practice Practice
+
+	err = runtime.BindStyledParameterWithOptions("simple", "practice", ctx.Param("practice"), &practice, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter practice: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutStreakParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PutStreak(ctx, practice, params)
+	return err
+}
+
 // Sync converts echo context to params.
 func (w *ServerInterfaceWrapper) Sync(ctx *echo.Context) error {
 	var err error
@@ -1021,7 +1899,10 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 
 	router.GET(options.BaseURL+"/healthz", wrapper.GetHealth, options.OperationMiddlewares["getHealth"]...)
 	router.GET(options.BaseURL+"/api/version", wrapper.GetVersion, options.OperationMiddlewares["getVersion"]...)
+	router.DELETE(options.BaseURL+"/api/me", wrapper.DeleteMe, options.OperationMiddlewares["deleteMe"]...)
 	router.GET(options.BaseURL+"/api/me", wrapper.GetMe, options.OperationMiddlewares["getMe"]...)
+	router.PATCH(options.BaseURL+"/api/me", wrapper.UpdateMe, options.OperationMiddlewares["updateMe"]...)
+	router.GET(options.BaseURL+"/api/me/export", wrapper.ExportMe, options.OperationMiddlewares["exportMe"]...)
 	router.DELETE(options.BaseURL+"/api/me/session", wrapper.SignOut, options.OperationMiddlewares["signOut"]...)
 	router.PUT(options.BaseURL+"/api/me/identity", wrapper.PutIdentity, options.OperationMiddlewares["putIdentity"]...)
 	router.GET(options.BaseURL+"/api/me/device-list", wrapper.GetDeviceList, options.OperationMiddlewares["getDeviceList"]...)
@@ -1036,6 +1917,21 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.POST(options.BaseURL+"/api/devices/:deviceId/wraps", wrapper.PutWrap, options.OperationMiddlewares["putWrap"]...)
 	router.PUT(options.BaseURL+"/api/practice-logs/:logId", wrapper.PutPracticeLog, options.OperationMiddlewares["putPracticeLog"]...)
 	router.GET(options.BaseURL+"/api/sync", wrapper.Sync, options.OperationMiddlewares["sync"]...)
+	router.GET(options.BaseURL+"/api/invites", wrapper.ListInvites, options.OperationMiddlewares["listInvites"]...)
+	router.POST(options.BaseURL+"/api/invites", wrapper.CreateInvite, options.OperationMiddlewares["createInvite"]...)
+	router.DELETE(options.BaseURL+"/api/invites/:inviteId", wrapper.RevokeInvite, options.OperationMiddlewares["revokeInvite"]...)
+	router.GET(options.BaseURL+"/api/invites/:inviteId", wrapper.GetInvite, options.OperationMiddlewares["getInvite"]...)
+	router.POST(options.BaseURL+"/api/invites/:inviteId/redemptions", wrapper.RedeemInvite, options.OperationMiddlewares["redeemInvite"]...)
+	router.GET(options.BaseURL+"/api/friends", wrapper.ListFriends, options.OperationMiddlewares["listFriends"]...)
+	router.GET(options.BaseURL+"/api/friends/streaks", wrapper.FriendsStreaks, options.OperationMiddlewares["friendsStreaks"]...)
+	router.DELETE(options.BaseURL+"/api/friends/:userId", wrapper.Unfriend, options.OperationMiddlewares["unfriend"]...)
+	router.GET(options.BaseURL+"/api/blocks", wrapper.ListBlocks, options.OperationMiddlewares["listBlocks"]...)
+	router.DELETE(options.BaseURL+"/api/blocks/:userId", wrapper.Unblock, options.OperationMiddlewares["unblock"]...)
+	router.PUT(options.BaseURL+"/api/blocks/:userId", wrapper.Block, options.OperationMiddlewares["block"]...)
+	router.POST(options.BaseURL+"/api/reports", wrapper.Report, options.OperationMiddlewares["report"]...)
+	router.GET(options.BaseURL+"/api/streaks", wrapper.OwnStreaks, options.OperationMiddlewares["ownStreaks"]...)
+	router.DELETE(options.BaseURL+"/api/streaks/:practice", wrapper.DeleteStreak, options.OperationMiddlewares["deleteStreak"]...)
+	router.PUT(options.BaseURL+"/api/streaks/:practice", wrapper.PutStreak, options.OperationMiddlewares["putStreak"]...)
 
 }
 
@@ -1045,7 +1941,128 @@ type ConflictJSONResponse Error
 
 type NotFoundJSONResponse Error
 
+type TooManyRequestsJSONResponse Error
+
 type UnauthorizedResponse struct {
+}
+
+type ListBlocksRequestObject struct {
+	Params ListBlocksParams
+}
+
+type ListBlocksResponseObject interface {
+	VisitListBlocksResponse(w http.ResponseWriter) error
+}
+
+type ListBlocks200JSONResponse BlockList
+
+func (response ListBlocks200JSONResponse) VisitListBlocksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBlocks401Response = UnauthorizedResponse
+
+func (response ListBlocks401Response) VisitListBlocksResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type UnblockRequestObject struct {
+	UserId UserId `json:"userId"`
+	Params UnblockParams
+}
+
+type UnblockResponseObject interface {
+	VisitUnblockResponse(w http.ResponseWriter) error
+}
+
+type Unblock204Response struct {
+}
+
+func (response Unblock204Response) VisitUnblockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type Unblock401Response = UnauthorizedResponse
+
+func (response Unblock401Response) VisitUnblockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type Unblock404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Unblock404JSONResponse) VisitUnblockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BlockRequestObject struct {
+	UserId UserId `json:"userId"`
+	Params BlockParams
+}
+
+type BlockResponseObject interface {
+	VisitBlockResponse(w http.ResponseWriter) error
+}
+
+type Block204Response struct {
+}
+
+func (response Block204Response) VisitBlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type Block400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response Block400JSONResponse) VisitBlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Block401Response = UnauthorizedResponse
+
+func (response Block401Response) VisitBlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type Block404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Block404JSONResponse) VisitBlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListDevicesRequestObject struct {
@@ -1270,6 +2287,381 @@ func (response PutWrap404JSONResponse) VisitPutWrapResponse(w http.ResponseWrite
 	return err
 }
 
+type ListFriendsRequestObject struct {
+	Params ListFriendsParams
+}
+
+type ListFriendsResponseObject interface {
+	VisitListFriendsResponse(w http.ResponseWriter) error
+}
+
+type ListFriends200JSONResponse FriendList
+
+func (response ListFriends200JSONResponse) VisitListFriendsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFriends401Response = UnauthorizedResponse
+
+func (response ListFriends401Response) VisitListFriendsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type FriendsStreaksRequestObject struct {
+	Params FriendsStreaksParams
+}
+
+type FriendsStreaksResponseObject interface {
+	VisitFriendsStreaksResponse(w http.ResponseWriter) error
+}
+
+type FriendsStreaks200JSONResponse StreakList
+
+func (response FriendsStreaks200JSONResponse) VisitFriendsStreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FriendsStreaks401Response = UnauthorizedResponse
+
+func (response FriendsStreaks401Response) VisitFriendsStreaksResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type UnfriendRequestObject struct {
+	UserId UserId `json:"userId"`
+	Params UnfriendParams
+}
+
+type UnfriendResponseObject interface {
+	VisitUnfriendResponse(w http.ResponseWriter) error
+}
+
+type Unfriend204Response struct {
+}
+
+func (response Unfriend204Response) VisitUnfriendResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type Unfriend401Response = UnauthorizedResponse
+
+func (response Unfriend401Response) VisitUnfriendResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type Unfriend404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Unfriend404JSONResponse) VisitUnfriendResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInvitesRequestObject struct {
+	Params ListInvitesParams
+}
+
+type ListInvitesResponseObject interface {
+	VisitListInvitesResponse(w http.ResponseWriter) error
+}
+
+type ListInvites200JSONResponse InviteList
+
+func (response ListInvites200JSONResponse) VisitListInvitesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInvites401Response = UnauthorizedResponse
+
+func (response ListInvites401Response) VisitListInvitesResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type CreateInviteRequestObject struct {
+	Params CreateInviteParams
+	Body   *CreateInviteJSONRequestBody
+}
+
+type CreateInviteResponseObject interface {
+	VisitCreateInviteResponse(w http.ResponseWriter) error
+}
+
+type CreateInvite201Response struct {
+}
+
+func (response CreateInvite201Response) VisitCreateInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(201)
+	return nil
+}
+
+type CreateInvite400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateInvite400JSONResponse) VisitCreateInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvite401Response = UnauthorizedResponse
+
+func (response CreateInvite401Response) VisitCreateInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type CreateInvite409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateInvite409JSONResponse) VisitCreateInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInviteRequestObject struct {
+	InviteId InviteId `json:"inviteId"`
+	Params   RevokeInviteParams
+}
+
+type RevokeInviteResponseObject interface {
+	VisitRevokeInviteResponse(w http.ResponseWriter) error
+}
+
+type RevokeInvite204Response struct {
+}
+
+func (response RevokeInvite204Response) VisitRevokeInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeInvite401Response = UnauthorizedResponse
+
+func (response RevokeInvite401Response) VisitRevokeInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type RevokeInvite404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeInvite404JSONResponse) VisitRevokeInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInviteRequestObject struct {
+	InviteId InviteId `json:"inviteId"`
+}
+
+type GetInviteResponseObject interface {
+	VisitGetInviteResponse(w http.ResponseWriter) error
+}
+
+type GetInvite200JSONResponse InviteRecord
+
+func (response GetInvite200JSONResponse) VisitGetInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInvite404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetInvite404JSONResponse) VisitGetInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInvite429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetInvite429JSONResponse) VisitGetInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemInviteRequestObject struct {
+	InviteId InviteId `json:"inviteId"`
+	Params   RedeemInviteParams
+	Body     *RedeemInviteJSONRequestBody
+}
+
+type RedeemInviteResponseObject interface {
+	VisitRedeemInviteResponse(w http.ResponseWriter) error
+}
+
+type RedeemInvite200JSONResponse RedemptionResult
+
+func (response RedeemInvite200JSONResponse) VisitRedeemInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemInvite400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RedeemInvite400JSONResponse) VisitRedeemInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemInvite401Response = UnauthorizedResponse
+
+func (response RedeemInvite401Response) VisitRedeemInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type RedeemInvite404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RedeemInvite404JSONResponse) VisitRedeemInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemInvite409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RedeemInvite409JSONResponse) VisitRedeemInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemInvite429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RedeemInvite429JSONResponse) VisitRedeemInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMeRequestObject struct {
+	Params DeleteMeParams
+}
+
+type DeleteMeResponseObject interface {
+	VisitDeleteMeResponse(w http.ResponseWriter) error
+}
+
+type DeleteMe204Response struct {
+}
+
+func (response DeleteMe204Response) VisitDeleteMeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMe401Response = UnauthorizedResponse
+
+func (response DeleteMe401Response) VisitDeleteMeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
 type GetMeRequestObject struct {
 	Params GetMeParams
 }
@@ -1295,6 +2687,44 @@ func (response GetMe200JSONResponse) VisitGetMeResponse(w http.ResponseWriter) e
 type GetMe401Response = UnauthorizedResponse
 
 func (response GetMe401Response) VisitGetMeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type UpdateMeRequestObject struct {
+	Params UpdateMeParams
+	Body   *UpdateMeJSONRequestBody
+}
+
+type UpdateMeResponseObject interface {
+	VisitUpdateMeResponse(w http.ResponseWriter) error
+}
+
+type UpdateMe204Response struct {
+}
+
+func (response UpdateMe204Response) VisitUpdateMeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UpdateMe400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateMe400JSONResponse) VisitUpdateMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMe401Response = UnauthorizedResponse
+
+func (response UpdateMe401Response) VisitUpdateMeResponse(w http.ResponseWriter) error {
 	w.WriteHeader(401)
 	return nil
 }
@@ -1392,6 +2822,35 @@ func (response PutDeviceList409JSONResponse) VisitPutDeviceListResponse(w http.R
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type ExportMeRequestObject struct {
+	Params ExportMeParams
+}
+
+type ExportMeResponseObject interface {
+	VisitExportMeResponse(w http.ResponseWriter) error
+}
+
+type ExportMe200JSONResponse map[string]interface{}
+
+func (response ExportMe200JSONResponse) VisitExportMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportMe401Response = UnauthorizedResponse
+
+func (response ExportMe401Response) VisitExportMeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
 }
 
 type PutIdentityRequestObject struct {
@@ -1662,6 +3121,184 @@ func (response PutPracticeLog422JSONResponse) VisitPutPracticeLogResponse(w http
 	return err
 }
 
+type ReportRequestObject struct {
+	Params ReportParams
+	Body   *ReportJSONRequestBody
+}
+
+type ReportResponseObject interface {
+	VisitReportResponse(w http.ResponseWriter) error
+}
+
+type Report201JSONResponse ReportResult
+
+func (response Report201JSONResponse) VisitReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Report400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response Report400JSONResponse) VisitReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Report401Response = UnauthorizedResponse
+
+func (response Report401Response) VisitReportResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type Report404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Report404JSONResponse) VisitReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OwnStreaksRequestObject struct {
+	Params OwnStreaksParams
+}
+
+type OwnStreaksResponseObject interface {
+	VisitOwnStreaksResponse(w http.ResponseWriter) error
+}
+
+type OwnStreaks200JSONResponse StreakList
+
+func (response OwnStreaks200JSONResponse) VisitOwnStreaksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OwnStreaks401Response = UnauthorizedResponse
+
+func (response OwnStreaks401Response) VisitOwnStreaksResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type DeleteStreakRequestObject struct {
+	Practice Practice `json:"practice"`
+	Params   DeleteStreakParams
+}
+
+type DeleteStreakResponseObject interface {
+	VisitDeleteStreakResponse(w http.ResponseWriter) error
+}
+
+type DeleteStreak204Response struct {
+}
+
+func (response DeleteStreak204Response) VisitDeleteStreakResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteStreak401Response = UnauthorizedResponse
+
+func (response DeleteStreak401Response) VisitDeleteStreakResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type DeleteStreak404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteStreak404JSONResponse) VisitDeleteStreakResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutStreakRequestObject struct {
+	Practice Practice `json:"practice"`
+	Params   PutStreakParams
+	Body     *PutStreakJSONRequestBody
+}
+
+type PutStreakResponseObject interface {
+	VisitPutStreakResponse(w http.ResponseWriter) error
+}
+
+type PutStreak204Response struct {
+}
+
+func (response PutStreak204Response) VisitPutStreakResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PutStreak400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutStreak400JSONResponse) VisitPutStreakResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutStreak401Response = UnauthorizedResponse
+
+func (response PutStreak401Response) VisitPutStreakResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type PutStreak409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutStreak409JSONResponse) VisitPutStreakResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SyncRequestObject struct {
 	Params SyncParams
 }
@@ -1747,6 +3384,15 @@ func (response GetHealth200TextResponse) VisitGetHealthResponse(w http.ResponseW
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (GET /api/blocks)
+	ListBlocks(ctx context.Context, request ListBlocksRequestObject) (ListBlocksResponseObject, error)
+
+	// (DELETE /api/blocks/{userId})
+	Unblock(ctx context.Context, request UnblockRequestObject) (UnblockResponseObject, error)
+
+	// (PUT /api/blocks/{userId})
+	Block(ctx context.Context, request BlockRequestObject) (BlockResponseObject, error)
+
 	// (GET /api/devices)
 	ListDevices(ctx context.Context, request ListDevicesRequestObject) (ListDevicesResponseObject, error)
 
@@ -1762,14 +3408,47 @@ type StrictServerInterface interface {
 	// (POST /api/devices/{deviceId}/wraps)
 	PutWrap(ctx context.Context, request PutWrapRequestObject) (PutWrapResponseObject, error)
 
+	// (GET /api/friends)
+	ListFriends(ctx context.Context, request ListFriendsRequestObject) (ListFriendsResponseObject, error)
+
+	// (GET /api/friends/streaks)
+	FriendsStreaks(ctx context.Context, request FriendsStreaksRequestObject) (FriendsStreaksResponseObject, error)
+
+	// (DELETE /api/friends/{userId})
+	Unfriend(ctx context.Context, request UnfriendRequestObject) (UnfriendResponseObject, error)
+
+	// (GET /api/invites)
+	ListInvites(ctx context.Context, request ListInvitesRequestObject) (ListInvitesResponseObject, error)
+
+	// (POST /api/invites)
+	CreateInvite(ctx context.Context, request CreateInviteRequestObject) (CreateInviteResponseObject, error)
+
+	// (DELETE /api/invites/{inviteId})
+	RevokeInvite(ctx context.Context, request RevokeInviteRequestObject) (RevokeInviteResponseObject, error)
+
+	// (GET /api/invites/{inviteId})
+	GetInvite(ctx context.Context, request GetInviteRequestObject) (GetInviteResponseObject, error)
+
+	// (POST /api/invites/{inviteId}/redemptions)
+	RedeemInvite(ctx context.Context, request RedeemInviteRequestObject) (RedeemInviteResponseObject, error)
+
+	// (DELETE /api/me)
+	DeleteMe(ctx context.Context, request DeleteMeRequestObject) (DeleteMeResponseObject, error)
+
 	// (GET /api/me)
 	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
+
+	// (PATCH /api/me)
+	UpdateMe(ctx context.Context, request UpdateMeRequestObject) (UpdateMeResponseObject, error)
 
 	// (GET /api/me/device-list)
 	GetDeviceList(ctx context.Context, request GetDeviceListRequestObject) (GetDeviceListResponseObject, error)
 
 	// (PUT /api/me/device-list)
 	PutDeviceList(ctx context.Context, request PutDeviceListRequestObject) (PutDeviceListResponseObject, error)
+
+	// (GET /api/me/export)
+	ExportMe(ctx context.Context, request ExportMeRequestObject) (ExportMeResponseObject, error)
 
 	// (PUT /api/me/identity)
 	PutIdentity(ctx context.Context, request PutIdentityRequestObject) (PutIdentityResponseObject, error)
@@ -1788,6 +3467,18 @@ type StrictServerInterface interface {
 
 	// (PUT /api/practice-logs/{logId})
 	PutPracticeLog(ctx context.Context, request PutPracticeLogRequestObject) (PutPracticeLogResponseObject, error)
+
+	// (POST /api/reports)
+	Report(ctx context.Context, request ReportRequestObject) (ReportResponseObject, error)
+
+	// (GET /api/streaks)
+	OwnStreaks(ctx context.Context, request OwnStreaksRequestObject) (OwnStreaksResponseObject, error)
+
+	// (DELETE /api/streaks/{practice})
+	DeleteStreak(ctx context.Context, request DeleteStreakRequestObject) (DeleteStreakResponseObject, error)
+
+	// (PUT /api/streaks/{practice})
+	PutStreak(ctx context.Context, request PutStreakRequestObject) (PutStreakResponseObject, error)
 
 	// (GET /api/sync)
 	Sync(ctx context.Context, request SyncRequestObject) (SyncResponseObject, error)
@@ -1809,6 +3500,83 @@ func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareF
 type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
+}
+
+// ListBlocks operation middleware
+func (sh *strictHandler) ListBlocks(ctx *echo.Context, params ListBlocksParams) error {
+	var request ListBlocksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListBlocks(ctx.Request().Context(), request.(ListBlocksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListBlocks")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListBlocksResponseObject); ok {
+		return validResponse.VisitListBlocksResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// Unblock operation middleware
+func (sh *strictHandler) Unblock(ctx *echo.Context, userId UserId, params UnblockParams) error {
+	var request UnblockRequestObject
+
+	request.UserId = userId
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.Unblock(ctx.Request().Context(), request.(UnblockRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Unblock")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UnblockResponseObject); ok {
+		return validResponse.VisitUnblockResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// Block operation middleware
+func (sh *strictHandler) Block(ctx *echo.Context, userId UserId, params BlockParams) error {
+	var request BlockRequestObject
+
+	request.UserId = userId
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.Block(ctx.Request().Context(), request.(BlockRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Block")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(BlockResponseObject); ok {
+		return validResponse.VisitBlockResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
 }
 
 // ListDevices operation middleware
@@ -1971,6 +3739,266 @@ func (sh *strictHandler) PutWrap(ctx *echo.Context, deviceId DeviceId, params Pu
 	return nil
 }
 
+// ListFriends operation middleware
+func (sh *strictHandler) ListFriends(ctx *echo.Context, params ListFriendsParams) error {
+	var request ListFriendsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFriends(ctx.Request().Context(), request.(ListFriendsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFriends")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListFriendsResponseObject); ok {
+		return validResponse.VisitListFriendsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// FriendsStreaks operation middleware
+func (sh *strictHandler) FriendsStreaks(ctx *echo.Context, params FriendsStreaksParams) error {
+	var request FriendsStreaksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.FriendsStreaks(ctx.Request().Context(), request.(FriendsStreaksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FriendsStreaks")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(FriendsStreaksResponseObject); ok {
+		return validResponse.VisitFriendsStreaksResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// Unfriend operation middleware
+func (sh *strictHandler) Unfriend(ctx *echo.Context, userId UserId, params UnfriendParams) error {
+	var request UnfriendRequestObject
+
+	request.UserId = userId
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.Unfriend(ctx.Request().Context(), request.(UnfriendRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Unfriend")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UnfriendResponseObject); ok {
+		return validResponse.VisitUnfriendResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListInvites operation middleware
+func (sh *strictHandler) ListInvites(ctx *echo.Context, params ListInvitesParams) error {
+	var request ListInvitesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInvites(ctx.Request().Context(), request.(ListInvitesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInvites")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListInvitesResponseObject); ok {
+		return validResponse.VisitListInvitesResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// CreateInvite operation middleware
+func (sh *strictHandler) CreateInvite(ctx *echo.Context, params CreateInviteParams) error {
+	var request CreateInviteRequestObject
+
+	request.Params = params
+
+	var body CreateInviteJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInvite(ctx.Request().Context(), request.(CreateInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInvite")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(CreateInviteResponseObject); ok {
+		return validResponse.VisitCreateInviteResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// RevokeInvite operation middleware
+func (sh *strictHandler) RevokeInvite(ctx *echo.Context, inviteId InviteId, params RevokeInviteParams) error {
+	var request RevokeInviteRequestObject
+
+	request.InviteId = inviteId
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeInvite(ctx.Request().Context(), request.(RevokeInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeInvite")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(RevokeInviteResponseObject); ok {
+		return validResponse.VisitRevokeInviteResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetInvite operation middleware
+func (sh *strictHandler) GetInvite(ctx *echo.Context, inviteId InviteId) error {
+	var request GetInviteRequestObject
+
+	request.InviteId = inviteId
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetInvite(ctx.Request().Context(), request.(GetInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetInvite")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetInviteResponseObject); ok {
+		return validResponse.VisitGetInviteResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// RedeemInvite operation middleware
+func (sh *strictHandler) RedeemInvite(ctx *echo.Context, inviteId InviteId, params RedeemInviteParams) error {
+	var request RedeemInviteRequestObject
+
+	request.InviteId = inviteId
+	request.Params = params
+
+	var body RedeemInviteJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemInvite(ctx.Request().Context(), request.(RedeemInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemInvite")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(RedeemInviteResponseObject); ok {
+		return validResponse.VisitRedeemInviteResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// DeleteMe operation middleware
+func (sh *strictHandler) DeleteMe(ctx *echo.Context, params DeleteMeParams) error {
+	var request DeleteMeRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMe(ctx.Request().Context(), request.(DeleteMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMe")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(DeleteMeResponseObject); ok {
+		return validResponse.VisitDeleteMeResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // GetMe operation middleware
 func (sh *strictHandler) GetMe(ctx *echo.Context, params GetMeParams) error {
 	var request GetMeRequestObject
@@ -1990,6 +4018,47 @@ func (sh *strictHandler) GetMe(ctx *echo.Context, params GetMeParams) error {
 		return err
 	} else if validResponse, ok := response.(GetMeResponseObject); ok {
 		return validResponse.VisitGetMeResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// UpdateMe operation middleware
+func (sh *strictHandler) UpdateMe(ctx *echo.Context, params UpdateMeParams) error {
+	var request UpdateMeRequestObject
+
+	request.Params = params
+
+	var body UpdateMeJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMe(ctx.Request().Context(), request.(UpdateMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMe")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UpdateMeResponseObject); ok {
+		return validResponse.VisitUpdateMeResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -2056,6 +4125,31 @@ func (sh *strictHandler) PutDeviceList(ctx *echo.Context, params PutDeviceListPa
 		return err
 	} else if validResponse, ok := response.(PutDeviceListResponseObject); ok {
 		return validResponse.VisitPutDeviceListResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ExportMe operation middleware
+func (sh *strictHandler) ExportMe(ctx *echo.Context, params ExportMeParams) error {
+	var request ExportMeRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportMe(ctx.Request().Context(), request.(ExportMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportMe")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ExportMeResponseObject); ok {
+		return validResponse.VisitExportMeResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -2278,6 +4372,140 @@ func (sh *strictHandler) PutPracticeLog(ctx *echo.Context, logId UUID, params Pu
 	return nil
 }
 
+// Report operation middleware
+func (sh *strictHandler) Report(ctx *echo.Context, params ReportParams) error {
+	var request ReportRequestObject
+
+	request.Params = params
+
+	var body ReportJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.Report(ctx.Request().Context(), request.(ReportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Report")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ReportResponseObject); ok {
+		return validResponse.VisitReportResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// OwnStreaks operation middleware
+func (sh *strictHandler) OwnStreaks(ctx *echo.Context, params OwnStreaksParams) error {
+	var request OwnStreaksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.OwnStreaks(ctx.Request().Context(), request.(OwnStreaksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "OwnStreaks")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(OwnStreaksResponseObject); ok {
+		return validResponse.VisitOwnStreaksResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// DeleteStreak operation middleware
+func (sh *strictHandler) DeleteStreak(ctx *echo.Context, practice Practice, params DeleteStreakParams) error {
+	var request DeleteStreakRequestObject
+
+	request.Practice = practice
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteStreak(ctx.Request().Context(), request.(DeleteStreakRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteStreak")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(DeleteStreakResponseObject); ok {
+		return validResponse.VisitDeleteStreakResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// PutStreak operation middleware
+func (sh *strictHandler) PutStreak(ctx *echo.Context, practice Practice, params PutStreakParams) error {
+	var request PutStreakRequestObject
+
+	request.Practice = practice
+	request.Params = params
+
+	var body PutStreakJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PutStreak(ctx.Request().Context(), request.(PutStreakRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutStreak")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PutStreakResponseObject); ok {
+		return validResponse.VisitPutStreakResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // Sync operation middleware
 func (sh *strictHandler) Sync(ctx *echo.Context, params SyncParams) error {
 	var request SyncRequestObject
@@ -2354,61 +4582,89 @@ func (sh *strictHandler) GetHealth(ctx *echo.Context) error {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"WVuY0ZCkOOA0N6Ek12rAioJmyv49AA==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -47,6 +47,45 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Me"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+    patch:
+      operationId: updateMe
+      description: Sets the display name friends see.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MeUpdate"}
+      responses:
+        "204": {description: Updated.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    delete:
+      operationId: deleteMe
+      description: |
+        Deletes everything the server holds about this account in one transaction
+        (GDPR Article 17); only an anonymous node of the invite tree remains. The
+        phone then wipes its own data. Friends drop the person on their next sync,
+        since the friend list no longer has them.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/export:
+    get:
+      operationId: exportMe
+      description: |
+        Everything the server stores about this account, one key per table, sealed
+        blobs as base64 (GDPR Articles 15 and 20). The phone decrypts the sealed logs
+        itself and builds the export ZIP; this is its server-raw.json.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: The server's rows.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
   /api/me/session:
     delete:
       operationId: signOut
@@ -278,6 +317,212 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
+  /api/invites:
+    get:
+      operationId: listInvites
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Invites this account created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InviteList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    post:
+      operationId: createInvite
+      description: |
+        Stores a reusable invitation: the inviter's signed invite statement, the pin
+        MAC the invitee checks, and auth, of which the server keeps only a hash.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InviteInput"}
+      responses:
+        "201": {description: Created.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/invites/{inviteId}:
+    get:
+      operationId: getInvite
+      description: |
+        A live invite, for the invitee's app to check (the signature, then the pin
+        MAC) before redeeming. Needs no session: the invitee has none yet.
+        Rate-limited per address.
+      parameters: [{$ref: "#/components/parameters/InviteId"}]
+      responses:
+        "200":
+          description: The invite record.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InviteRecord"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+    delete:
+      operationId: revokeInvite
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/InviteId"}
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/invites/{inviteId}/redemptions:
+    post:
+      operationId: redeemInvite
+      description: |
+        Makes this account and the inviter friends. auth proves the link's secret; the
+        acceptance, signed by this account's identity key, names the invite, the
+        account and its key. A wrong auth answers 404 like an unknown invite.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/InviteId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Redemption"}
+      responses:
+        "200":
+          description: Now friends.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RedemptionResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+
+  /api/friends:
+    get:
+      operationId: listFriends
+      description: The authoritative friend list; a phone drops anyone cached who is not in it.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Friends.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FriendList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/friends/streaks:
+    get:
+      operationId: friendsStreaks
+      description: The newest signed statement of every public practice of every friend.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Statements to verify against each friend's pinned key.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StreakList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/friends/{userId}:
+    delete:
+      operationId: unfriend
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/UserId"}
+      responses:
+        "204": {description: No longer friends, both ways.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/blocks:
+    get:
+      operationId: listBlocks
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: People this account has blocked.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BlockList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/blocks/{userId}:
+    put:
+      operationId: block
+      description: Ends any friendship and keeps it from coming back, both ways.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/UserId"}
+      responses:
+        "204": {description: Blocked.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      operationId: unblock
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/UserId"}
+      responses:
+        "204": {description: Unblocked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/reports:
+    post:
+      operationId: report
+      description: Reports a friend, or someone this account blocked, for moderation.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReportInput"}
+      responses:
+        "201":
+          description: Filed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReportResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/streaks:
+    get:
+      operationId: ownStreaks
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: This account's public streak statements.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StreakList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/streaks/{practice}:
+    put:
+      operationId: putStreak
+      description: |
+        Publishes a signed streak statement (type `streak`) for one practice: tracked
+        days only, a seq above the stored one, and a deadline the server times
+        streak-at-risk pushes by.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/Practice"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SignedStatement"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      operationId: deleteStreak
+      description: Makes the practice's streak private again.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/Practice"}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   parameters:
     Authorization:
@@ -291,6 +536,22 @@ components:
       in: path
       required: true
       schema: {$ref: "#/components/schemas/UUID"}
+    InviteId:
+      name: inviteId
+      in: path
+      required: true
+      description: 8 Crockford base32 characters; either case.
+      schema: {type: string, minLength: 8, maxLength: 8}
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: {$ref: "#/components/schemas/UUID"}
+    Practice:
+      name: practice
+      in: path
+      required: true
+      schema: {type: string, maxLength: 64}
     Kind:
       name: kind
       in: path
@@ -308,6 +569,11 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
     NotFound:
       description: No such resource for this account.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    TooManyRequests:
+      description: Rate-limited; try again later.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -339,11 +605,12 @@ components:
         go: {type: string}
     Me:
       type: object
-      required: [id, keyVersion, devices]
+      required: [id, keyVersion, displayName, devices]
       properties:
         id: {$ref: "#/components/schemas/UUID"}
         identityPublicKey: {type: string, format: byte, description: Ed25519, 32 bytes}
         keyVersion: {type: integer, description: Current version of the practice key}
+        displayName: {type: string}
         devices:
           type: array
           items: {$ref: "#/components/schemas/Device"}
@@ -485,3 +752,107 @@ components:
         logs:
           type: array
           items: {$ref: "#/components/schemas/PracticeLog"}
+    MeUpdate:
+      type: object
+      required: [displayName]
+      properties:
+        displayName: {type: string, maxLength: 64}
+    InviteInput:
+      type: object
+      required: [id, auth, expiresAt, payload, signature, mac]
+      properties:
+        id: {type: string, minLength: 8, maxLength: 8}
+        auth: {type: string, format: byte, description: "HKDF(secret, invite-auth), 32 bytes"}
+        expiresAt: {type: string, format: date-time}
+        payload: {type: string, format: byte, description: The signed invite statement}
+        signature: {type: string, format: byte}
+        mac: {type: string, format: byte, description: "HMAC(pin, inviterIdentityPk), 32 bytes"}
+    InviteRecord:
+      type: object
+      required: [id, payload, signature, mac, expiresAt]
+      properties:
+        id: {type: string}
+        payload: {type: string, format: byte}
+        signature: {type: string, format: byte}
+        mac: {type: string, format: byte}
+        expiresAt: {type: string, format: date-time}
+    InviteSummary:
+      type: object
+      required: [id, expiresAt, createdAt]
+      properties:
+        id: {type: string}
+        expiresAt: {type: string, format: date-time}
+        revokedAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+    InviteList:
+      type: object
+      required: [invites]
+      properties:
+        invites:
+          type: array
+          items: {$ref: "#/components/schemas/InviteSummary"}
+    Redemption:
+      type: object
+      required: [auth, acceptance]
+      properties:
+        auth: {type: string, format: byte}
+        acceptance: {$ref: "#/components/schemas/SignedStatement"}
+    RedemptionResult:
+      type: object
+      required: [inviterId]
+      properties:
+        inviterId: {$ref: "#/components/schemas/UUID"}
+    Friend:
+      type: object
+      required: [userId, displayName, since]
+      properties:
+        userId: {$ref: "#/components/schemas/UUID"}
+        displayName: {type: string}
+        identityPublicKey: {type: string, format: byte}
+        since: {type: string, format: date-time}
+    FriendList:
+      type: object
+      required: [friends]
+      properties:
+        friends:
+          type: array
+          items: {$ref: "#/components/schemas/Friend"}
+    BlockEntry:
+      type: object
+      required: [userId, createdAt]
+      properties:
+        userId: {$ref: "#/components/schemas/UUID"}
+        createdAt: {type: string, format: date-time}
+    BlockList:
+      type: object
+      required: [blocks]
+      properties:
+        blocks:
+          type: array
+          items: {$ref: "#/components/schemas/BlockEntry"}
+    ReportInput:
+      type: object
+      required: [userId, reason]
+      properties:
+        userId: {$ref: "#/components/schemas/UUID"}
+        reason: {type: string, maxLength: 1000}
+    ReportResult:
+      type: object
+      required: [id]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+    StreakStatement:
+      type: object
+      required: [userId, practice, payload, signature]
+      properties:
+        userId: {$ref: "#/components/schemas/UUID"}
+        practice: {type: string}
+        payload: {type: string, format: byte}
+        signature: {type: string, format: byte}
+    StreakList:
+      type: object
+      required: [streaks]
+      properties:
+        streaks:
+          type: array
+          items: {$ref: "#/components/schemas/StreakStatement"}

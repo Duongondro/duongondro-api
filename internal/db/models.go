@@ -10,66 +10,124 @@ import (
 	"uuid"
 )
 
+type Block struct {
+	BlockerID uuid.UUID `json:"blockerId"`
+	BlockedID uuid.UUID `json:"blockedId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type DatabaseGeneration struct {
-	Singleton bool
-	ID        uuid.UUID
+	Singleton bool      `json:"singleton"`
+	ID        uuid.UUID `json:"id"`
 }
 
 type Device struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	PublicKey []byte
-	Tier      string
-	CreatedAt time.Time
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"userId"`
+	PublicKey []byte    `json:"publicKey"`
+	Tier      string    `json:"tier"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type DeviceList struct {
-	UserID    uuid.UUID
-	Version   int64
-	Payload   []byte
-	Signature []byte
-	UpdatedAt time.Time
+	UserID    uuid.UUID `json:"userId"`
+	Version   int64     `json:"version"`
+	Payload   []byte    `json:"payload"`
+	Signature []byte    `json:"signature"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type Friendship struct {
+	UserID    uuid.UUID `json:"userId"`
+	FriendID  uuid.UUID `json:"friendId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Invite struct {
+	ID        string     `json:"id"`
+	InviterID uuid.UUID  `json:"inviterId"`
+	AuthHash  []byte     `json:"authHash"`
+	Payload   []byte     `json:"payload"`
+	Signature []byte     `json:"signature"`
+	Mac       []byte     `json:"mac"`
+	ExpiresAt time.Time  `json:"expiresAt"`
+	RevokedAt *time.Time `json:"revokedAt"`
+	CreatedAt time.Time  `json:"createdAt"`
+}
+
+type InviteRedemption struct {
+	InviteID  string    `json:"inviteId"`
+	InviteeID uuid.UUID `json:"inviteeId"`
+	Payload   []byte    `json:"payload"`
+	Signature []byte    `json:"signature"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type InviteTree struct {
+	NodeID    uuid.UUID  `json:"nodeId"`
+	UserID    *uuid.UUID `json:"userId"`
+	ParentID  *uuid.UUID `json:"parentId"`
+	CreatedAt time.Time  `json:"createdAt"`
 }
 
 type KeyWrap struct {
-	DeviceID      uuid.UUID
-	Kind          int16
-	KeyVersion    int32
-	EphemeralKey  []byte
-	Box           []byte
-	AuthType      string
-	Authenticator []byte
-	CreatedAt     time.Time
+	DeviceID      uuid.UUID `json:"deviceId"`
+	Kind          int16     `json:"kind"`
+	KeyVersion    int32     `json:"keyVersion"`
+	EphemeralKey  []byte    `json:"ephemeralKey"`
+	Box           []byte    `json:"box"`
+	AuthType      string    `json:"authType"`
+	Authenticator []byte    `json:"authenticator"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 type PracticeLog struct {
-	ID              uuid.UUID
-	UserID          uuid.UUID
-	Sealed          []byte
-	KeyVersion      int32
-	ClientUpdatedAt time.Time
-	DeletedAt       *time.Time
-	Xid             uint64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID              uuid.UUID  `json:"id"`
+	UserID          uuid.UUID  `json:"userId"`
+	Sealed          []byte     `json:"sealed"`
+	KeyVersion      int32      `json:"keyVersion"`
+	ClientUpdatedAt time.Time  `json:"clientUpdatedAt"`
+	DeletedAt       *time.Time `json:"deletedAt"`
+	Xid             uint64     `json:"xid"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 type RecoveryBox struct {
-	UserID    uuid.UUID
-	Kind      int16
-	Box       []byte
-	UpdatedAt time.Time
+	UserID    uuid.UUID `json:"userId"`
+	Kind      int16     `json:"kind"`
+	Box       []byte    `json:"box"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type Report struct {
+	ID         uuid.UUID `json:"id"`
+	ReporterID uuid.UUID `json:"reporterId"`
+	ReportedID uuid.UUID `json:"reportedId"`
+	Reason     string    `json:"reason"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type Session struct {
-	TokenHash []byte
-	UserID    uuid.UUID
-	CreatedAt time.Time
+	TokenHash []byte    `json:"tokenHash"`
+	UserID    uuid.UUID `json:"userId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Streak struct {
+	UserID     uuid.UUID `json:"userId"`
+	Practice   string    `json:"practice"`
+	Seq        int64     `json:"seq"`
+	Payload    []byte    `json:"payload"`
+	Signature  []byte    `json:"signature"`
+	DeadlineAt time.Time `json:"deadlineAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 type User struct {
-	ID                uuid.UUID
-	IdentityPublicKey []byte
-	KeyVersion        int32
-	CreatedAt         time.Time
+	ID                uuid.UUID `json:"id"`
+	IdentityPublicKey []byte    `json:"identityPublicKey"`
+	KeyVersion        int32     `json:"keyVersion"`
+	CreatedAt         time.Time `json:"createdAt"`
+	DisplayName       string    `json:"displayName"`
 }

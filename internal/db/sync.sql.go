@@ -40,8 +40,8 @@ ORDER BY xid, id
 `
 
 type LogsChangedSinceParams struct {
-	UserID uuid.UUID
-	Since  uint64
+	UserID uuid.UUID `json:"userId"`
+	Since  uint64    `json:"since"`
 }
 
 func (q *Queries) LogsChangedSince(ctx context.Context, arg LogsChangedSinceParams) ([]PracticeLog, error) {
@@ -91,8 +91,8 @@ FROM database_generation
 `
 
 type SyncStateRow struct {
-	Generation uuid.UUID
-	Xmax       uint64
+	Generation uuid.UUID `json:"generation"`
+	Xmax       uint64    `json:"xmax"`
 }
 
 func (q *Queries) SyncState(ctx context.Context) (SyncStateRow, error) {
@@ -115,12 +115,12 @@ RETURNING id, user_id, sealed, key_version, client_updated_at, deleted_at, xid, 
 `
 
 type UpsertLogParams struct {
-	ID              uuid.UUID
-	UserID          uuid.UUID
-	Sealed          []byte
-	KeyVersion      int32
-	ClientUpdatedAt time.Time
-	DeletedAt       *time.Time
+	ID              uuid.UUID  `json:"id"`
+	UserID          uuid.UUID  `json:"userId"`
+	Sealed          []byte     `json:"sealed"`
+	KeyVersion      int32      `json:"keyVersion"`
+	ClientUpdatedAt time.Time  `json:"clientUpdatedAt"`
+	DeletedAt       *time.Time `json:"deletedAt"`
 }
 
 // Last write wins on the client's clock. A row of another user is never touched:

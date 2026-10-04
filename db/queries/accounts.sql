@@ -21,3 +21,6 @@ WHERE sessions.token_hash = $1;
 
 -- name: DeleteSession :execrows
 DELETE FROM sessions WHERE token_hash = $1;
+
+-- name: LockInvite :one
+SELECT * FROM invites WHERE id = $1 FOR UPDATE;

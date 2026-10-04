@@ -45,7 +45,7 @@ func (q *Queries) ListWraps(ctx context.Context, deviceID uuid.UUID) ([]KeyWrap,
 }
 
 const lockUser = `-- name: LockUser :one
-SELECT id, identity_public_key, key_version, created_at FROM users WHERE id = $1 FOR UPDATE
+SELECT id, identity_public_key, key_version, created_at, display_name FROM users WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -56,6 +56,7 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.IdentityPublicKey,
 		&i.KeyVersion,
 		&i.CreatedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }
@@ -68,13 +69,13 @@ ORDER BY devices.id
 `
 
 type PracticeKeyHoldersParams struct {
-	UserID     uuid.UUID
-	KeyVersion int32
+	UserID     uuid.UUID `json:"userId"`
+	KeyVersion int32     `json:"keyVersion"`
 }
 
 type PracticeKeyHoldersRow struct {
-	ID        uuid.UUID
-	PublicKey []byte
+	ID        uuid.UUID `json:"id"`
+	PublicKey []byte    `json:"publicKey"`
 }
 
 // Devices holding a wrap of the given practice-key version: a rotation must wrap the
@@ -108,13 +109,13 @@ ON CONFLICT (device_id, kind, key_version) DO UPDATE SET
 `
 
 type PutWrapParams struct {
-	DeviceID      uuid.UUID
-	Kind          int16
-	KeyVersion    int32
-	EphemeralKey  []byte
-	Box           []byte
-	AuthType      string
-	Authenticator []byte
+	DeviceID      uuid.UUID `json:"deviceId"`
+	Kind          int16     `json:"kind"`
+	KeyVersion    int32     `json:"keyVersion"`
+	EphemeralKey  []byte    `json:"ephemeralKey"`
+	Box           []byte    `json:"box"`
+	AuthType      string    `json:"authType"`
+	Authenticator []byte    `json:"authenticator"`
 }
 
 func (q *Queries) PutWrap(ctx context.Context, arg PutWrapParams) error {
@@ -136,8 +137,8 @@ WHERE id = $2 AND key_version = $1::integer - 1
 `
 
 type SetKeyVersionParams struct {
-	NewVersion int32
-	ID         uuid.UUID
+	NewVersion int32     `json:"newVersion"`
+	ID         uuid.UUID `json:"id"`
 }
 
 func (q *Queries) SetKeyVersion(ctx context.Context, arg SetKeyVersionParams) (int64, error) {

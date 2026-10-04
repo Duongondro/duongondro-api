@@ -32,9 +32,7 @@ make vectors   # regenerate testdata/vectors.json after a format change
 make release   # build; refuses a dirty tree and any trace of the DEV sign-in
 ```
 
-What exists so far (phase 3): sessions, the Ed25519 identity key, devices with their key tier, the signed device list, wraps of the practice key and identity seed (signatures verified against an AAD the server rebuilds), practice-key rotation, sealed practice logs with last-write-wins and the `<generation>:<xid8>` sync cursor, and recovery boxes. Sign-in providers, invites, friends, streaks, push and the GDPR endpoints follow.
-
-`GET /api/version` reports the commit the binary was built from (with `-dirty` for development builds), which the apps show in Settings.
+What exists so far: sessions, the Ed25519 identity key, devices with their key tier, the signed device list, wraps of the practice key and identity seed (signatures verified against an AAD the server rebuilds), practice-key rotation, sealed practice logs with last-write-wins and the `<generation>:<xid8>` sync cursor, recovery boxes; invitations (signed, reusable, rate-limited, auth stored hashed), friendships, blocks, reports, signed public streaks visible to friends only; and the GDPR export and purge. Sign-in providers and push follow.
 
 ## Design
 
