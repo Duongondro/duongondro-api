@@ -1,6 +1,6 @@
 module github.com/Duongondro/duongondro-api
 
-go 1.24
+go 1.24.0
 
 require golang.org/x/crypto v0.42.0
 
