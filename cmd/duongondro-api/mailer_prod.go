@@ -3,31 +3,37 @@
 package main
 
 import (
-	"context"
+	"log/slog"
 	"os"
-
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"strconv"
 
 	"github.com/Duongondro/duongondro-api/internal/mail"
 	"github.com/Duongondro/duongondro-api/internal/service"
 )
 
-// mailer sends magic links through SES when MAIL_FROM is set (region MAIL_REGION,
-// default eu-central-1, credentials from the AWS default chain); without it the
-// magic-link endpoints answer that they are not configured.
-func mailer() service.Mailer {
+// mailer sends magic links over SMTP when MAIL_FROM is set (SMTP_HOST, SMTP_PORT,
+// default 587, SMTP_USERNAME and SMTP_PASSWORD: Brevo's relay in production);
+// without it the magic-link endpoints answer that they are not configured.
+func mailer() (service.Mailer, error) {
 	from := os.Getenv("MAIL_FROM")
 	if from == "" {
-		return nil
+		return nil, nil
 	}
-	region := os.Getenv("MAIL_REGION")
-	if region == "" {
-		region = "eu-central-1"
+	if err := required("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD"); err != nil {
+		return nil, err
 	}
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
+	port := 587
+	if p := os.Getenv("SMTP_PORT"); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, err
+		}
+		port = n
+	}
+	m, err := mail.NewSMTP(os.Getenv("SMTP_HOST"), port, os.Getenv("SMTP_USERNAME"), os.Getenv("SMTP_PASSWORD"), from)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &mail.SES{Client: sesv2.NewFromConfig(cfg), From: from}
+	slog.Info("magic links by SMTP", "host", os.Getenv("SMTP_HOST"))
+	return m, nil
 }

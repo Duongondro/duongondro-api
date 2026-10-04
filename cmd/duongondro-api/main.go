@@ -29,8 +29,8 @@
 //	                   push to iOS (team: APPLE_TEAM_ID; topic: the bundle id)
 //	FCM_SERVICE_ACCOUNT_FILE
 //	                   push to Android: the Firebase service account's JSON key
-//	MAIL_FROM, MAIL_REGION
-//	                   magic links through SES (region default eu-central-1)
+//	MAIL_FROM, SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+//	                   magic links by SMTP with STARTTLS (Brevo's relay; port default 587)
 //	APPLE_APP_IDS      <team>.<bundle id> for apple-app-site-association
 //	ANDROID_PACKAGE, ANDROID_CERT_SHA256
 //	                   for assetlinks.json (fingerprints comma-separated)
@@ -205,12 +205,16 @@ func loadConfig() (server.Config, error) {
 	if base == "" {
 		base = "https://duongondro.app/m#"
 	}
+	mail, err := mailer()
+	if err != nil {
+		return server.Config{}, err
+	}
 	senders, err := pushSenders()
 	if err != nil {
 		return server.Config{}, err
 	}
 	return server.Config{
-		SignIn: service.SignInConfig{RPID: rpID, RPOrigins: origins, Verifiers: verifiers, Mailer: mailer(),
+		SignIn: service.SignInConfig{RPID: rpID, RPOrigins: origins, Verifiers: verifiers, Mailer: mail,
 			Apple: revoker},
 		MagicLinkBase: base,
 		Push:          senders,

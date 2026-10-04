@@ -12,7 +12,7 @@ import (
 
 // mailer prints magic links to stderr in DEV builds, so the Simulator can sign in
 // against a local server. Never in a release build: the link is a credential.
-func mailer() service.Mailer { return stderrMailer{} }
+func mailer() (service.Mailer, error) { return stderrMailer{}, nil }
 
 type stderrMailer struct{}
 

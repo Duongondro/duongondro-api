@@ -24,7 +24,7 @@ type TokenVerifier interface {
 	Verify(ctx context.Context, raw string) (oidc.Claims, error)
 }
 
-// Mailer sends the magic-link mail (SES in an EU region in production).
+// Mailer sends the magic-link mail (SMTP through Brevo in production).
 type Mailer interface {
 	SendMagicLink(ctx context.Context, to, link string) error
 }
