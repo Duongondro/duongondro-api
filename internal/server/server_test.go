@@ -10,7 +10,7 @@ import (
 )
 
 func TestRoutes(t *testing.T) {
-	srv := httptest.NewServer(New(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	srv := httptest.NewServer(New(slog.New(slog.NewTextHandler(io.Discard, nil)), Deps{}))
 	defer srv.Close()
 
 	res, err := http.Get(srv.URL + "/healthz")

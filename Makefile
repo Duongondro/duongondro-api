@@ -3,6 +3,7 @@
 test:
 	gofmt -l . | (! grep .) || (echo "gofmt needed"; exit 1)
 	go vet ./...
+	go vet -tags DEV ./...
 	go test ./...
 
 # Integration tests against the local PostgreSQL; each test gets its own
@@ -10,6 +11,7 @@ test:
 TEST_DATABASE_URL ?= postgres://postgres@127.0.0.1:54329/duongondro_test?sslmode=disable
 test-db:
 	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test -count=1 ./...
+	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test -count=1 -tags DEV ./internal/server
 
 build:
 	go build -trimpath -o bin/duongondro-api ./cmd/duongondro-api
