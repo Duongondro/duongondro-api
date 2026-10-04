@@ -34,9 +34,13 @@ func setup(t *testing.T) *fixture {
 		wraps: NewWraps(pool, devices), logs: NewLogs(pool), recovery: NewRecovery(pool)}
 }
 
+// user creates an account with its node in the invite tree, as every account has.
 func (f *fixture) user() db.User {
 	u, err := f.q.CreateUser(f.t.Context())
 	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.q.CreateInviteNode(f.t.Context(), db.CreateInviteNodeParams{UserID: &u.ID}); err != nil {
 		f.t.Fatal(err)
 	}
 	return u

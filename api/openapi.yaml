@@ -11,8 +11,9 @@ info:
     Contract first: edit this file, then `make gen`. The Android client is generated
     from it too.
 
-    Sign-in routes (passkeys, Sign in with Apple, Google, magic links) and the DEV
-    build's POST /api/dev/session are registered outside this file, as in CodeShare.
+    Every sign-in ends in a bearer token. An account is created only with a valid
+    invitation; signing in never grants keys. The DEV build's POST /api/dev/session is
+    registered outside this file, so a release build has no trace of it.
 servers:
   - url: https://api.duongondro.app
 paths:
@@ -523,6 +524,156 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/auth/passkeys/sign-up:
+    post:
+      operationId: beginPasskeySignUp
+      description: Starts creating an account with a passkey; the invitation is checked now and when it finishes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InviteProofBody"}
+      responses:
+        "200":
+          description: Options for the platform authenticator.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Ceremony"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/auth/passkeys/sign-in:
+    post:
+      operationId: beginPasskeySignIn
+      description: Starts a discoverable sign-in; the phone offers its passkeys.
+      responses:
+        "200":
+          description: Options for the platform authenticator.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Ceremony"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/auth/passkeys/{sessionId}:
+    post:
+      operationId: finishPasskey
+      description: Completes a passkey sign-up or sign-in with the authenticator's response.
+      parameters: [{$ref: "#/components/parameters/CeremonyId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasskeyResponse"}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SignInResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/auth/providers/{provider}:
+    post:
+      operationId: providerSignIn
+      description: |
+        Signs in with a Sign in with Apple or Google ID token; with an invitation and
+        no account for that provider account, creates one. 403 means no account uses
+        it and an invitation is needed.
+      parameters: [{$ref: "#/components/parameters/Provider"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProviderSignIn"}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SignInResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/auth/magic-links:
+    post:
+      operationId: requestMagicLink
+      description: |
+        Mails a single-use sign-in link (15 minutes). The answer is the same whether
+        or not an account uses the address, which therefore is never revealed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MagicLinkRequest"}
+      responses:
+        "204": {description: Sent, or nothing to send.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/auth/magic-links/redeem:
+    post:
+      operationId: redeemMagicLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MagicLinkToken"}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SignInResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/me/passkeys:
+    post:
+      operationId: beginPasskeyAdd
+      description: Starts adding a passkey to this account.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Options for the platform authenticator.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Ceremony"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/passkeys/{sessionId}:
+    post:
+      operationId: finishPasskeyAdd
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CeremonyId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasskeyResponse"}
+      responses:
+        "204": {description: Added.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/identities/{provider}:
+    post:
+      operationId: linkProvider
+      description: Adds an Apple or Google account to this account. Linking is only ever explicit, like this.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/Provider"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProviderLink"}
+      responses:
+        "204": {description: Linked.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
 components:
   parameters:
     Authorization:
@@ -536,6 +687,16 @@ components:
       in: path
       required: true
       schema: {$ref: "#/components/schemas/UUID"}
+    CeremonyId:
+      name: sessionId
+      in: path
+      required: true
+      schema: {$ref: "#/components/schemas/UUID"}
+    Provider:
+      name: provider
+      in: path
+      required: true
+      schema: {type: string, enum: [apple, google]}
     InviteId:
       name: inviteId
       in: path
@@ -569,6 +730,11 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
     NotFound:
       description: No such resource for this account.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Forbidden:
+      description: No account uses this sign-in; an invitation is needed to create one.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -856,3 +1022,65 @@ components:
         streaks:
           type: array
           items: {$ref: "#/components/schemas/StreakStatement"}
+    InviteProof:
+      type: object
+      required: [id, auth]
+      description: The invitation a sign-up presents.
+      properties:
+        id: {type: string, minLength: 8, maxLength: 8}
+        auth: {type: string, format: byte}
+    InviteProofBody:
+      type: object
+      required: [invite]
+      properties:
+        invite: {$ref: "#/components/schemas/InviteProof"}
+    Ceremony:
+      type: object
+      required: [sessionId, options]
+      properties:
+        sessionId: {$ref: "#/components/schemas/UUID"}
+        options:
+          type: object
+          additionalProperties: true
+          description: WebAuthn creation or request options, for the platform authenticator
+    PasskeyResponse:
+      type: object
+      required: [credential]
+      properties:
+        credential:
+          type: object
+          additionalProperties: true
+          description: The authenticator's PublicKeyCredential as WebAuthn JSON (base64url fields)
+    SignInResult:
+      type: object
+      required: [token, userId, created]
+      properties:
+        token: {type: string, description: "Bearer token; send as Authorization: Bearer <token>"}
+        userId: {$ref: "#/components/schemas/UUID"}
+        created: {type: boolean, description: A new account was made with the invitation}
+    ProviderSignIn:
+      type: object
+      required: [idToken, nonce]
+      properties:
+        idToken: {type: string, maxLength: 8192}
+        nonce: {type: string, maxLength: 256, description: The raw nonce the app gave the provider}
+        authorizationCode: {type: string, maxLength: 1024, description: "Apple only: kept to revoke the authorisation when the account is deleted"}
+        invite: {$ref: "#/components/schemas/InviteProof"}
+    ProviderLink:
+      type: object
+      required: [idToken, nonce]
+      properties:
+        idToken: {type: string, maxLength: 8192}
+        nonce: {type: string, maxLength: 256}
+        authorizationCode: {type: string, maxLength: 1024}
+    MagicLinkRequest:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, maxLength: 320}
+        invite: {$ref: "#/components/schemas/InviteProof"}
+    MagicLinkToken:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string, maxLength: 128}

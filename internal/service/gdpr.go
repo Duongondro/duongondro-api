@@ -27,30 +27,38 @@ func NewGDPR(pool *pgxpool.Pool) *GDPR { return &GDPR{pool: pool, q: db.New(pool
 // (TestExportCoversEveryTable keeps it that way); session tokens appear only as
 // their creation times, since the server holds no more than a hash of them.
 type Export struct {
-	ExportedAt         time.Time               `json:"exportedAt"`
-	Users              db.User                 `json:"users"`
-	Sessions           []time.Time             `json:"sessions"`
-	Devices            []db.Device             `json:"devices"`
-	DeviceLists        *db.DeviceList          `json:"device_lists"`
-	KeyWraps           []db.KeyWrap            `json:"key_wraps"`
-	PracticeLogs       []db.PracticeLog        `json:"practice_logs"`
-	RecoveryBoxes      []db.RecoveryBox        `json:"recovery_boxes"`
-	InviteTree         *db.ExportInviteNodeRow `json:"invite_tree"`
-	Invites            []db.Invite             `json:"invites"`
-	InviteRedemptions  []db.InviteRedemption   `json:"invite_redemptions"`
-	Friendships        []db.ListFriendsRow     `json:"friendships"`
-	Blocks             []db.Block              `json:"blocks"`
-	Reports            []db.ExportReportsRow   `json:"reports"`
-	Streaks            []db.Streak             `json:"streaks"`
-	DatabaseGeneration string                  `json:"database_generation"`
+	ExportedAt         time.Time                 `json:"exportedAt"`
+	Users              db.User                   `json:"users"`
+	Sessions           []time.Time               `json:"sessions"`
+	Devices            []db.Device               `json:"devices"`
+	DeviceLists        *db.DeviceList            `json:"device_lists"`
+	KeyWraps           []db.KeyWrap              `json:"key_wraps"`
+	PracticeLogs       []db.PracticeLog          `json:"practice_logs"`
+	RecoveryBoxes      []db.RecoveryBox          `json:"recovery_boxes"`
+	InviteTree         *db.ExportInviteNodeRow   `json:"invite_tree"`
+	Invites            []db.Invite               `json:"invites"`
+	InviteRedemptions  []db.InviteRedemption     `json:"invite_redemptions"`
+	Friendships        []db.ListFriendsRow       `json:"friendships"`
+	Blocks             []db.Block                `json:"blocks"`
+	Reports            []db.ExportReportsRow     `json:"reports"`
+	Streaks            []db.Streak               `json:"streaks"`
+	Credentials        []db.ExportCredentialsRow `json:"credentials"`
+	AuthIdentities     []db.ExportIdentitiesRow  `json:"auth_identities"`
+	MagicLinks         []db.ExportMagicLinksRow  `json:"magic_links"`
+	WebauthnSessions   []string                  `json:"webauthn_sessions"`
+	DatabaseGeneration string                    `json:"database_generation"`
 }
 
 // ExportedTables names every table Export covers. database_generation holds no
 // personal data; it is listed because the cursor in the apps refers to it.
+// webauthn_sessions are passkey ceremonies of the last five minutes: listed as
+// always empty, since one in flight is no stored data, and deleted by a purge.
+// Passkeys and identities appear without their secrets (the public key and Apple's
+// refresh token stay out).
 var ExportedTables = []string{
-	"blocks", "database_generation", "device_lists", "devices", "friendships", "invite_redemptions",
-	"invite_tree", "invites", "key_wraps", "practice_logs", "recovery_boxes", "reports",
-	"sessions", "streaks", "users",
+	"auth_identities", "blocks", "credentials", "database_generation", "device_lists", "devices",
+	"friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps", "magic_links",
+	"practice_logs", "recovery_boxes", "reports", "sessions", "streaks", "users", "webauthn_sessions",
 }
 
 // Export reads everything in one snapshot.
@@ -106,6 +114,16 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		if out.Streaks, err = q.OwnStreaks(ctx, userID); err != nil {
 			return err
 		}
+		if out.Credentials, err = q.ExportCredentials(ctx, userID); err != nil {
+			return err
+		}
+		if out.AuthIdentities, err = q.ExportIdentities(ctx, userID); err != nil {
+			return err
+		}
+		if out.MagicLinks, err = q.ExportMagicLinks(ctx, userID); err != nil {
+			return err
+		}
+		out.WebauthnSessions = []string{}
 		state, err := q.SyncState(ctx)
 		if err != nil {
 			return err
@@ -123,10 +141,23 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 // invite tree stays, anonymous, so others' "invited by" stays consistent. Friends'
 // phones drop the person on their next sync, since the friend list no longer has
 // them.
+//
+// Unused magic links to the user's addresses and passkey ceremonies in flight go
+// too; they are not tied to the account by a foreign key. Revoking Sign in with
+// Apple (SignIn.RevokeApple) comes first, while the refresh tokens still exist.
 func (g *GDPR) Purge(ctx context.Context, userID uuid.UUID) error {
-	n, err := g.q.DeleteUser(ctx, userID)
-	if err == nil && n == 0 {
-		return ErrNotFound
-	}
-	return err
+	return pgx.BeginTxFunc(ctx, g.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := g.q.WithTx(tx)
+		if err := q.DeleteMagicLinksForUser(ctx, userID); err != nil {
+			return err
+		}
+		if err := q.DeleteWebauthnSessionsForUser(ctx, &userID); err != nil {
+			return err
+		}
+		n, err := q.DeleteUser(ctx, userID)
+		if err == nil && n == 0 {
+			return ErrNotFound
+		}
+		return err
+	})
 }

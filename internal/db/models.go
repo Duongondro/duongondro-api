@@ -10,10 +10,27 @@ import (
 	"uuid"
 )
 
+type AuthIdentity struct {
+	Provider     string    `json:"provider"`
+	Subject      string    `json:"subject"`
+	UserID       uuid.UUID `json:"userId"`
+	Email        *string   `json:"email"`
+	RefreshToken *string   `json:"refreshToken"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 type Block struct {
 	BlockerID uuid.UUID `json:"blockerId"`
 	BlockedID uuid.UUID `json:"blockedId"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Credential struct {
+	ID         []byte     `json:"id"`
+	UserID     uuid.UUID  `json:"userId"`
+	Data       []byte     `json:"data"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
 }
 
 type DatabaseGeneration struct {
@@ -81,6 +98,13 @@ type KeyWrap struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
+type MagicLink struct {
+	TokenHash []byte    `json:"tokenHash"`
+	Email     string    `json:"email"`
+	InviteID  *string   `json:"inviteId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type PracticeLog struct {
 	ID              uuid.UUID  `json:"id"`
 	UserID          uuid.UUID  `json:"userId"`
@@ -130,4 +154,12 @@ type User struct {
 	KeyVersion        int32     `json:"keyVersion"`
 	CreatedAt         time.Time `json:"createdAt"`
 	DisplayName       string    `json:"displayName"`
+}
+
+type WebauthnSession struct {
+	ID        uuid.UUID  `json:"id"`
+	Data      []byte     `json:"data"`
+	UserID    *uuid.UUID `json:"userId"`
+	InviteID  *string    `json:"inviteId"`
+	CreatedAt time.Time  `json:"createdAt"`
 }

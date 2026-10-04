@@ -16,7 +16,20 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/Duongondro/duongondro-api/internal/dbtest"
+	"github.com/Duongondro/duongondro-api/internal/service"
 )
+
+func newTestServer(t *testing.T, schema string) *echo.Echo {
+	t.Helper()
+	e, err := New(dbtest.Fresh(t, schema), Config{
+		SignIn:        service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
+		MagicLinkBase: "https://duongondro.app/m/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
 
 func serve(t *testing.T, e *echo.Echo, method, target, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -37,7 +50,7 @@ func serve(t *testing.T, e *echo.Echo, method, target, token string, body any) *
 // A device's first steps against the API, through the DEV sign-in: register,
 // upload a sealed log, sync it back, sign out.
 func TestFirstSync(t *testing.T) {
-	e := New(dbtest.Fresh(t, "server_tests"))
+	e := newTestServer(t, "server_tests")
 
 	rec := serve(t, e, http.MethodPost, devSessionPath, "", nil)
 	if rec.Code != http.StatusOK {

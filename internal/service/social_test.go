@@ -191,11 +191,6 @@ func TestStreaks(t *testing.T) {
 func (f *fixture) fillEveryTable(s *Social) member {
 	ctx := f.t.Context()
 	ana, bo := f.member(), f.member()
-	for _, m := range []member{ana, bo} {
-		if err := f.q.CreateInviteNode(ctx, db.CreateInviteNodeParams{UserID: &m.ID}); err != nil {
-			f.t.Fatal(err)
-		}
-	}
 	if err := f.q.CreateSession(ctx, db.CreateSessionParams{TokenHash: random(32), UserID: ana.ID}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -240,6 +235,20 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	if err := s.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
 		f.t.Fatal(err)
 	}
+	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.
+	if err := f.q.CreateCredential(ctx, db.CreateCredentialParams{ID: random(16), UserID: ana.ID, Data: []byte(`{}`)}); err != nil {
+		f.t.Fatal(err)
+	}
+	email := "ana@example.com"
+	if err := f.q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: "email", Subject: email, UserID: ana.ID, Email: &email}); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: random(32), Email: email}); err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: []byte(`{}`), UserID: &ana.ID}); err != nil {
+		f.t.Fatal(err)
+	}
 	return ana
 }
 
@@ -276,6 +285,9 @@ func TestExportCoversEveryTable(t *testing.T) {
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
 	for _, table := range tables {
+		if table == "webauthn_sessions" {
+			continue // ceremonies in flight are exported as always empty (see ExportedTables)
+		}
 		v, ok := fields[table]
 		if !ok || string(v) == "null" || string(v) == "[]" {
 			t.Errorf("the export has nothing under %q although the user has rows there", table)
@@ -313,6 +325,11 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 		if n != 0 {
 			t.Errorf("%s.%s still references the purged user (%d rows)", c.table, c.column, n)
 		}
+	}
+	var links int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email = 'ana@example.com'`).Scan(&links)
+	if links != 0 {
+		t.Errorf("%d unused magic links to the purged address remain", links)
 	}
 	var anonymous int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM invite_tree WHERE user_id IS NULL`).Scan(&anonymous)

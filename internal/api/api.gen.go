@@ -65,6 +65,60 @@ func (e Tier) Valid() bool {
 	}
 }
 
+// Defines values for Provider.
+const (
+	ProviderApple  Provider = "apple"
+	ProviderGoogle Provider = "google"
+)
+
+// Valid indicates whether the value is a known member of the Provider enum.
+func (e Provider) Valid() bool {
+	switch e {
+	case ProviderApple:
+		return true
+	case ProviderGoogle:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderSignInParamsProvider.
+const (
+	ProviderSignInParamsProviderApple  ProviderSignInParamsProvider = "apple"
+	ProviderSignInParamsProviderGoogle ProviderSignInParamsProvider = "google"
+)
+
+// Valid indicates whether the value is a known member of the ProviderSignInParamsProvider enum.
+func (e ProviderSignInParamsProvider) Valid() bool {
+	switch e {
+	case ProviderSignInParamsProviderApple:
+		return true
+	case ProviderSignInParamsProviderGoogle:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LinkProviderParamsProvider.
+const (
+	LinkProviderParamsProviderApple  LinkProviderParamsProvider = "apple"
+	LinkProviderParamsProviderGoogle LinkProviderParamsProvider = "google"
+)
+
+// Valid indicates whether the value is a known member of the LinkProviderParamsProvider enum.
+func (e LinkProviderParamsProvider) Valid() bool {
+	switch e {
+	case LinkProviderParamsProviderApple:
+		return true
+	case LinkProviderParamsProviderGoogle:
+		return true
+	default:
+		return false
+	}
+}
+
 // AuthType signature: Ed25519 by the identity key; enrol: HMAC from the QR secret; self:
 // HMAC from the device's own ECDH (docs/crypto.md, Wraps).
 type AuthType string
@@ -78,6 +132,13 @@ type BlockEntry struct {
 // BlockList defines model for BlockList.
 type BlockList struct {
 	Blocks []BlockEntry `json:"blocks"`
+}
+
+// Ceremony defines model for Ceremony.
+type Ceremony struct {
+	// Options WebAuthn creation or request options, for the platform authenticator
+	Options   map[string]interface{} `json:"options"`
+	SessionId UUID                   `json:"sessionId"`
 }
 
 // Device defines model for Device.
@@ -144,6 +205,18 @@ type InviteList struct {
 	Invites []InviteSummary `json:"invites"`
 }
 
+// InviteProof The invitation a sign-up presents.
+type InviteProof struct {
+	Auth []byte `json:"auth"`
+	Id   string `json:"id"`
+}
+
+// InviteProofBody defines model for InviteProofBody.
+type InviteProofBody struct {
+	// Invite The invitation a sign-up presents.
+	Invite InviteProof `json:"invite"`
+}
+
 // InviteRecord defines model for InviteRecord.
 type InviteRecord struct {
 	ExpiresAt time.Time `json:"expiresAt"`
@@ -165,6 +238,19 @@ type InviteSummary struct {
 type KeyRotation struct {
 	NewVersion int            `json:"newVersion"`
 	Wraps      []RotationWrap `json:"wraps"`
+}
+
+// MagicLinkRequest defines model for MagicLinkRequest.
+type MagicLinkRequest struct {
+	Email string `json:"email"`
+
+	// Invite The invitation a sign-up presents.
+	Invite *InviteProof `json:"invite,omitempty"`
+}
+
+// MagicLinkToken defines model for MagicLinkToken.
+type MagicLinkToken struct {
+	Token string `json:"token"`
 }
 
 // Me defines model for Me.
@@ -191,6 +277,12 @@ type OldKeyError struct {
 	Error             string `json:"error"`
 }
 
+// PasskeyResponse defines model for PasskeyResponse.
+type PasskeyResponse struct {
+	// Credential The authenticator's PublicKeyCredential as WebAuthn JSON (base64url fields)
+	Credential map[string]interface{} `json:"credential"`
+}
+
 // PracticeLog defines model for PracticeLog.
 type PracticeLog struct {
 	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
@@ -211,6 +303,26 @@ type PracticeLogInput struct {
 
 	// UpdatedAt The client's clock; the newer write wins
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ProviderLink defines model for ProviderLink.
+type ProviderLink struct {
+	AuthorizationCode *string `json:"authorizationCode,omitempty"`
+	IdToken           string  `json:"idToken"`
+	Nonce             string  `json:"nonce"`
+}
+
+// ProviderSignIn defines model for ProviderSignIn.
+type ProviderSignIn struct {
+	// AuthorizationCode Apple only: kept to revoke the authorisation when the account is deleted
+	AuthorizationCode *string `json:"authorizationCode,omitempty"`
+	IdToken           string  `json:"idToken"`
+
+	// Invite The invitation a sign-up presents.
+	Invite *InviteProof `json:"invite,omitempty"`
+
+	// Nonce The raw nonce the app gave the provider
+	Nonce string `json:"nonce"`
 }
 
 // RecoveryBox defines model for RecoveryBox.
@@ -271,6 +383,16 @@ type RotationWrap struct {
 	EphemeralKey []byte `json:"ephemeralKey"`
 	KeyVersion   int    `json:"keyVersion"`
 	Kind         int    `json:"kind"`
+}
+
+// SignInResult defines model for SignInResult.
+type SignInResult struct {
+	// Created A new account was made with the invitation
+	Created bool `json:"created"`
+
+	// Token Bearer token; send as Authorization: Bearer <token>
+	Token  string `json:"token"`
+	UserId UUID   `json:"userId"`
 }
 
 // SignedStatement Exact payload bytes (compact JSON, sorted keys) and their Ed25519 signature.
@@ -363,6 +485,9 @@ type WrapList struct {
 // Authorization defines model for Authorization.
 type Authorization = string
 
+// CeremonyId defines model for CeremonyId.
+type CeremonyId = UUID
+
 // DeviceId defines model for DeviceId.
 type DeviceId = UUID
 
@@ -375,6 +500,9 @@ type Kind = int
 // Practice defines model for Practice.
 type Practice = string
 
+// Provider defines model for Provider.
+type Provider string
+
 // UserId defines model for UserId.
 type UserId = UUID
 
@@ -384,11 +512,17 @@ type BadRequest = Error
 // Conflict defines model for Conflict.
 type Conflict = Error
 
+// Forbidden defines model for Forbidden.
+type Forbidden = Error
+
 // NotFound defines model for NotFound.
 type NotFound = Error
 
 // TooManyRequests defines model for TooManyRequests.
 type TooManyRequests = Error
+
+// ProviderSignInParamsProvider defines parameters for ProviderSignIn.
+type ProviderSignInParamsProvider string
 
 // ListBlocksParams defines parameters for ListBlocks.
 type ListBlocksParams struct {
@@ -516,6 +650,15 @@ type ExportMeParams struct {
 	Authorization Authorization `json:"Authorization"`
 }
 
+// LinkProviderParams defines parameters for LinkProvider.
+type LinkProviderParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// LinkProviderParamsProvider defines parameters for LinkProvider.
+type LinkProviderParamsProvider string
+
 // PutIdentityParams defines parameters for PutIdentity.
 type PutIdentityParams struct {
 	// Authorization Bearer <session token>
@@ -524,6 +667,18 @@ type PutIdentityParams struct {
 
 // RotatePracticeKeyParams defines parameters for RotatePracticeKey.
 type RotatePracticeKeyParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// BeginPasskeyAddParams defines parameters for BeginPasskeyAdd.
+type BeginPasskeyAddParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// FinishPasskeyAddParams defines parameters for FinishPasskeyAdd.
+type FinishPasskeyAddParams struct {
 	// Authorization Bearer <session token>
 	Authorization Authorization `json:"Authorization"`
 }
@@ -584,6 +739,21 @@ type SyncParams struct {
 	Authorization Authorization `json:"Authorization"`
 }
 
+// RequestMagicLinkJSONRequestBody defines body for RequestMagicLink for application/json ContentType.
+type RequestMagicLinkJSONRequestBody = MagicLinkRequest
+
+// RedeemMagicLinkJSONRequestBody defines body for RedeemMagicLink for application/json ContentType.
+type RedeemMagicLinkJSONRequestBody = MagicLinkToken
+
+// BeginPasskeySignUpJSONRequestBody defines body for BeginPasskeySignUp for application/json ContentType.
+type BeginPasskeySignUpJSONRequestBody = InviteProofBody
+
+// FinishPasskeyJSONRequestBody defines body for FinishPasskey for application/json ContentType.
+type FinishPasskeyJSONRequestBody = PasskeyResponse
+
+// ProviderSignInJSONRequestBody defines body for ProviderSignIn for application/json ContentType.
+type ProviderSignInJSONRequestBody = ProviderSignIn
+
 // RegisterDeviceJSONRequestBody defines body for RegisterDevice for application/json ContentType.
 type RegisterDeviceJSONRequestBody = DeviceInput
 
@@ -602,11 +772,17 @@ type UpdateMeJSONRequestBody = MeUpdate
 // PutDeviceListJSONRequestBody defines body for PutDeviceList for application/json ContentType.
 type PutDeviceListJSONRequestBody = SignedStatement
 
+// LinkProviderJSONRequestBody defines body for LinkProvider for application/json ContentType.
+type LinkProviderJSONRequestBody = ProviderLink
+
 // PutIdentityJSONRequestBody defines body for PutIdentity for application/json ContentType.
 type PutIdentityJSONRequestBody = IdentityKey
 
 // RotatePracticeKeyJSONRequestBody defines body for RotatePracticeKey for application/json ContentType.
 type RotatePracticeKeyJSONRequestBody = KeyRotation
+
+// FinishPasskeyAddJSONRequestBody defines body for FinishPasskeyAdd for application/json ContentType.
+type FinishPasskeyAddJSONRequestBody = PasskeyResponse
 
 // PutRecoveryBoxJSONRequestBody defines body for PutRecoveryBox for application/json ContentType.
 type PutRecoveryBoxJSONRequestBody = RecoveryBoxInput
@@ -622,6 +798,24 @@ type PutStreakJSONRequestBody = SignedStatement
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+
+	// (POST /api/auth/magic-links)
+	RequestMagicLink(ctx *echo.Context) error
+
+	// (POST /api/auth/magic-links/redeem)
+	RedeemMagicLink(ctx *echo.Context) error
+
+	// (POST /api/auth/passkeys/sign-in)
+	BeginPasskeySignIn(ctx *echo.Context) error
+
+	// (POST /api/auth/passkeys/sign-up)
+	BeginPasskeySignUp(ctx *echo.Context) error
+
+	// (POST /api/auth/passkeys/{sessionId})
+	FinishPasskey(ctx *echo.Context, sessionId CeremonyId) error
+
+	// (POST /api/auth/providers/{provider})
+	ProviderSignIn(ctx *echo.Context, provider ProviderSignInParamsProvider) error
 
 	// (GET /api/blocks)
 	ListBlocks(ctx *echo.Context, params ListBlocksParams) error
@@ -689,11 +883,20 @@ type ServerInterface interface {
 	// (GET /api/me/export)
 	ExportMe(ctx *echo.Context, params ExportMeParams) error
 
+	// (POST /api/me/identities/{provider})
+	LinkProvider(ctx *echo.Context, provider LinkProviderParamsProvider, params LinkProviderParams) error
+
 	// (PUT /api/me/identity)
 	PutIdentity(ctx *echo.Context, params PutIdentityParams) error
 
 	// (POST /api/me/key-rotations)
 	RotatePracticeKey(ctx *echo.Context, params RotatePracticeKeyParams) error
+
+	// (POST /api/me/passkeys)
+	BeginPasskeyAdd(ctx *echo.Context, params BeginPasskeyAddParams) error
+
+	// (POST /api/me/passkeys/{sessionId})
+	FinishPasskeyAdd(ctx *echo.Context, sessionId CeremonyId, params FinishPasskeyAddParams) error
 
 	// (GET /api/me/recovery-boxes)
 	ListRecoveryBoxes(ctx *echo.Context, params ListRecoveryBoxesParams) error
@@ -732,6 +935,74 @@ type ServerInterface interface {
 // ServerInterfaceWrapper converts echo contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler ServerInterface
+}
+
+// RequestMagicLink converts echo context to params.
+func (w *ServerInterfaceWrapper) RequestMagicLink(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.RequestMagicLink(ctx)
+	return err
+}
+
+// RedeemMagicLink converts echo context to params.
+func (w *ServerInterfaceWrapper) RedeemMagicLink(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.RedeemMagicLink(ctx)
+	return err
+}
+
+// BeginPasskeySignIn converts echo context to params.
+func (w *ServerInterfaceWrapper) BeginPasskeySignIn(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.BeginPasskeySignIn(ctx)
+	return err
+}
+
+// BeginPasskeySignUp converts echo context to params.
+func (w *ServerInterfaceWrapper) BeginPasskeySignUp(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.BeginPasskeySignUp(ctx)
+	return err
+}
+
+// FinishPasskey converts echo context to params.
+func (w *ServerInterfaceWrapper) FinishPasskey(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "sessionId" -------------
+	var sessionId CeremonyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionId", ctx.Param("sessionId"), &sessionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter sessionId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.FinishPasskey(ctx, sessionId)
+	return err
+}
+
+// ProviderSignIn converts echo context to params.
+func (w *ServerInterfaceWrapper) ProviderSignIn(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "provider" -------------
+	var provider ProviderSignInParamsProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", ctx.Param("provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter provider: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ProviderSignIn(ctx, provider)
+	return err
 }
 
 // ListBlocks converts echo context to params.
@@ -1457,6 +1728,44 @@ func (w *ServerInterfaceWrapper) ExportMe(ctx *echo.Context) error {
 	return err
 }
 
+// LinkProvider converts echo context to params.
+func (w *ServerInterfaceWrapper) LinkProvider(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "provider" -------------
+	var provider LinkProviderParamsProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", ctx.Param("provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter provider: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params LinkProviderParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.LinkProvider(ctx, provider, params)
+	return err
+}
+
 // PutIdentity converts echo context to params.
 func (w *ServerInterfaceWrapper) PutIdentity(ctx *echo.Context) error {
 	var err error
@@ -1516,6 +1825,75 @@ func (w *ServerInterfaceWrapper) RotatePracticeKey(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.RotatePracticeKey(ctx, params)
+	return err
+}
+
+// BeginPasskeyAdd converts echo context to params.
+func (w *ServerInterfaceWrapper) BeginPasskeyAdd(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params BeginPasskeyAddParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.BeginPasskeyAdd(ctx, params)
+	return err
+}
+
+// FinishPasskeyAdd converts echo context to params.
+func (w *ServerInterfaceWrapper) FinishPasskeyAdd(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "sessionId" -------------
+	var sessionId CeremonyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionId", ctx.Param("sessionId"), &sessionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter sessionId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FinishPasskeyAddParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.FinishPasskeyAdd(ctx, sessionId, params)
 	return err
 }
 
@@ -1932,6 +2310,15 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/streaks", wrapper.OwnStreaks, options.OperationMiddlewares["ownStreaks"]...)
 	router.DELETE(options.BaseURL+"/api/streaks/:practice", wrapper.DeleteStreak, options.OperationMiddlewares["deleteStreak"]...)
 	router.PUT(options.BaseURL+"/api/streaks/:practice", wrapper.PutStreak, options.OperationMiddlewares["putStreak"]...)
+	router.POST(options.BaseURL+"/api/auth/passkeys/sign-up", wrapper.BeginPasskeySignUp, options.OperationMiddlewares["beginPasskeySignUp"]...)
+	router.POST(options.BaseURL+"/api/auth/passkeys/sign-in", wrapper.BeginPasskeySignIn, options.OperationMiddlewares["beginPasskeySignIn"]...)
+	router.POST(options.BaseURL+"/api/auth/passkeys/:sessionId", wrapper.FinishPasskey, options.OperationMiddlewares["finishPasskey"]...)
+	router.POST(options.BaseURL+"/api/auth/providers/:provider", wrapper.ProviderSignIn, options.OperationMiddlewares["providerSignIn"]...)
+	router.POST(options.BaseURL+"/api/auth/magic-links", wrapper.RequestMagicLink, options.OperationMiddlewares["requestMagicLink"]...)
+	router.POST(options.BaseURL+"/api/auth/magic-links/redeem", wrapper.RedeemMagicLink, options.OperationMiddlewares["redeemMagicLink"]...)
+	router.POST(options.BaseURL+"/api/me/passkeys", wrapper.BeginPasskeyAdd, options.OperationMiddlewares["beginPasskeyAdd"]...)
+	router.POST(options.BaseURL+"/api/me/passkeys/:sessionId", wrapper.FinishPasskeyAdd, options.OperationMiddlewares["finishPasskeyAdd"]...)
+	router.POST(options.BaseURL+"/api/me/identities/:provider", wrapper.LinkProvider, options.OperationMiddlewares["linkProvider"]...)
 
 }
 
@@ -1939,11 +2326,392 @@ type BadRequestJSONResponse Error
 
 type ConflictJSONResponse Error
 
+type ForbiddenJSONResponse Error
+
 type NotFoundJSONResponse Error
 
 type TooManyRequestsJSONResponse Error
 
 type UnauthorizedResponse struct {
+}
+
+type RequestMagicLinkRequestObject struct {
+	Body *RequestMagicLinkJSONRequestBody
+}
+
+type RequestMagicLinkResponseObject interface {
+	VisitRequestMagicLinkResponse(w http.ResponseWriter) error
+}
+
+type RequestMagicLink204Response struct {
+}
+
+func (response RequestMagicLink204Response) VisitRequestMagicLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RequestMagicLink400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RequestMagicLink400JSONResponse) VisitRequestMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestMagicLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RequestMagicLink404JSONResponse) VisitRequestMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestMagicLink429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RequestMagicLink429JSONResponse) VisitRequestMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemMagicLinkRequestObject struct {
+	Body *RedeemMagicLinkJSONRequestBody
+}
+
+type RedeemMagicLinkResponseObject interface {
+	VisitRedeemMagicLinkResponse(w http.ResponseWriter) error
+}
+
+type RedeemMagicLink200JSONResponse SignInResult
+
+func (response RedeemMagicLink200JSONResponse) VisitRedeemMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemMagicLink400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RedeemMagicLink400JSONResponse) VisitRedeemMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemMagicLink403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RedeemMagicLink403JSONResponse) VisitRedeemMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemMagicLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RedeemMagicLink404JSONResponse) VisitRedeemMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemMagicLink429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RedeemMagicLink429JSONResponse) VisitRedeemMagicLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeySignInRequestObject struct {
+}
+
+type BeginPasskeySignInResponseObject interface {
+	VisitBeginPasskeySignInResponse(w http.ResponseWriter) error
+}
+
+type BeginPasskeySignIn200JSONResponse Ceremony
+
+func (response BeginPasskeySignIn200JSONResponse) VisitBeginPasskeySignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeySignIn429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response BeginPasskeySignIn429JSONResponse) VisitBeginPasskeySignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeySignUpRequestObject struct {
+	Body *BeginPasskeySignUpJSONRequestBody
+}
+
+type BeginPasskeySignUpResponseObject interface {
+	VisitBeginPasskeySignUpResponse(w http.ResponseWriter) error
+}
+
+type BeginPasskeySignUp200JSONResponse Ceremony
+
+func (response BeginPasskeySignUp200JSONResponse) VisitBeginPasskeySignUpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeySignUp400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response BeginPasskeySignUp400JSONResponse) VisitBeginPasskeySignUpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeySignUp404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response BeginPasskeySignUp404JSONResponse) VisitBeginPasskeySignUpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeySignUp429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response BeginPasskeySignUp429JSONResponse) VisitBeginPasskeySignUpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FinishPasskeyRequestObject struct {
+	SessionId CeremonyId `json:"sessionId"`
+	Body      *FinishPasskeyJSONRequestBody
+}
+
+type FinishPasskeyResponseObject interface {
+	VisitFinishPasskeyResponse(w http.ResponseWriter) error
+}
+
+type FinishPasskey200JSONResponse SignInResult
+
+func (response FinishPasskey200JSONResponse) VisitFinishPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FinishPasskey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response FinishPasskey400JSONResponse) VisitFinishPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FinishPasskey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response FinishPasskey404JSONResponse) VisitFinishPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FinishPasskey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response FinishPasskey429JSONResponse) VisitFinishPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ProviderSignInRequestObject struct {
+	Provider ProviderSignInParamsProvider `json:"provider"`
+	Body     *ProviderSignInJSONRequestBody
+}
+
+type ProviderSignInResponseObject interface {
+	VisitProviderSignInResponse(w http.ResponseWriter) error
+}
+
+type ProviderSignIn200JSONResponse SignInResult
+
+func (response ProviderSignIn200JSONResponse) VisitProviderSignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ProviderSignIn400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ProviderSignIn400JSONResponse) VisitProviderSignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ProviderSignIn403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ProviderSignIn403JSONResponse) VisitProviderSignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ProviderSignIn404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ProviderSignIn404JSONResponse) VisitProviderSignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ProviderSignIn429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ProviderSignIn429JSONResponse) VisitProviderSignInResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListBlocksRequestObject struct {
@@ -2853,6 +3621,59 @@ func (response ExportMe401Response) VisitExportMeResponse(w http.ResponseWriter)
 	return nil
 }
 
+type LinkProviderRequestObject struct {
+	Provider LinkProviderParamsProvider `json:"provider"`
+	Params   LinkProviderParams
+	Body     *LinkProviderJSONRequestBody
+}
+
+type LinkProviderResponseObject interface {
+	VisitLinkProviderResponse(w http.ResponseWriter) error
+}
+
+type LinkProvider204Response struct {
+}
+
+func (response LinkProvider204Response) VisitLinkProviderResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type LinkProvider400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response LinkProvider400JSONResponse) VisitLinkProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LinkProvider401Response = UnauthorizedResponse
+
+func (response LinkProvider401Response) VisitLinkProviderResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type LinkProvider409JSONResponse struct{ ConflictJSONResponse }
+
+func (response LinkProvider409JSONResponse) VisitLinkProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PutIdentityRequestObject struct {
 	Params PutIdentityParams
 	Body   *PutIdentityJSONRequestBody
@@ -2955,6 +3776,74 @@ func (response RotatePracticeKey409JSONResponse) VisitRotatePracticeKeyResponse(
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type BeginPasskeyAddRequestObject struct {
+	Params BeginPasskeyAddParams
+}
+
+type BeginPasskeyAddResponseObject interface {
+	VisitBeginPasskeyAddResponse(w http.ResponseWriter) error
+}
+
+type BeginPasskeyAdd200JSONResponse Ceremony
+
+func (response BeginPasskeyAdd200JSONResponse) VisitBeginPasskeyAddResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginPasskeyAdd401Response = UnauthorizedResponse
+
+func (response BeginPasskeyAdd401Response) VisitBeginPasskeyAddResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type FinishPasskeyAddRequestObject struct {
+	SessionId CeremonyId `json:"sessionId"`
+	Params    FinishPasskeyAddParams
+	Body      *FinishPasskeyAddJSONRequestBody
+}
+
+type FinishPasskeyAddResponseObject interface {
+	VisitFinishPasskeyAddResponse(w http.ResponseWriter) error
+}
+
+type FinishPasskeyAdd204Response struct {
+}
+
+func (response FinishPasskeyAdd204Response) VisitFinishPasskeyAddResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type FinishPasskeyAdd400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response FinishPasskeyAdd400JSONResponse) VisitFinishPasskeyAddResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FinishPasskeyAdd401Response = UnauthorizedResponse
+
+func (response FinishPasskeyAdd401Response) VisitFinishPasskeyAddResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
 }
 
 type ListRecoveryBoxesRequestObject struct {
@@ -3384,6 +4273,24 @@ func (response GetHealth200TextResponse) VisitGetHealthResponse(w http.ResponseW
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (POST /api/auth/magic-links)
+	RequestMagicLink(ctx context.Context, request RequestMagicLinkRequestObject) (RequestMagicLinkResponseObject, error)
+
+	// (POST /api/auth/magic-links/redeem)
+	RedeemMagicLink(ctx context.Context, request RedeemMagicLinkRequestObject) (RedeemMagicLinkResponseObject, error)
+
+	// (POST /api/auth/passkeys/sign-in)
+	BeginPasskeySignIn(ctx context.Context, request BeginPasskeySignInRequestObject) (BeginPasskeySignInResponseObject, error)
+
+	// (POST /api/auth/passkeys/sign-up)
+	BeginPasskeySignUp(ctx context.Context, request BeginPasskeySignUpRequestObject) (BeginPasskeySignUpResponseObject, error)
+
+	// (POST /api/auth/passkeys/{sessionId})
+	FinishPasskey(ctx context.Context, request FinishPasskeyRequestObject) (FinishPasskeyResponseObject, error)
+
+	// (POST /api/auth/providers/{provider})
+	ProviderSignIn(ctx context.Context, request ProviderSignInRequestObject) (ProviderSignInResponseObject, error)
+
 	// (GET /api/blocks)
 	ListBlocks(ctx context.Context, request ListBlocksRequestObject) (ListBlocksResponseObject, error)
 
@@ -3450,11 +4357,20 @@ type StrictServerInterface interface {
 	// (GET /api/me/export)
 	ExportMe(ctx context.Context, request ExportMeRequestObject) (ExportMeResponseObject, error)
 
+	// (POST /api/me/identities/{provider})
+	LinkProvider(ctx context.Context, request LinkProviderRequestObject) (LinkProviderResponseObject, error)
+
 	// (PUT /api/me/identity)
 	PutIdentity(ctx context.Context, request PutIdentityRequestObject) (PutIdentityResponseObject, error)
 
 	// (POST /api/me/key-rotations)
 	RotatePracticeKey(ctx context.Context, request RotatePracticeKeyRequestObject) (RotatePracticeKeyResponseObject, error)
+
+	// (POST /api/me/passkeys)
+	BeginPasskeyAdd(ctx context.Context, request BeginPasskeyAddRequestObject) (BeginPasskeyAddResponseObject, error)
+
+	// (POST /api/me/passkeys/{sessionId})
+	FinishPasskeyAdd(ctx context.Context, request FinishPasskeyAddRequestObject) (FinishPasskeyAddResponseObject, error)
 
 	// (GET /api/me/recovery-boxes)
 	ListRecoveryBoxes(ctx context.Context, request ListRecoveryBoxesRequestObject) (ListRecoveryBoxesResponseObject, error)
@@ -3500,6 +4416,228 @@ func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareF
 type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
+}
+
+// RequestMagicLink operation middleware
+func (sh *strictHandler) RequestMagicLink(ctx *echo.Context) error {
+	var request RequestMagicLinkRequestObject
+
+	var body RequestMagicLinkJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestMagicLink(ctx.Request().Context(), request.(RequestMagicLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestMagicLink")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(RequestMagicLinkResponseObject); ok {
+		return validResponse.VisitRequestMagicLinkResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// RedeemMagicLink operation middleware
+func (sh *strictHandler) RedeemMagicLink(ctx *echo.Context) error {
+	var request RedeemMagicLinkRequestObject
+
+	var body RedeemMagicLinkJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemMagicLink(ctx.Request().Context(), request.(RedeemMagicLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemMagicLink")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(RedeemMagicLinkResponseObject); ok {
+		return validResponse.VisitRedeemMagicLinkResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// BeginPasskeySignIn operation middleware
+func (sh *strictHandler) BeginPasskeySignIn(ctx *echo.Context) error {
+	var request BeginPasskeySignInRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginPasskeySignIn(ctx.Request().Context(), request.(BeginPasskeySignInRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginPasskeySignIn")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(BeginPasskeySignInResponseObject); ok {
+		return validResponse.VisitBeginPasskeySignInResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// BeginPasskeySignUp operation middleware
+func (sh *strictHandler) BeginPasskeySignUp(ctx *echo.Context) error {
+	var request BeginPasskeySignUpRequestObject
+
+	var body BeginPasskeySignUpJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginPasskeySignUp(ctx.Request().Context(), request.(BeginPasskeySignUpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginPasskeySignUp")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(BeginPasskeySignUpResponseObject); ok {
+		return validResponse.VisitBeginPasskeySignUpResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// FinishPasskey operation middleware
+func (sh *strictHandler) FinishPasskey(ctx *echo.Context, sessionId CeremonyId) error {
+	var request FinishPasskeyRequestObject
+
+	request.SessionId = sessionId
+
+	var body FinishPasskeyJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.FinishPasskey(ctx.Request().Context(), request.(FinishPasskeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FinishPasskey")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(FinishPasskeyResponseObject); ok {
+		return validResponse.VisitFinishPasskeyResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ProviderSignIn operation middleware
+func (sh *strictHandler) ProviderSignIn(ctx *echo.Context, provider ProviderSignInParamsProvider) error {
+	var request ProviderSignInRequestObject
+
+	request.Provider = provider
+
+	var body ProviderSignInJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ProviderSignIn(ctx.Request().Context(), request.(ProviderSignInRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ProviderSignIn")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ProviderSignInResponseObject); ok {
+		return validResponse.VisitProviderSignInResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
 }
 
 // ListBlocks operation middleware
@@ -4156,6 +5294,48 @@ func (sh *strictHandler) ExportMe(ctx *echo.Context, params ExportMeParams) erro
 	return nil
 }
 
+// LinkProvider operation middleware
+func (sh *strictHandler) LinkProvider(ctx *echo.Context, provider LinkProviderParamsProvider, params LinkProviderParams) error {
+	var request LinkProviderRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	var body LinkProviderJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.LinkProvider(ctx.Request().Context(), request.(LinkProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LinkProvider")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(LinkProviderResponseObject); ok {
+		return validResponse.VisitLinkProviderResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // PutIdentity operation middleware
 func (sh *strictHandler) PutIdentity(ctx *echo.Context, params PutIdentityParams) error {
 	var request PutIdentityRequestObject
@@ -4232,6 +5412,73 @@ func (sh *strictHandler) RotatePracticeKey(ctx *echo.Context, params RotatePract
 		return err
 	} else if validResponse, ok := response.(RotatePracticeKeyResponseObject); ok {
 		return validResponse.VisitRotatePracticeKeyResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// BeginPasskeyAdd operation middleware
+func (sh *strictHandler) BeginPasskeyAdd(ctx *echo.Context, params BeginPasskeyAddParams) error {
+	var request BeginPasskeyAddRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginPasskeyAdd(ctx.Request().Context(), request.(BeginPasskeyAddRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginPasskeyAdd")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(BeginPasskeyAddResponseObject); ok {
+		return validResponse.VisitBeginPasskeyAddResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// FinishPasskeyAdd operation middleware
+func (sh *strictHandler) FinishPasskeyAdd(ctx *echo.Context, sessionId CeremonyId, params FinishPasskeyAddParams) error {
+	var request FinishPasskeyAddRequestObject
+
+	request.SessionId = sessionId
+	request.Params = params
+
+	var body FinishPasskeyAddJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.FinishPasskeyAdd(ctx.Request().Context(), request.(FinishPasskeyAddRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FinishPasskeyAdd")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(FinishPasskeyAddResponseObject); ok {
+		return validResponse.VisitFinishPasskeyAddResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -4582,89 +5829,107 @@ func (sh *strictHandler) GetHealth(ctx *echo.Context) error {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

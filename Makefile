@@ -31,8 +31,9 @@ db-new:               ## New migration stamped with the current UTC second: make
 migrate:
 	DATABASE_URL="$(DATABASE_URL)" go run ./cmd/duongondro-api migrate
 
-serve:                ## DEV build on 127.0.0.1:8080, with POST /api/dev/session
-	DATABASE_URL="$(DATABASE_URL)" go run -tags DEV ./cmd/duongondro-api serve
+serve:                ## DEV build on 127.0.0.1:8080, with POST /api/dev/session and magic links on stderr
+	DATABASE_URL="$(DATABASE_URL)" RP_ID=localhost RP_ORIGINS=http://localhost:8080 \
+		go run -tags DEV ./cmd/duongondro-api serve
 
 build:
 	go build -trimpath -o bin/duongondro-api ./cmd/duongondro-api

@@ -58,11 +58,13 @@ func TestReleaseBinaryHasNoDevSession(t *testing.T) {
 	cmd := exec.CommandContext(ctx, filepath.Join(dir, "server"), "serve")
 	cmd.Dir = dir
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, "DATABASE_URL=") || strings.HasPrefix(kv, "LISTEN_ADDR=")
+		return strings.HasPrefix(kv, "DATABASE_URL=") || strings.HasPrefix(kv, "LISTEN_ADDR=") ||
+			strings.HasPrefix(kv, "RP_") || strings.HasSuffix(strings.SplitN(kv, "=", 2)[0], "_CLIENT_IDS")
 	})
 	cmd.Env = append(env,
 		"LISTEN_ADDR=127.0.0.1:"+port,
 		"DATABASE_URL=postgres://nobody@127.0.0.1:1/unused",
+		"RP_ID=localhost", "RP_ORIGINS=http://localhost:"+port,
 	)
 	var logs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &logs, &logs

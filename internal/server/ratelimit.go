@@ -18,6 +18,9 @@ type RateLimit struct {
 // inviteRateLimit covers fetching and redeeming invites, and creating them.
 var inviteRateLimit = RateLimit{Requests: 30, Per: time.Minute}
 
+// authRateLimit covers the sign-in routes, as CodeShare's limits its own.
+var authRateLimit = RateLimit{Requests: 20, Per: time.Minute}
+
 // rateLimitPrefix limits requests whose path starts with prefix, keyed by the
 // client's address (only those Caddy appended to X-Forwarded-For are trusted), as
 // CodeShare limits its auth routes.

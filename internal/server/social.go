@@ -34,6 +34,8 @@ func (s *Server) DeleteMe(ctx context.Context, req api.DeleteMeRequestObject) (a
 	} else if !ok {
 		return api.DeleteMe401Response{}, nil
 	}
+	// Apple requires the authorisation revoked; the refresh tokens go with the purge.
+	s.signIn.RevokeApple(ctx, user.ID)
 	if err := s.gdpr.Purge(ctx, user.ID); err != nil && !errors.Is(err, service.ErrNotFound) {
 		return nil, err
 	}

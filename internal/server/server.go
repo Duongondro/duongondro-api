@@ -31,13 +31,24 @@ type Server struct {
 	recovery *service.Recovery
 	social   *service.Social
 	gdpr     *service.GDPR
+	signIn   *service.SignIn
 	version  buildinfo.Info
+
+	magicLinkBase string
+}
+
+// Config carries what the sign-in methods need from the environment.
+type Config struct {
+	SignIn service.SignInConfig
+	// MagicLinkBase is prefixed to a magic link's token: an App Link and Universal
+	// Link on duongondro.app that opens the app.
+	MagicLinkBase string
 }
 
 var _ api.StrictServerInterface = (*Server)(nil)
 
 // New returns an Echo instance serving the API.
-func New(pool *pgxpool.Pool) *echo.Echo {
+func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, error) {
 	e := echo.NewWithConfig(echo.Config{
 		Logger: slog.Default(),
 		// Caddy, on loopback, appends the client's address to X-Forwarded-For;
@@ -57,24 +68,34 @@ func New(pool *pgxpool.Pool) *echo.Echo {
 	})
 
 	devices := service.NewDevices(pool)
+	authSvc := auth.New(pool)
+	social := service.NewSocial(pool)
+	signIn, err := service.NewSignIn(pool, authSvc, social, cfg.SignIn)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
-		auth:     auth.New(pool),
+		auth:     authSvc,
 		accounts: service.NewAccounts(pool),
 		devices:  devices,
 		wraps:    service.NewWraps(pool, devices),
 		logs:     service.NewLogs(pool),
 		recovery: service.NewRecovery(pool),
-		social:   service.NewSocial(pool),
+		social:   social,
 		gdpr:     service.NewGDPR(pool),
+		signIn:   signIn,
 		version:  buildinfo.Read(),
+
+		magicLinkBase: cfg.MagicLinkBase,
 	}
-	// Invites are the one thing reachable without a session: limit them per address,
-	// so ids cannot be guessed and redemptions cannot be scripted (design: Social).
+	// Invites and sign-in are reachable without a session: limit them per address, so
+	// invite ids cannot be guessed and sign-ups cannot be scripted (design: Social).
 	e.Use(rateLimitPrefix("/api/invites", inviteRateLimit))
+	e.Use(rateLimitPrefix("/api/auth/", authRateLimit))
 	// Sign-in without any method; only in DEV builds.
 	registerDevSession(e, s.auth)
 	api.RegisterHandlers(e, api.NewStrictHandler(s, nil))
-	return e
+	return e, nil
 }
 
 // authenticate resolves the Authorization header to its user. ok is false for a

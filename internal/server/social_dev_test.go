@@ -12,7 +12,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/Duongondro/duongondro-api/internal/dbtest"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 )
 
@@ -41,7 +40,7 @@ func statement(u devUser, typ string, v any) map[string]any {
 // Two people become friends through an invite, one sees the other's streak, and a
 // purge takes the purged person off the other's friend list.
 func TestFriendsOverHTTP(t *testing.T) {
-	e := New(dbtest.Fresh(t, "server_social_tests"))
+	e := newTestServer(t, "server_social_tests")
 	ana, bo := newDevUser(t, e), newDevUser(t, e)
 
 	expires := time.Now().Add(7 * 24 * time.Hour).Truncate(time.Millisecond).UTC()
