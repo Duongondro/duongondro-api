@@ -30,13 +30,13 @@ sealed    = nonce(12) ‖ ChaCha20-Poly1305(seal_key, nonce, padded, aad)   (cip
 |---|---|---|
 | `practice` | string | Catalogue id (`dorje-sempa`) or a custom practice's id |
 | `count` | integer | Repetitions in this sitting (a mala's worth, or 0 for streak-only) |
-| `day` | string | The civil day the session counts for |
+| `day` | string | The civil day the session counts for; written for other readers, derivable from `start`, `tz` and `chosenDay` |
 | `chosenDay` | string, optional | Present when the user picked the day (the after-midnight choice) |
 | `start` | integer | When the sitting started |
 | `exact` | boolean, optional | Whether `start` was recorded (true) or estimated; default false |
 | `tz` | string | IANA time zone the session was logged in |
 | `loggedAt` | integer, optional | When it was logged; default `start` |
-| `updatedAt` | integer | Last change; must equal the outer `updatedAt`, which a client checks, so the server cannot replay an old blob under a newer time |
+| `updatedAt` | integer | Last change; must equal the outer `updatedAt`, which a client checks, so the server cannot replay an old blob under a newer time. The outer time is sent as exactly this millisecond (RFC 3339 with three fractional digits), and both sides round a clock reading to the nearest millisecond, never down: a stored time can sit a hair below its millisecond |
 | `deletedAt` | integer, optional | Present on a tombstone |
 | `practiceName` | string, optional | A custom practice's name, so another phone can show it |
 
