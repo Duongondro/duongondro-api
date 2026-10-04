@@ -729,6 +729,25 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
 
+  /api/client-errors:
+    post:
+      operationId: reportClientError
+      description: |
+        A crash or error the app reports about itself, such as a device-key fallback
+        to the software tier on a broken Keystore. Logged with the user id and nothing
+        else about them; nothing is stored. 30 per user per hour.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ClientErrorReport"}
+      responses:
+        "204": {description: Logged.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+
 components:
   parameters:
     Authorization:
@@ -1151,3 +1170,15 @@ components:
       required: [notifyDone]
       properties:
         notifyDone: {type: boolean}
+    ClientErrorReport:
+      type: object
+      required: [kind, message]
+      properties:
+        kind: {type: string, enum: [crash, error]}
+        message: {type: string, maxLength: 2048}
+        appVersion: {type: string, maxLength: 64}
+        osVersion: {type: string, maxLength: 64}
+        context:
+          type: object
+          additionalProperties: {type: string, maxLength: 256}
+          maxProperties: 20

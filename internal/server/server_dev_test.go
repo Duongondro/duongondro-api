@@ -105,3 +105,24 @@ func TestFirstSync(t *testing.T) {
 		t.Fatalf("after sign out: %d", rec.Code)
 	}
 }
+
+// The association files the apex serves for Universal Links, App Links and passkeys.
+func TestWellKnown(t *testing.T) {
+	e, _, err := New(dbtest.Fresh(t, "server_wellknown_tests"), Config{
+		SignIn:    service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
+		WellKnown: WellKnown{AppleAppIDs: []string{"TEAM.app.duongondro.ios"}, AndroidPackage: "app.duongondro", AndroidFingerprints: []string{"AB:CD"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/.well-known/apple-app-site-association", "/.well-known/assetlinks.json"} {
+		rec := serve(t, e, http.MethodGet, path, "", nil)
+		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
+			t.Fatalf("%s: %d %q", path, rec.Code, rec.Header().Get("Content-Type"))
+		}
+	}
+	rec := serve(t, e, http.MethodPost, "/api/client-errors", "bogus", map[string]any{"kind": "error", "message": "x"})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("client error without a session: %d", rec.Code)
+	}
+}

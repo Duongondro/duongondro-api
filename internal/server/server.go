@@ -36,6 +36,8 @@ type Server struct {
 	nudges   *service.Nudges
 	version  buildinfo.Info
 
+	clientErrors *service.ClientErrors
+
 	magicLinkBase string
 }
 
@@ -47,6 +49,8 @@ type Config struct {
 	MagicLinkBase string
 	// Push delivers nudges (APNs and FCM); nil sends nothing.
 	Push push.Sender
+	// WellKnown is served on the apex for Universal Links, App Links and passkeys.
+	WellKnown WellKnown
 }
 
 var _ api.StrictServerInterface = (*Server)(nil)
@@ -92,12 +96,15 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 		nudges:   service.NewNudges(pool, cfg.Push),
 		version:  buildinfo.Read(),
 
+		clientErrors: service.NewClientErrors(nil, service.ClientErrorLimit, service.ClientErrorWindow),
+
 		magicLinkBase: cfg.MagicLinkBase,
 	}
 	// Invites and sign-in are reachable without a session: limit them per address, so
 	// invite ids cannot be guessed and sign-ups cannot be scripted (design: Social).
 	e.Use(rateLimitPrefix("/api/invites", inviteRateLimit))
 	e.Use(rateLimitPrefix("/api/auth/", authRateLimit))
+	registerWellKnown(e, cfg.WellKnown)
 	// Sign-in without any method; only in DEV builds.
 	registerDevSession(e, s.auth)
 	api.RegisterHandlers(e, api.NewStrictHandler(s, nil))
