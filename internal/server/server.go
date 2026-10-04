@@ -47,6 +47,11 @@ type Server struct {
 
 // New returns the HTTP handler.
 func New(log *slog.Logger, deps Deps) http.Handler {
+	s := newServer(log, deps)
+	return withBasics(s.log, s.routes())
+}
+
+func newServer(log *slog.Logger, deps Deps) *Server {
 	s := &Server{
 		log:      log,
 		store:    deps.Store,
@@ -72,10 +77,10 @@ func New(log *slog.Logger, deps Deps) http.Handler {
 		s.now = time.Now
 	}
 	s.limits = newLimits(s.now)
-	return s.routes()
+	return s
 }
 
-func (s *Server) routes() http.Handler {
+func (s *Server) routes() *http.ServeMux {
 	info := buildinfo.Read()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +96,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/magic-link/verify", s.verifyMagicLink)
 	mux.HandleFunc("GET /api/me", s.authed(s.getMe))
 	mux.HandleFunc("PATCH /api/me", s.authed(s.updateMe))
+	mux.HandleFunc("DELETE /api/me", s.authed(s.deleteMe))
+	mux.HandleFunc("GET /api/me/export", s.authed(s.exportMe))
 	mux.HandleFunc("DELETE /api/me/session", s.authed(s.signOut))
 	registerDev(s, mux)
 
@@ -151,7 +158,7 @@ func (s *Server) routes() http.Handler {
 	// Everything else is the public website: landing page, invite and
 	// add-friend link pages, privacy policy, .well-known files.
 	mux.Handle("/", web.Handler())
-	return withBasics(s.log, mux)
+	return mux
 }
 
 func withBasics(log *slog.Logger, next http.Handler) http.Handler {

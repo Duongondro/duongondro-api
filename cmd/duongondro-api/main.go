@@ -47,6 +47,14 @@ func main() {
 		log.Info("migrated", "versions", applied)
 	}
 	st := store.New(pool)
+	// After a restore, purges recorded since the backup are applied again.
+	if n, err := st.ReapplyPurges(ctx); err != nil {
+		log.Error("reapply purges", "err", err)
+		os.Exit(1)
+	} else if n > 0 {
+		log.Info("reapplied purges", "count", n)
+	}
+
 	srv := &http.Server{
 		Addr: addr,
 		Handler: server.New(log, server.Deps{

@@ -153,7 +153,8 @@ paths:
         account, identities, sessions, devices, device lists, wraps (received
         and sent), recovery boxes, sealed practice logs, streak statements,
         invites, friendships both ways, blocks both ways, reports filed, push
-        tokens and nudges. The caller's place in the invite tree, and as the
+        tokens, nudges both ways, and pending sign-in links and sign-up
+        tokens for the caller's addresses. The caller's place in the invite tree, and as the
         subject of others' reports, is taken by an anonymous placeholder with
         no name (one placeholder per purged account, so the tree keeps its
         shape); acceptances the caller signed are dropped from the tree. A
