@@ -94,6 +94,18 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/me/session", s.authed(s.signOut))
 	registerDev(s, mux)
 
+	// Devices and keys.
+	mux.HandleFunc("PUT /api/me/key-version", s.authed(s.setKeyVersion))
+	mux.HandleFunc("GET /api/devices", s.authed(s.listDevices))
+	mux.HandleFunc("POST /api/devices", s.authed(s.registerDevice))
+	mux.HandleFunc("DELETE /api/devices/{deviceId}", s.authed(s.deleteDevice))
+	mux.HandleFunc("PUT /api/device-list", s.authed(s.publishDeviceList))
+	mux.HandleFunc("GET /api/users/{userId}/device-list", s.authed(s.getDeviceList))
+	mux.HandleFunc("GET /api/wraps", s.authed(s.listWraps))
+	mux.HandleFunc("PUT /api/wraps", s.authed(s.putWrap))
+	mux.HandleFunc("GET /api/recovery-boxes", s.authed(s.listRecoveryBoxes))
+	mux.HandleFunc("PUT /api/recovery-boxes/{kind}", s.authed(s.putRecoveryBox))
+
 	// Unknown /api/ paths answer JSON 404 (405 for a known path with
 	// another method) instead of reaching the website.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

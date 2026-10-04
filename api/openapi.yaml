@@ -373,10 +373,13 @@ paths:
         Stores a wrap. `user`, `keyVersion`, `recipientDevice` and `kind` are
         the AAD fields; the recipient device must belong to `user`. Kinds 1
         and 2 may be put only by `user` itself; kind 3 (share key) by `user`
-        or by a friend with no block either way. Sizes and the ephemeral point
-        are checked; the authenticator is stored as received. The server
-        cannot verify enrolment or self tags and does not try; recipients
-        verify every authenticator before decrypting. Replaces an existing
+        or by a friend with no block either way, always with a `signature`
+        authenticator. Sizes and the ephemeral point are checked. A
+        `signature` authenticator is verified with the sender's pinned
+        identity key over `"duongondro/v1/wrap-sig" ‖ epk ‖ box ‖ aad ‖
+        recipientPk`; enrolment and self tags are HMACs under secrets the
+        server never sees, so they are stored as received and not checked.
+        Recipients verify every authenticator before decrypting. Replaces an existing
         wrap with the same user, device, kind, key version and sender.
         Answers 400 for a wrong size, an ephemeral key that is not a P-256
         point, or an authenticator of the wrong length for its kind.
@@ -394,8 +397,16 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`no_identity`: a `signature` wrap from a sender without a pinned identity key."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "422":
-          description: "`unknown_device`: the recipient device is not registered to `user`."
+          description: |
+            `unknown_device`: the recipient device is not registered to
+            `user`; `bad_signature`: the signature authenticator does not
+            verify.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
