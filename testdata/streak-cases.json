@@ -1,0 +1,172 @@
+[
+  {
+    "name": "home: three consecutive days",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:30:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-06T07:30:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-07T21:00:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-08T12:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 3, "currentTracked": 3, "longest": 3, "longestTracked": 3, "lastDay": "2026-10-07", "deadline": "2026-10-08T22:00:00Z"}
+  },
+  {
+    "name": "home: a missed day breaks the streak",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:30:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-07T07:30:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-07T22:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 1, "currentTracked": 1, "longest": 1, "longestTracked": 1, "lastDay": "2026-10-07", "deadline": "2026-10-08T22:00:00Z"}
+  },
+  {
+    "name": "home: the streak has expired by now",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:30:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-06T07:30:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-08T09:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 0, "currentTracked": 0, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-06", "deadline": "2026-10-07T22:00:00Z"}
+  },
+  {
+    "name": "home: several sessions on one day count once",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-05T12:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-05T21:00:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-05T22:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 1, "currentTracked": 1, "longest": 1, "longestTracked": 1, "lastDay": "2026-10-05", "deadline": "2026-10-06T22:00:00Z"}
+  },
+  {
+    "name": "after midnight: started 23:30, counts for the day it started",
+    "events": [
+      {"kind": "session", "start": "2026-10-03T08:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-04T23:30:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-05T21:00:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-05T22:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 3, "currentTracked": 3, "longest": 3, "longestTracked": 3, "lastDay": "2026-10-05", "deadline": "2026-10-06T22:00:00Z"}
+  },
+  {
+    "name": "after midnight: started 00:10 but the user chose Sunday",
+    "events": [
+      {"kind": "session", "start": "2026-10-03T08:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-05T00:10:00+02:00", "tz": "Europe/Amsterdam", "day": "2026-10-04"}
+    ],
+    "now": "2026-10-05T08:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 2, "currentTracked": 2, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-04", "deadline": "2026-10-05T22:00:00Z"}
+  },
+  {
+    "name": "west: Amsterdam to New York, the later midnight applies",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-06T20:00:00-04:00", "tz": "America/New_York"},
+      {"kind": "session", "start": "2026-10-07T07:00:00-04:00", "tz": "America/New_York"}
+    ],
+    "now": "2026-10-07T12:00:00Z", "nowTz": "America/New_York",
+    "expect": {"current": 3, "currentTracked": 3, "longest": 3, "longestTracked": 3, "lastDay": "2026-10-07", "deadline": "2026-10-09T04:00:00Z"}
+  },
+  {
+    "name": "west: the same date in two cities counts once",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-06T07:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-06T18:00:00-04:00", "tz": "America/New_York"}
+    ],
+    "now": "2026-10-06T23:00:00Z", "nowTz": "America/New_York",
+    "expect": {"current": 2, "currentTracked": 2, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-06", "deadline": "2026-10-08T04:00:00Z"}
+  },
+  {
+    "name": "east: Amsterdam to Tokyo, the lost hours do not cost the streak",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T22:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-07T05:30:00+09:00", "tz": "Asia/Tokyo"}
+    ],
+    "now": "2026-10-07T06:00:00+09:00", "nowTz": "Asia/Tokyo",
+    "expect": {"current": 2, "currentTracked": 2, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-07", "deadline": "2026-10-08T15:00:00Z"}
+  },
+  {
+    "name": "date line east: Los Angeles Monday to Tokyo Wednesday morning",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T20:00:00-07:00", "tz": "America/Los_Angeles"},
+      {"kind": "session", "start": "2026-10-07T10:00:00+09:00", "tz": "Asia/Tokyo"}
+    ],
+    "now": "2026-10-07T12:00:00+09:00", "nowTz": "Asia/Tokyo",
+    "expect": {"current": 2, "currentTracked": 2, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-07", "deadline": "2026-10-08T15:00:00Z"}
+  },
+  {
+    "name": "date line east: after 16:00 Tokyo on Wednesday it is too late",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T20:00:00-07:00", "tz": "America/Los_Angeles"},
+      {"kind": "session", "start": "2026-10-07T17:00:00+09:00", "tz": "Asia/Tokyo"}
+    ],
+    "now": "2026-10-07T18:00:00+09:00", "nowTz": "Asia/Tokyo",
+    "expect": {"current": 1, "currentTracked": 1, "longest": 1, "longestTracked": 1, "lastDay": "2026-10-07", "deadline": "2026-10-08T15:00:00Z"}
+  },
+  {
+    "name": "date line west: Tokyo to Los Angeles, repeated dates add nothing",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T08:00:00+09:00", "tz": "Asia/Tokyo"},
+      {"kind": "session", "start": "2026-10-06T08:00:00+09:00", "tz": "Asia/Tokyo"},
+      {"kind": "session", "start": "2026-10-05T19:00:00-07:00", "tz": "America/Los_Angeles"},
+      {"kind": "session", "start": "2026-10-06T19:00:00-07:00", "tz": "America/Los_Angeles"},
+      {"kind": "session", "start": "2026-10-07T19:00:00-07:00", "tz": "America/Los_Angeles"}
+    ],
+    "now": "2026-10-08T03:00:00Z", "nowTz": "America/Los_Angeles",
+    "expect": {"current": 3, "currentTracked": 3, "longest": 3, "longestTracked": 3, "lastDay": "2026-10-07", "deadline": "2026-10-09T07:00:00Z"}
+  },
+  {
+    "name": "seed: an imported streak continues but is not tracked",
+    "seed": {"days": 38, "lastDay": "2026-10-04", "tz": "Europe/Amsterdam"},
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:00:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-05T12:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 39, "currentTracked": 1, "longest": 39, "longestTracked": 1, "lastDay": "2026-10-05", "deadline": "2026-10-06T22:00:00Z"}
+  },
+  {
+    "name": "seed: an imported streak that already lapsed",
+    "seed": {"days": 38, "lastDay": "2026-10-01", "tz": "Europe/Amsterdam"},
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:00:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-05T12:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 1, "currentTracked": 1, "longest": 38, "longestTracked": 1, "lastDay": "2026-10-05", "deadline": "2026-10-06T22:00:00Z"}
+  },
+  {
+    "name": "bardo day: covers a missed day without adding to the count",
+    "events": [
+      {"kind": "session", "start": "2026-10-05T07:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "bardo", "day": "2026-10-06", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-07T07:00:00+02:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-07T12:00:00+02:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 2, "currentTracked": 2, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-07", "deadline": "2026-10-08T22:00:00Z"}
+  },
+  {
+    "name": "year boundary: 29 December 2025 is still 2025",
+    "events": [
+      {"kind": "session", "start": "2025-12-29T08:00:00+01:00", "tz": "Europe/Warsaw"},
+      {"kind": "session", "start": "2025-12-30T08:00:00+01:00", "tz": "Europe/Warsaw"},
+      {"kind": "session", "start": "2025-12-31T08:00:00+01:00", "tz": "Europe/Warsaw"},
+      {"kind": "session", "start": "2026-01-01T08:00:00+01:00", "tz": "Europe/Warsaw"}
+    ],
+    "now": "2026-01-01T12:00:00+01:00", "nowTz": "Europe/Warsaw",
+    "expect": {"current": 4, "currentTracked": 4, "longest": 4, "longestTracked": 4, "lastDay": "2026-01-01", "deadline": "2026-01-02T23:00:00Z"}
+  },
+  {
+    "name": "DST ends overnight: a 25-hour day still works",
+    "events": [
+      {"kind": "session", "start": "2026-10-24T21:00:00+02:00", "tz": "Europe/Amsterdam"},
+      {"kind": "session", "start": "2026-10-25T21:00:00+01:00", "tz": "Europe/Amsterdam"}
+    ],
+    "now": "2026-10-26T08:00:00+01:00", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 2, "currentTracked": 2, "longest": 2, "longestTracked": 2, "lastDay": "2026-10-25", "deadline": "2026-10-26T23:00:00Z"}
+  },
+  {
+    "name": "nothing logged yet",
+    "events": [],
+    "now": "2026-10-05T12:00:00Z", "nowTz": "Europe/Amsterdam",
+    "expect": {"current": 0, "currentTracked": 0, "longest": 0, "longestTracked": 0, "lastDay": null, "deadline": null}
+  }
+]
