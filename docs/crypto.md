@@ -78,7 +78,7 @@ signature = Ed25519(identity, message)
 | `device-list` | `devices` (array of `{id, pk, tier}`; `tier` is `hardware`, `tee` or `software`), `issuedAt`, `user`, `version` |
 | `streak` | `current`, `day`, `deadline`, `longest`, `practice`, `seq`, `user` (`current` and `longest` count tracked days only) |
 | `invite` | `expiresAt`, `inviteId`, `inviter`, `inviterIdentityPk` |
-| `acceptance` | `invitee`, `inviteeIdentityPk`, `inviteId` |
+| `acceptance` | `inviteId`, `invitee`, `inviteeIdentityPk` |
 
 ## Invites
 
