@@ -514,7 +514,7 @@ paths:
         - name: since
           in: query
           required: false
-          description: "`<generation>:<xid8>` from the previous response; omit for a first sync."
+          description: "`<generation>:<xid8>` from the previous response; omit for a first sync, which returns every row with `full: true`."
           schema: { type: string, pattern: "^[0-9a-f-]{36}:[0-9]+$" }
       responses:
         "200":

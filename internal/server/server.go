@@ -106,6 +106,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/recovery-boxes", s.authed(s.listRecoveryBoxes))
 	mux.HandleFunc("PUT /api/recovery-boxes/{kind}", s.authed(s.putRecoveryBox))
 
+	// Sync.
+	mux.HandleFunc("PUT /api/practice-logs/{logId}", s.authed(s.putPracticeLog))
+	mux.HandleFunc("GET /api/sync", s.authed(s.sync))
+
 	// Unknown /api/ paths answer JSON 404 (405 for a known path with
 	// another method) instead of reaching the website.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
