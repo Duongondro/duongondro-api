@@ -30,7 +30,10 @@ make serve     # DEV build on 127.0.0.1:8080, with POST /api/dev/session for sim
 make gen       # regenerate the server from api/openapi.yaml and queries from db/
 make vectors   # regenerate testdata/vectors.json after a format change
 make release   # build; refuses a dirty tree and any trace of the DEV sign-in
+make deploy    # build for FreeBSD and deploy to the shared server (deploy/deploy.yml)
 ```
+
+Production is `duongondro` on the shared FreeBSD server set up by [shared-infrastructure](https://github.com/moroz/shared-infrastructure): service, database, env file and Caddy for `api.duongondro.app` and the apex's `/.well-known/` files. The service runs `./server migrate` before it starts; the server reads the env vars listed at the top of `cmd/duongondro-api/main.go`.
 
 What exists so far: sessions, the Ed25519 identity key, devices with their key tier, the signed device list, wraps of the practice key and identity seed (signatures verified against an AAD the server rebuilds), practice-key rotation, sealed practice logs with last-write-wins and the `<generation>:<xid8>` sync cursor, recovery boxes; invitations (signed, reusable, rate-limited, auth stored hashed), friendships, blocks, reports, signed public streaks visible to friends only; the GDPR export and purge; and sign-in with passkeys, Sign in with Apple, Google and magic links, all creating accounts only with an invitation (Apple authorisations are revoked on deletion); and push through APNs and FCM: "done today" to friends who opted in, one poke per friend per day, and streak-at-risk two hours before a public streak's signed deadline, all as loc-keys the phones render in their own language. Magic links are mailed through SES in an EU region.
 

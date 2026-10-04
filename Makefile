@@ -4,7 +4,7 @@ DATABASE_URL      ?= postgres://$(USER)@localhost/duongondro
 TEST_DATABASE_URL ?= postgres://$(USER)@localhost/duongondro_test
 export TEST_DATABASE_URL
 
-.PHONY: test vet gen db-setup db-new migrate serve build release vectors
+.PHONY: test vet gen db-setup db-new migrate serve build release deploy vectors
 
 test: vet             ## gofmt, vet (release and DEV), every test (DEV ones too)
 	go test ./...
@@ -51,3 +51,8 @@ release:
 	@! grep -q -a '/api/dev/session' bin/duongondro-api || (echo "the binary contains the DEV sign-in; refusing to release it"; exit 1)
 	@go version -m bin/duongondro-api | grep -q 'vcs.modified=false' || (echo "binary is not stamped as clean"; exit 1)
 	@echo "built $$(git rev-parse --short HEAD)"
+
+# Builds a release for the shared FreeBSD server and deploys it (deploy/deploy.yml);
+# github.com/moroz/shared-infrastructure sets up the service, database and env there.
+deploy:
+	cd deploy && mise exec -- ansible-playbook deploy.yml

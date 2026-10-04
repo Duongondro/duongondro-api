@@ -6,6 +6,7 @@ Go backend for Duongöndro. The design lives in `Duongondro/duongondro-design` (
 - **Specs, vectors and cases change together.** A format change updates `docs/crypto.md`, then `make vectors`, and the diff of `testdata/vectors.json` is reviewed. `testdata/streak-cases.json` expected values are worked out by hand from `docs/streaks.md`, never generated from the implementation.
 - **Release builds refuse a dirty tree** (`make release`); development builds may be dirty and report `<hash>-dirty` from `GET /api/version`.
 - **Logging:** never log tokens, query strings, sealed blobs, public keys or usernames; ERROR only for 5xx and crashes (CodeShare's rule).
+- **Deploying:** `make deploy` (Ansible, `deploy/`) builds from a clean tree and deploys to the shared FreeBSD server; its env vars and Caddy site live in `shared-infrastructure` (`group_vars/all/vars.yml`, project `duongondro`), not here. A new env var goes there too.
 - **No GitHub CI.** Build and test locally (`make test`) on the Mac.
 - **Toolchain:** Go 1.27 (the stdlib `uuid` package), Echo v5 with an oapi-codegen strict server, pgx, sqlc, goose and PostgreSQL 18, CodeShare's stack. Tests need the local Postgres: `make db-setup` once, then `make test`.
 - **Contract first:** edit `api/openapi.yaml`, then `make gen`; never edit `internal/api/api.gen.go` or `internal/db/*.go`. Sign-in routes are in the spec too (the Android client is generated from it; WebAuthn responses travel as JSON objects the service parses); only the DEV-only `POST /api/dev/session` stays outside it.

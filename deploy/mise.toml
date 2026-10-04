@@ -1,0 +1,2 @@
+[tools]
+ansible = { version = "latest", uvx_args = "--with-executables-from ansible-core" }

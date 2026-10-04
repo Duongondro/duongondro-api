@@ -1,6 +1,7 @@
 // Command duongondro-api serves the Duongöndro API.
 //
-//	duongondro-api [serve]   serve on LISTEN_ADDR (default 127.0.0.1:8080, behind Caddy)
+//	duongondro-api [serve]   serve on LISTEN_ADDR, else 127.0.0.1:PORT (the shared
+//	                         server's env file sets PORT), else 127.0.0.1:8080; behind Caddy
 //	duongondro-api migrate   apply the database migrations and exit
 //	duongondro-api reapply-purges
 //	                         after restoring a backup, delete again every account
@@ -133,7 +134,11 @@ func serve(ctx context.Context) error {
 	defer pool.Close()
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
-		addr = "127.0.0.1:8080"
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
+		addr = "127.0.0.1:" + port
 	}
 	cfg, err := loadConfig()
 	if err != nil {
