@@ -22,6 +22,8 @@
 //	                   push to iOS (team: APPLE_TEAM_ID; topic: the bundle id)
 //	FCM_SERVICE_ACCOUNT_FILE
 //	                   push to Android: the Firebase service account's JSON key
+//	MAIL_FROM, MAIL_REGION
+//	                   magic links through SES (region default eu-central-1)
 //	APPLE_APP_IDS      <team>.<bundle id> for apple-app-site-association
 //	ANDROID_PACKAGE, ANDROID_CERT_SHA256
 //	                   for assetlinks.json (fingerprints comma-separated)
@@ -104,7 +106,7 @@ func serve(ctx context.Context) error {
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	cfg, err := config()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
@@ -134,7 +136,7 @@ func list(env string) []string {
 	return out
 }
 
-func config() (server.Config, error) {
+func loadConfig() (server.Config, error) {
 	rpID, origins := os.Getenv("RP_ID"), list("RP_ORIGINS")
 	if rpID == "" || len(origins) == 0 {
 		return server.Config{}, fmt.Errorf("RP_ID and RP_ORIGINS are required")

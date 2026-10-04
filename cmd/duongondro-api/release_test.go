@@ -60,7 +60,8 @@ func TestReleaseBinaryHasNoDevSession(t *testing.T) {
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "DATABASE_URL=") || strings.HasPrefix(kv, "LISTEN_ADDR=") ||
 			strings.HasPrefix(kv, "RP_") || strings.HasPrefix(kv, "APPLE_") || strings.HasPrefix(kv, "APNS_") ||
-			strings.HasPrefix(kv, "GOOGLE_") || strings.HasPrefix(kv, "FCM_")
+			strings.HasPrefix(kv, "GOOGLE_") || strings.HasPrefix(kv, "FCM_") || strings.HasPrefix(kv, "MAIL_") ||
+			strings.HasPrefix(kv, "AWS_")
 	})
 	cmd.Env = append(env,
 		"LISTEN_ADDR=127.0.0.1:"+port,
