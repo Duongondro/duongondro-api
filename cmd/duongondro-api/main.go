@@ -29,7 +29,7 @@
 //	                   push to iOS (team: APPLE_TEAM_ID; topic: the bundle id)
 //	FCM_SERVICE_ACCOUNT_FILE
 //	                   push to Android: the Firebase service account's JSON key
-//	MAIL_FROM, SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+//	MAIL_FROM, SMTP_HOST, SMTP_PORT, SMTP_LOGIN, SMTP_TOKEN
 //	                   magic links by SMTP with STARTTLS (Brevo's relay; port default 587)
 //	APPLE_APP_IDS      <team>.<bundle id> for apple-app-site-association
 //	ANDROID_PACKAGE, ANDROID_CERT_SHA256

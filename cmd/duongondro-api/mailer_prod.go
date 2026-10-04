@@ -12,14 +12,14 @@ import (
 )
 
 // mailer sends magic links over SMTP when MAIL_FROM is set (SMTP_HOST, SMTP_PORT,
-// default 587, SMTP_USERNAME and SMTP_PASSWORD: Brevo's relay in production);
+// default 587, SMTP_LOGIN and SMTP_TOKEN, named as in homeosapiens's vault: Brevo's relay in production);
 // without it the magic-link endpoints answer that they are not configured.
 func mailer() (service.Mailer, error) {
 	from := os.Getenv("MAIL_FROM")
 	if from == "" {
 		return nil, nil
 	}
-	if err := required("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD"); err != nil {
+	if err := required("SMTP_HOST", "SMTP_LOGIN", "SMTP_TOKEN"); err != nil {
 		return nil, err
 	}
 	port := 587
@@ -30,7 +30,7 @@ func mailer() (service.Mailer, error) {
 		}
 		port = n
 	}
-	m, err := mail.NewSMTP(os.Getenv("SMTP_HOST"), port, os.Getenv("SMTP_USERNAME"), os.Getenv("SMTP_PASSWORD"), from)
+	m, err := mail.NewSMTP(os.Getenv("SMTP_HOST"), port, os.Getenv("SMTP_LOGIN"), os.Getenv("SMTP_TOKEN"), from)
 	if err != nil {
 		return nil, err
 	}
