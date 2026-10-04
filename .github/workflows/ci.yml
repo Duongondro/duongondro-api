@@ -11,5 +11,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go mod verify
-      - run: make test
+      - name: Test
+        run: |
+          set -o pipefail
+          make test 2>&1 | tee test.log || {
+            # Raw logs are not readable from every client; surface the tail as one annotation.
+            echo "::error title=make test failed::$(tail -80 test.log | sed -e ':a' -e 'N' -e '$!ba' -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g')"
+            exit 1
+          }
       - run: make build
