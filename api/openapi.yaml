@@ -628,8 +628,9 @@ paths:
           UUIDv7 `userId`, pins `inviteeIdentityPk` from the acceptance after
           verifying the signature with it, and returns a session.
 
-        Each redemption is recorded for the invite tree (inviter, invitee,
-        invite). Redeeming again as an existing friend succeeds without
+        A request carries exactly one of a bearer token and `signup` (400
+        otherwise). Each redemption is recorded for the invite tree
+        (inviter, invitee, invite). Redeeming again as an existing friend succeeds without
         change. Invites are reusable until `expiresAt` or revocation. The
         auth key is compared with the stored SHA-256 in constant time.
         Rate-limited per client IP.
@@ -719,8 +720,10 @@ paths:
     delete:
       tags: [social]
       operationId: unfriend
+      description: Ends the friendship both ways and drops the share-key wraps the two sent each other.
       responses:
         "204": { description: No longer friends, both ways. }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -1261,7 +1264,11 @@ components:
       properties:
         invitee: { $ref: "#/components/schemas/UUID" }
         redeemedAt: { $ref: "#/components/schemas/Millis" }
-        acceptance: { $ref: "#/components/schemas/SignedStatement" }
+        acceptance:
+          description: Null once the invitee's account was purged (the invitee is then an anonymous placeholder).
+          oneOf:
+            - $ref: "#/components/schemas/SignedStatement"
+            - type: "null"
 
     Friend:
       type: object

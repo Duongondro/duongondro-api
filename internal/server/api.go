@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -106,4 +107,9 @@ func (o *optional[T]) UnmarshalJSON(b []byte) error {
 	}
 	o.Value = &v
 	return nil
+}
+
+func sha256Sum(b []byte) []byte {
+	h := sha256.Sum256(b)
+	return h[:]
 }

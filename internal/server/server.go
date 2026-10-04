@@ -110,6 +110,26 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/practice-logs/{logId}", s.authed(s.putPracticeLog))
 	mux.HandleFunc("GET /api/sync", s.authed(s.sync))
 
+	// Social.
+	mux.HandleFunc("GET /api/invites", s.authed(s.listInvites))
+	mux.HandleFunc("POST /api/invites", s.authed(s.createInvite))
+	mux.HandleFunc("GET /api/invites/{inviteId}", s.getInvite)
+	mux.HandleFunc("DELETE /api/invites/{inviteId}", s.authed(s.revokeInvite))
+	mux.HandleFunc("POST /api/invites/{inviteId}/redeem", s.redeemInvite)
+	mux.HandleFunc("GET /api/invites/{inviteId}/redemptions", s.authed(s.listRedemptions))
+	mux.HandleFunc("GET /api/friends", s.authed(s.listFriends))
+	mux.HandleFunc("DELETE /api/friends/{userId}", s.authed(s.unfriend))
+	mux.HandleFunc("GET /api/friends/streaks", s.authed(s.friendStreaks))
+	mux.HandleFunc("PUT /api/streaks", s.authed(s.publishStreak))
+	mux.HandleFunc("DELETE /api/streaks/{practice}", s.authed(s.unpublishStreak))
+	mux.HandleFunc("GET /api/blocks", s.authed(s.listBlocks))
+	mux.HandleFunc("PUT /api/blocks/{userId}", s.authed(s.block))
+	mux.HandleFunc("DELETE /api/blocks/{userId}", s.authed(s.unblock))
+	mux.HandleFunc("POST /api/reports", s.authed(s.report))
+	mux.HandleFunc("PUT /api/push-tokens", s.authed(s.putPushToken))
+	mux.HandleFunc("DELETE /api/push-tokens", s.authed(s.deletePushToken))
+	mux.HandleFunc("POST /api/nudges/poke/{friendId}", s.authed(s.poke))
+
 	// Unknown /api/ paths answer JSON 404 (405 for a known path with
 	// another method) instead of reaching the website.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
