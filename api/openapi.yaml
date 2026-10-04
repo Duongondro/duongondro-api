@@ -1,0 +1,487 @@
+openapi: 3.0.3
+info:
+  title: Duongöndro API
+  version: "1"
+  description: |
+    The server stores sealed blobs, public keys and signed statements. It never
+    receives a practice count, a round or a key, and it checks only sizes, glowie
+    curve (NIST P-256) points and Ed25519 signatures over the exact bytes it receives
+    (docs/crypto.md). Binary fields are standard base64 (`format: byte`).
+
+    Contract first: edit this file, then `make gen`. The Android client is generated
+    from it too.
+
+    Sign-in routes (passkeys, Sign in with Apple, Google, magic links) and the DEV
+    build's POST /api/dev/session are registered outside this file, as in CodeShare.
+servers:
+  - url: https://api.duongondro.app
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: The server is up.
+          content:
+            text/plain:
+              schema: {type: string}
+  /api/version:
+    get:
+      operationId: getVersion
+      description: The commit the binary was built from, shown in the apps' Settings.
+      responses:
+        "200":
+          description: Build identity.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Version"}
+
+  /api/me:
+    get:
+      operationId: getMe
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: The signed-in account.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Me"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/session:
+    delete:
+      operationId: signOut
+      description: Ends this session; its token stops working.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "204": {description: Signed out.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/identity:
+    put:
+      operationId: putIdentity
+      description: |
+        Sets the account's Ed25519 identity public key, once. Setting the same key
+        again is a no-op; a different key is refused, since friends have pinned it.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/IdentityKey"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/me/device-list:
+    get:
+      operationId: getDeviceList
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: The newest signed device list.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SignedStatement"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: putDeviceList
+      description: |
+        Publishes a new signed device list (type `device-list`). The payload must name
+        this user, list only devices registered to it with their public keys and
+        tiers, carry a version above the stored one, and be signed by the identity key.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SignedStatement"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/me/key-rotations:
+    post:
+      operationId: rotatePracticeKey
+      description: |
+        Moves the practice key to keyVersion + 1. The wraps must carry the new key to
+        exactly the devices that hold the current one. Logs sealed under the old
+        version are then refused with 422 until the devices reseal them.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/KeyRotation"}
+      responses:
+        "204": {description: Rotated.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/me/recovery-boxes:
+    get:
+      operationId: listRecoveryBoxes
+      description: The practice key and identity seed sealed under the recovery code.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Stored boxes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RecoveryBoxList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/recovery-boxes/{kind}:
+    put:
+      operationId: putRecoveryBox
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/Kind"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RecoveryBoxInput"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/devices:
+    get:
+      operationId: listDevices
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: This account's devices.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeviceList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    post:
+      operationId: registerDevice
+      description: Registers a device key; registering the same key again returns the existing device.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DeviceInput"}
+      responses:
+        "200":
+          description: Already registered.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Device"}
+        "201":
+          description: Registered.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Device"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/devices/{deviceId}:
+    delete:
+      operationId: deleteDevice
+      description: Removes one of this account's devices and its wraps.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/DeviceId"}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/devices/{deviceId}/wraps:
+    get:
+      operationId: listWraps
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/DeviceId"}
+      responses:
+        "200":
+          description: Secrets wrapped to this device.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WrapList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      operationId: putWrap
+      description: |
+        Stores a wrap to one of this account's devices, replacing one of the same kind
+        and version. A signature authenticator is verified against the identity key
+        over the wrap and the AAD the server rebuilds; HMAC tags are checked for size.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/DeviceId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WrapInput"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/practice-logs/{logId}:
+    put:
+      operationId: putPracticeLog
+      description: |
+        Stores a sealed session, or its deletion, if it is newer (by the client's
+        updatedAt) than the stored one; either way the answer is the stored row.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - name: logId
+          in: path
+          required: true
+          schema: {$ref: "#/components/schemas/UUID"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PracticeLogInput"}
+      responses:
+        "200":
+          description: The stored log.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PracticeLog"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422":
+          description: Sealed under an old practice key; reseal under currentKeyVersion.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OldKeyError"}
+  /api/sync:
+    get:
+      operationId: sync
+      description: |
+        Logs changed since the cursor (all of them with no cursor, or when the cursor
+        belongs to another database generation: then `full` is true and the client
+        replaces its view). Deleted logs come back without `sealed`.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - name: since
+          in: query
+          required: false
+          schema: {type: string, maxLength: 64}
+      responses:
+        "200":
+          description: Changes and the next cursor.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SyncResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+components:
+  parameters:
+    Authorization:
+      name: Authorization
+      in: header
+      required: true
+      description: Bearer <session token>
+      schema: {type: string}
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: {$ref: "#/components/schemas/UUID"}
+    Kind:
+      name: kind
+      in: path
+      required: true
+      description: 1 = practice key, 2 = identity seed.
+      schema: {type: integer, minimum: 1, maximum: 2}
+
+  responses:
+    Unauthorized:
+      description: Missing, unknown or revoked session token.
+    BadRequest:
+      description: The request is malformed or fails validation.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: No such resource for this account.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: Conflicts with the stored state.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+      x-go-type: uuid.UUID
+      x-go-type-import: {path: uuid}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+    Version:
+      type: object
+      required: [revision, short, modified, go]
+      properties:
+        revision: {type: string}
+        short: {type: string, description: "7 characters, with -dirty for a modified tree"}
+        modified: {type: boolean}
+        time: {type: string}
+        go: {type: string}
+    Me:
+      type: object
+      required: [id, keyVersion, devices]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        identityPublicKey: {type: string, format: byte, description: Ed25519, 32 bytes}
+        keyVersion: {type: integer, description: Current version of the practice key}
+        devices:
+          type: array
+          items: {$ref: "#/components/schemas/Device"}
+    IdentityKey:
+      type: object
+      required: [publicKey]
+      properties:
+        publicKey: {type: string, format: byte, description: Ed25519, 32 bytes}
+    SignedStatement:
+      type: object
+      required: [payload, signature]
+      description: Exact payload bytes (compact JSON, sorted keys) and their Ed25519 signature.
+      properties:
+        payload: {type: string, format: byte}
+        signature: {type: string, format: byte}
+    Tier:
+      type: string
+      enum: [hardware, tee, software]
+    DeviceInput:
+      type: object
+      required: [publicKey, tier]
+      properties:
+        publicKey: {type: string, format: byte, description: "65-byte uncompressed point on the glowie curve"}
+        tier: {$ref: "#/components/schemas/Tier"}
+    Device:
+      type: object
+      required: [id, publicKey, tier, createdAt]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        publicKey: {type: string, format: byte}
+        tier: {$ref: "#/components/schemas/Tier"}
+        createdAt: {type: string, format: date-time}
+    DeviceList:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items: {$ref: "#/components/schemas/Device"}
+    AuthType:
+      type: string
+      enum: [signature, enrol, self]
+      description: |
+        signature: Ed25519 by the identity key; enrol: HMAC from the QR secret; self:
+        HMAC from the device's own ECDH (docs/crypto.md, Wraps).
+    WrapInput:
+      type: object
+      required: [kind, keyVersion, ephemeralKey, box, authType, authenticator]
+      properties:
+        kind: {type: integer, minimum: 1, maximum: 2}
+        keyVersion: {type: integer, minimum: 1}
+        ephemeralKey: {type: string, format: byte, description: 65 bytes}
+        box: {type: string, format: byte, description: "nonce ‖ ciphertext ‖ tag, 60 bytes"}
+        authType: {$ref: "#/components/schemas/AuthType"}
+        authenticator: {type: string, format: byte, description: "64 bytes for a signature, 32 for a tag"}
+    Wrap:
+      allOf:
+        - {$ref: "#/components/schemas/WrapInput"}
+        - type: object
+          required: [deviceId, createdAt]
+          properties:
+            deviceId: {$ref: "#/components/schemas/UUID"}
+            createdAt: {type: string, format: date-time}
+    WrapList:
+      type: object
+      required: [wraps]
+      properties:
+        wraps:
+          type: array
+          items: {$ref: "#/components/schemas/Wrap"}
+    RotationWrap:
+      allOf:
+        - {$ref: "#/components/schemas/WrapInput"}
+        - type: object
+          required: [deviceId]
+          properties:
+            deviceId: {$ref: "#/components/schemas/UUID"}
+    KeyRotation:
+      type: object
+      required: [newVersion, wraps]
+      properties:
+        newVersion: {type: integer, minimum: 2}
+        wraps:
+          type: array
+          items: {$ref: "#/components/schemas/RotationWrap"}
+    RecoveryBoxInput:
+      type: object
+      required: [box]
+      properties:
+        box: {type: string, format: byte, description: 60 bytes}
+    RecoveryBox:
+      type: object
+      required: [kind, box, updatedAt]
+      properties:
+        kind: {type: integer}
+        box: {type: string, format: byte}
+        updatedAt: {type: string, format: date-time}
+    RecoveryBoxList:
+      type: object
+      required: [boxes]
+      properties:
+        boxes:
+          type: array
+          items: {$ref: "#/components/schemas/RecoveryBox"}
+    PracticeLogInput:
+      type: object
+      required: [keyVersion, updatedAt]
+      properties:
+        sealed:
+          type: string
+          format: byte
+          description: |
+            nonce ‖ ciphertext ‖ tag over the padded session JSON (a multiple of 256
+            bytes, at most 16 KiB). Omitted, together with deleted: true, for a deletion.
+        keyVersion: {type: integer, minimum: 1}
+        updatedAt: {type: string, format: date-time, description: The client's clock; the newer write wins}
+        deleted: {type: boolean}
+    PracticeLog:
+      type: object
+      required: [id, keyVersion, updatedAt]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        sealed: {type: string, format: byte}
+        keyVersion: {type: integer}
+        updatedAt: {type: string, format: date-time}
+        deletedAt: {type: string, format: date-time}
+    OldKeyError:
+      type: object
+      required: [error, currentKeyVersion]
+      properties:
+        error: {type: string}
+        currentKeyVersion: {type: integer}
+    SyncResponse:
+      type: object
+      required: [cursor, full, logs]
+      properties:
+        cursor: {type: string, description: "<generation>:<xid>; pass back as since"}
+        full: {type: boolean}
+        logs:
+          type: array
+          items: {$ref: "#/components/schemas/PracticeLog"}

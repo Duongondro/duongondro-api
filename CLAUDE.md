@@ -7,5 +7,9 @@ Go backend for Duongöndro. The design lives in `Duongondro/duongondro-design` (
 - **Release builds refuse a dirty tree** (`make release`); development builds may be dirty and report `<hash>-dirty` from `GET /api/version`.
 - **Logging:** never log tokens, query strings, sealed blobs, public keys or usernames; ERROR only for 5xx and crashes (CodeShare's rule).
 - **No GitHub CI.** Build and test locally (`make test`) on the Mac.
-- **Toolchain:** Go 1.24 for now. In sessions where the Go module proxy is unreachable, a local `go.work` (git-ignored) replaces `golang.org/x/crypto` and `golang.org/x/sys` with their GitHub mirrors and sets `GOPROXY=direct GOSUMDB=off`; `go.sum` keeps the canonical hashes, which CI verifies.
+- **Toolchain:** Go 1.27 (the stdlib `uuid` package), Echo v5 with an oapi-codegen strict server, pgx, sqlc, goose and PostgreSQL 18, CodeShare's stack. Tests need the local Postgres: `make db-setup` once, then `make test`.
+- **Contract first:** edit `api/openapi.yaml`, then `make gen`; never edit `internal/api/api.gen.go` or `internal/db/*.go`. Sign-in routes and the DEV-only `POST /api/dev/session` stay outside the spec.
+- **Layering:** `internal/server` authenticates and maps DTOs and errors only; `internal/service` holds the rules (what is checked before a key, wrap, statement or sealed log is stored); `internal/repository` holds transactions; single-table work calls sqlc directly. Service errors: `invalid(...)` → 400, `conflict(...)` → 409, `ErrNotFound` → 404 (another user's rows look missing), `OldKeyError` → 422; only `auth.ErrInvalidToken` becomes a 401.
+- **Migrations:** `make db-new name=<snake_case>`, never a hand-typed version (`db/migrations` tests reject one); never edit or roll back a deployed migration, fix forward.
+- **The DEV sign-in** exists only with `-tags DEV` (`make serve`); `make release` refuses a binary that contains it, as CodeShare's does.
 - Commits end with the attribution trailers the session asks for.

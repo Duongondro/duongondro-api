@@ -14,17 +14,25 @@ The server stores sealed blobs and signed public streaks. It never receives a pr
 | `testdata/streak-cases.json` | Streak conformance cases every implementation must pass |
 | `internal/e2ee` | Reference implementation of the crypto formats |
 | `internal/streak` | Reference implementation of the streak rules |
-| `internal/server` | HTTP routes (health and version so far) |
-| `cmd/duongondro-api` | The server binary |
+| `api/openapi.yaml` | The API contract; the Android client is generated from it too |
+| `db/migrations`, `db/queries` | goose migrations and sqlc queries (PostgreSQL 18) |
+| `internal/server` | Echo strict server: authentication and DTO mapping |
+| `internal/service` | The rules: what is checked before a key, wrap, signed statement or sealed log is stored |
+| `internal/repository` | Transactions: practice-key rotation, the sync read |
+| `cmd/duongondro-api` | The server binary (`serve`, `migrate`) |
 
 ## Commands
 
 ```sh
-make test      # gofmt, vet, tests
-make run       # serve on 127.0.0.1:8080 (LISTEN_ADDR to change)
+make db-setup  # create and migrate the local databases (Postgres 18)
+make test      # gofmt, vet, every test (against duongondro_test)
+make serve     # DEV build on 127.0.0.1:8080, with POST /api/dev/session for simulators
+make gen       # regenerate the server from api/openapi.yaml and queries from db/
 make vectors   # regenerate testdata/vectors.json after a format change
-make release   # build; refuses a dirty tree
+make release   # build; refuses a dirty tree and any trace of the DEV sign-in
 ```
+
+What exists so far (phase 3): sessions, the Ed25519 identity key, devices with their key tier, the signed device list, wraps of the practice key and identity seed (signatures verified against an AAD the server rebuilds), practice-key rotation, sealed practice logs with last-write-wins and the `<generation>:<xid8>` sync cursor, and recovery boxes. Sign-in providers, invites, friends, streaks, push and the GDPR endpoints follow.
 
 `GET /api/version` reports the commit the binary was built from (with `-dirty` for development builds), which the apps show in Settings.
 
