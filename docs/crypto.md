@@ -55,7 +55,7 @@ message   = "duongondro/v1/" ‖ type ‖ "\n" ‖ payload
 signature = Ed25519(identity, message)
 ```
 
-`payload` is compact UTF-8 JSON with keys in lexicographic order, integers only (times are Unix milliseconds), byte strings as unpadded base64url. The server stores and forwards the exact payload bytes; verifiers check the signature over the bytes they received and only then parse, so no client ever re-serialises JSON to verify.
+`payload` is compact UTF-8 JSON with keys in lexicographic order, integers only (times are Unix milliseconds), byte strings as unpadded base64url, and UUIDs as lowercase strings with hyphens (`b67fe412-4108-71f1-b85c-4c0606f45a8a`), the form the server compares against. The server stores and forwards the exact payload bytes; verifiers check the signature over the bytes they received and only then parse, so no client ever re-serialises JSON to verify.
 
 | Type | Payload keys |
 | --- | --- |

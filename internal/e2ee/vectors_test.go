@@ -62,6 +62,13 @@ type Vectors struct {
 
 func uuidHex(u UUID) string { return hex.EncodeToString(u[:]) }
 
+// uuidText is a UUID as statements carry it: lowercase with hyphens, the form the
+// server compares against (uuid.UUID.String()).
+func uuidText(u UUID) string {
+	h := uuidHex(u)
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}
+
 func build(t *testing.T) Vectors {
 	practiceKey := fixed("practice key", 32)
 	user := uuidOf("user")
@@ -148,11 +155,11 @@ func build(t *testing.T) Vectors {
 		v   any
 	}{
 		{TypeDeviceList, DeviceList{
-			Devices:  []Device{{ID: uuidHex(device), PK: recipient.PublicKey().Bytes(), Tier: "hardware"}},
-			IssuedAt: 1791176400000, User: uuidHex(user), Version: 1,
+			Devices:  []Device{{ID: uuidText(device), PK: recipient.PublicKey().Bytes(), Tier: "hardware"}},
+			IssuedAt: 1791176400000, User: uuidText(user), Version: 1,
 		}},
-		{TypeStreak, Streak{Current: 42, Day: "2026-10-05", Deadline: 1791324000000, Longest: 61, Practice: "dorje-sempa", Seq: 7, User: uuidHex(user)}},
-		{TypeInvite, Invite{ExpiresAt: 1791781200000, InviteID: "7K2MQ9XA", Inviter: uuidHex(user), InviterIdentityPk: Bytes(identity.Public().(ed25519.PublicKey))}},
+		{TypeStreak, Streak{Current: 42, Day: "2026-10-05", Deadline: 1791324000000, Longest: 61, Practice: "dorje-sempa", Seq: 7, User: uuidText(user)}},
+		{TypeInvite, Invite{ExpiresAt: 1791781200000, InviteID: "7K2MQ9XA", Inviter: uuidText(user), InviterIdentityPk: Bytes(identity.Public().(ed25519.PublicKey))}},
 	}
 	for _, s := range statements {
 		payload, err := Marshal(s.v)
