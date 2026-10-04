@@ -6,7 +6,6 @@ package store
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,13 +60,4 @@ func notFound(err error) error {
 		return ErrNotFound
 	}
 	return err
-}
-
-// millis converts a nullable timestamp for the API.
-func millis(t *time.Time) *int64 {
-	if t == nil {
-		return nil
-	}
-	v := t.UnixMilli()
-	return &v
 }

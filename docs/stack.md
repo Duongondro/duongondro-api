@@ -22,3 +22,7 @@ Kept from CodeShare: pgx/v5, bearer tokens stored as SHA-256, the `<generation>:
 - **APNs and FCM delivery**: `push.Sender` only logs; the payload builders are final.
 - **Avatar blobs**: `users.avatar_ref` is a reference the phone sets; the upload route is not built.
 - **Streak-at-risk pushes** from `streak_statements.deadline`: needs a scheduler.
+
+## Dependencies
+
+Only `github.com/jackc/pgx/v5` (v5.8.0, the newest that builds with Go 1.24) and `golang.org/x/crypto`. The `gopkg.in/yaml.v3`, `gopkg.in/check.v1` and `stretchr/testify` lines in `go.sum` come from pgx's own test dependencies, which `go mod tidy` records; nothing here imports them.
