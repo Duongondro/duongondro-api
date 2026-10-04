@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy policy (draft) | Duongöndro</title>
+<meta name="description" content="Draft privacy policy for Duongöndro. Not yet in force.">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+
+<link rel="stylesheet" href="/site.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div class="wrap">
+<header class="top"><a class="brand" href="/"><svg class="mark" viewBox="0 0 36 36" aria-hidden="true" focusable="false"><g fill="none" stroke="#D4A72C" stroke-width="2" stroke-linecap="round"><path d="M18 6v24"/><path d="M18 13C12 12 10 9 11.5 6M18 13c6-1 8-4 6.500-7M18 23c-6 1-8 4-6.500 7M18 23c6 1 8 4 6.500 7"/><circle cx="18" cy="18" r="3" fill="#D4A72C"/></g></svg><span>Duongöndro</span></a></header>
+<main>
+<section class="hero">
+<p><span class="tag">Draft — not yet in force</span></p>
+<h1>Privacy policy</h1>
+<p class="lede">This draft says what Duongöndro stores, where, and why. It has not been reviewed by a lawyer and does not apply until it is published without this banner.</p>
+<p class="note">Controller: [CONTROLLER NAME AND ADDRESS]. Contact: [CONTACT EMAIL].</p>
+</section>
+
+<section aria-labelledby="sealed">
+<h2 id="sealed">What is end-to-end encrypted</h2>
+<p>These are sealed on your device before they are uploaded. The server stores them and cannot read them:</p>
+<ul class="plain">
+<li>practice sessions, including the day, the duration and your notes</li>
+<li>counts, rounds and totals</li>
+<li>targets</li>
+<li>imported streak seeds</li>
+</ul>
+<p>The keys that open them stay on your devices. The server never receives a plaintext count or a key, and signing in does not give it one.</p>
+</section>
+
+<section aria-labelledby="plain">
+<h2 id="plain">What the server stores in plain form</h2>
+<ul class="plain">
+<li>your account, and the Apple or Google sign-in linked to it</li>
+<li>your display name and avatar</li>
+<li>your friendships</li>
+<li>the invite tree: who invited whom</li>
+<li>your streaks, only for practices where you chose to publish them, with a signature</li>
+<li>the public keys of your devices</li>
+<li>push notification tokens</li>
+<li>when you upload, and how large each sealed blob is</li>
+</ul>
+<p>The last item is a real limit. Upload times and sizes can suggest when you practise, even for a private streak.</p>
+<p>Cover photos for practices never leave your phone.</p>
+</section>
+
+<section aria-labelledby="belief">
+<h2 id="belief">Religious belief and consent</h2>
+<p>Being a member of a Buddhist practice app says something about your religious belief. Under Article 9 of the GDPR that is special-category data. We ask for your explicit consent before you create an account. You can withdraw it at any time by deleting your account, which takes effect immediately.</p>
+<p>There is no member directory. Only friends you have accepted can see your name.</p>
+</section>
+
+<section aria-labelledby="hosting">
+<h2 id="hosting">Hosting, analytics and third parties</h2>
+<ul class="plain">
+<li>The server is hosted in the EU. [HOSTING PROVIDER AND REGION, TO CONFIRM]</li>
+<li>No analytics, no advertising, no trackers, no crash-reporting service.</li>
+<li>This website uses no third-party fonts or scripts and makes no requests to other sites. Invite codes in link fragments are read in your browser and are not sent to us.</li>
+<li>Push notifications go through Apple or Google, which is how push works on those platforms. The text of a notification is built on your device.</li>
+</ul>
+</section>
+
+<section aria-labelledby="rights">
+<h2 id="rights">Your rights: export and deletion</h2>
+<p>Both are done inside the app, with no email needed.</p>
+<ul class="plain">
+<li><b>Access and portability (Articles 15 and 20):</b> Settings › Your data › Export gives you a ZIP of machine-readable JSON, with your sessions decrypted on your phone.</li>
+<li><b>Erasure (Article 17):</b> Settings › Your data › Delete everything removes your account and everything linked to it from the server in one step, and then from your phone. The invite tree keeps an anonymous placeholder with no name, so that other people's &ldquo;invited by&rdquo; stays consistent.</li>
+</ul>
+<p>You can also contact us at [CONTACT EMAIL], and you can complain to your data protection authority.</p>
+</section>
+
+<section aria-labelledby="retention">
+<h2 id="retention">Backups and logs</h2>
+<p>Encrypted database backups are kept for 30 days [TO CONFIRM]. A deleted account disappears from backups as they expire, and a restore re-applies deletions. Server logs never contain your content and are kept for at most the same period.</p>
+</section>
+
+<section aria-labelledby="changes">
+<h2 id="changes">Changes</h2>
+<p>This draft will change before it comes into force. The history is public in the <a href="https://github.com/Duongondro/duongondro-api">source repository</a>.</p>
+</section>
+</main>
+<footer>
+<ul>
+<li><a href="/privacy/">Privacy</a></li>
+<li><a href="https://github.com/Duongondro/duongondro-ios">Source: iOS app</a></li>
+<li><a href="https://github.com/Duongondro/duongondro-api">Source: server</a></li>
+<li>Contact: [CONTACT EMAIL]</li>
+</ul>
+<p>Not affiliated with any organisation. This website is licensed under AGPL-3.0.</p>
+</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.app.duongondro.ios"],
+        "components": [
+          { "/": "/i/*" },
+          { "/": "/f/*" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID.app.duongondro.ios"]
+  }
+}
