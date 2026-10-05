@@ -190,6 +190,16 @@ func (s *Social) SetDisplayName(ctx context.Context, userID uuid.UUID, name stri
 	return s.q.SetDisplayName(ctx, db.SetDisplayNameParams{ID: userID, DisplayName: name})
 }
 
+// Genders a person may give; nil clears it (design: Localisation › Grammatical gender).
+var genders = map[string]bool{"male": true, "female": true, "nonbinary": true}
+
+func (s *Social) SetGender(ctx context.Context, userID uuid.UUID, gender *string) error {
+	if gender != nil && !genders[*gender] {
+		return invalid("gender must be male, female or nonbinary")
+	}
+	return s.q.SetGender(ctx, db.SetGenderParams{ID: userID, Gender: gender})
+}
+
 func (s *Social) Friends(ctx context.Context, userID uuid.UUID) ([]db.ListFriendsRow, error) {
 	return s.q.ListFriends(ctx, userID)
 }

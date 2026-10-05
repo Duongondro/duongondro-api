@@ -26,7 +26,7 @@ func (s *Server) GetMe(ctx context.Context, req api.GetMeRequestObject) (api.Get
 	if err != nil {
 		return nil, err
 	}
-	me := api.GetMe200JSONResponse{Id: user.ID, KeyVersion: int(user.KeyVersion), DisplayName: user.DisplayName, Devices: deviceDTOs(devices)}
+	me := api.GetMe200JSONResponse{Id: user.ID, KeyVersion: int(user.KeyVersion), DisplayName: user.DisplayName, Gender: genderDTO(user.Gender), Devices: deviceDTOs(devices)}
 	if user.IdentityPublicKey != nil {
 		me.IdentityPublicKey = &user.IdentityPublicKey
 	}

@@ -72,6 +72,22 @@ paths:
       responses:
         "204": {description: Deleted.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/gender:
+    put:
+      operationId: setGender
+      description: |
+        Sets or clears the optional grammatical gender friends' phones use for
+        conjugations; without one, they use the neutral forms.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GenderUpdate"}
+      responses:
+        "204": {description: Updated.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
   /api/me/export:
     get:
       operationId: exportMe
@@ -872,6 +888,7 @@ components:
         identityPublicKey: {type: string, format: byte, description: Ed25519, 32 bytes}
         keyVersion: {type: integer, description: Current version of the practice key}
         displayName: {type: string}
+        gender: {$ref: "#/components/schemas/Gender"}
         devices:
           type: array
           items: {$ref: "#/components/schemas/Device"}
@@ -1020,6 +1037,16 @@ components:
       required: [displayName]
       properties:
         displayName: {type: string, maxLength: 64}
+    Gender:
+      type: string
+      enum: [male, female, nonbinary]
+      description: |
+        Grammatical gender for conjugations in the Slavic languages, optional.
+        Absent when not given; nonbinary, like absent, gets the neutral forms.
+    GenderUpdate:
+      type: object
+      properties:
+        gender: {$ref: "#/components/schemas/Gender"}
     InviteInput:
       type: object
       required: [id, auth, expiresAt, payload, signature, mac]
@@ -1071,6 +1098,7 @@ components:
       properties:
         userId: {$ref: "#/components/schemas/UUID"}
         displayName: {type: string}
+        gender: {$ref: "#/components/schemas/Gender"}
         notifyDone: {type: boolean, description: This account hears when the friend practises}
         identityPublicKey: {type: string, format: byte}
         since: {type: string, format: date-time}

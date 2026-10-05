@@ -41,7 +41,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users DEFAULT VALUES RETURNING id, identity_public_key, key_version, created_at, display_name
+INSERT INTO users DEFAULT VALUES RETURNING id, identity_public_key, key_version, created_at, display_name, gender
 `
 
 func (q *Queries) CreateUser(ctx context.Context) (User, error) {
@@ -53,6 +53,7 @@ func (q *Queries) CreateUser(ctx context.Context) (User, error) {
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.DisplayName,
+		&i.Gender,
 	)
 	return i, err
 }
@@ -115,7 +116,7 @@ func (q *Queries) GetSession(ctx context.Context, tokenHash []byte) (Session, er
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT users.id, users.identity_public_key, users.key_version, users.created_at, users.display_name FROM sessions JOIN users ON users.id = sessions.user_id
+SELECT users.id, users.identity_public_key, users.key_version, users.created_at, users.display_name, users.gender FROM sessions JOIN users ON users.id = sessions.user_id
 WHERE sessions.token_hash = $1
 `
 
@@ -128,12 +129,13 @@ func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (User, e
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.DisplayName,
+		&i.Gender,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, identity_public_key, key_version, created_at, display_name FROM users WHERE id = $1
+SELECT id, identity_public_key, key_version, created_at, display_name, gender FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -145,6 +147,7 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.DisplayName,
+		&i.Gender,
 	)
 	return i, err
 }

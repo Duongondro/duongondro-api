@@ -1,6 +1,9 @@
 -- name: SetDisplayName :exec
 UPDATE users SET display_name = $2 WHERE id = $1;
 
+-- name: SetGender :exec
+UPDATE users SET gender = sqlc.narg(gender) WHERE id = sqlc.arg(id);
+
 -- name: CreateInviteNode :exec
 -- Every account gets a node; parent_id is the inviter's node (NULL for the first
 -- members and DEV accounts).
@@ -32,7 +35,7 @@ ON CONFLICT DO NOTHING;
 DELETE FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1);
 
 -- name: ListFriends :many
-SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at, friendships.notify_done
+SELECT users.id, users.display_name, users.gender, users.identity_public_key, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id;

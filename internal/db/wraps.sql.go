@@ -45,7 +45,7 @@ func (q *Queries) ListWraps(ctx context.Context, deviceID uuid.UUID) ([]KeyWrap,
 }
 
 const lockUser = `-- name: LockUser :one
-SELECT id, identity_public_key, key_version, created_at, display_name FROM users WHERE id = $1 FOR UPDATE
+SELECT id, identity_public_key, key_version, created_at, display_name, gender FROM users WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -57,6 +57,7 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.DisplayName,
+		&i.Gender,
 	)
 	return i, err
 }

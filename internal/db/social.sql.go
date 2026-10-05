@@ -261,7 +261,7 @@ func (q *Queries) ListBlocks(ctx context.Context, blockerID uuid.UUID) ([]Block,
 }
 
 const listFriends = `-- name: ListFriends :many
-SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at, friendships.notify_done
+SELECT users.id, users.display_name, users.gender, users.identity_public_key, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id
@@ -270,6 +270,7 @@ ORDER BY friendships.created_at, users.id
 type ListFriendsRow struct {
 	ID                uuid.UUID `json:"id"`
 	DisplayName       string    `json:"displayName"`
+	Gender            *string   `json:"gender"`
 	IdentityPublicKey []byte    `json:"identityPublicKey"`
 	CreatedAt         time.Time `json:"createdAt"`
 	NotifyDone        bool      `json:"notifyDone"`
@@ -287,6 +288,7 @@ func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFrie
 		if err := rows.Scan(
 			&i.ID,
 			&i.DisplayName,
+			&i.Gender,
 			&i.IdentityPublicKey,
 			&i.CreatedAt,
 			&i.NotifyDone,
@@ -452,6 +454,20 @@ type SetDisplayNameParams struct {
 
 func (q *Queries) SetDisplayName(ctx context.Context, arg SetDisplayNameParams) error {
 	_, err := q.db.Exec(ctx, setDisplayName, arg.ID, arg.DisplayName)
+	return err
+}
+
+const setGender = `-- name: SetGender :exec
+UPDATE users SET gender = $1 WHERE id = $2
+`
+
+type SetGenderParams struct {
+	Gender *string   `json:"gender"`
+	ID     uuid.UUID `json:"id"`
+}
+
+func (q *Queries) SetGender(ctx context.Context, arg SetGenderParams) error {
+	_, err := q.db.Exec(ctx, setGender, arg.Gender, arg.ID)
 	return err
 }
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 	"uuid"
 
@@ -22,6 +23,17 @@ const (
 	LocPoke         = "POKE"           // args: name
 	LocStreakAtRisk = "STREAK_AT_RISK" // args: practice, day count
 )
+
+// genderedKey picks the loc-key variant for the sender's grammatical gender, so the
+// phone can say "Anna ukończyła" rather than "ukończył(a)": FRIEND_DONE_FEMALE,
+// FRIEND_DONE_MALE, or the neutral key for nonbinary and unset (design: Localisation
+// › Grammatical gender). Every variant exists in every language's strings.
+func genderedKey(key string, gender *string) string {
+	if gender != nil && (*gender == "male" || *gender == "female") {
+		return key + "_" + strings.ToUpper(*gender)
+	}
+	return key
+}
 
 var platforms = map[string]bool{"apns": true, "apns-sandbox": true, "fcm": true}
 
@@ -161,7 +173,7 @@ func (n *Nudges) DoneToday(ctx context.Context, user db.User, practice string, c
 		return
 	}
 	for _, r := range recipients {
-		n.enqueue(r, push.Message{LocKey: LocFriendDone, LocArgs: []string{user.DisplayName, practice, strconv.Itoa(current)},
+		n.enqueue(r, push.Message{LocKey: genderedKey(LocFriendDone, user.Gender), LocArgs: []string{user.DisplayName, practice, strconv.Itoa(current)},
 			ThreadID: user.ID.String()})
 	}
 }
@@ -184,7 +196,7 @@ func (n *Nudges) Poke(ctx context.Context, user db.User, friendID uuid.UUID) err
 	if rows == 0 {
 		return ErrAlreadyPoked
 	}
-	n.enqueue(friendID, push.Message{LocKey: LocPoke, LocArgs: []string{user.DisplayName}, ThreadID: user.ID.String()})
+	n.enqueue(friendID, push.Message{LocKey: genderedKey(LocPoke, user.Gender), LocArgs: []string{user.DisplayName}, ThreadID: user.ID.String()})
 	return nil
 }
 

@@ -108,6 +108,45 @@ func TestInvites(t *testing.T) {
 	}
 }
 
+func TestGender(t *testing.T) {
+	f := setup(t)
+	s := NewSocial(f.pool)
+	ctx := t.Context()
+	ana, bo := f.member(), f.member()
+	auth := f.invite(s, ana, "GENDER23")
+	p, sg := acceptance(bo, "GENDER23")
+	if _, err := s.Redeem(ctx, bo.User, "GENDER23", auth, p, sg); err != nil {
+		t.Fatal(err)
+	}
+	other := "other"
+	if err := s.SetGender(ctx, ana.ID, &other); !isValidation(err) {
+		t.Fatalf("an unknown gender: %v", err)
+	}
+	friendGender := func() *string {
+		friends, err := s.Friends(ctx, bo.ID)
+		if err != nil || len(friends) != 1 {
+			t.Fatalf("friends: %v %v", friends, err)
+		}
+		return friends[0].Gender
+	}
+	if g := friendGender(); g != nil {
+		t.Fatalf("a gender nobody gave: %q", *g)
+	}
+	female := "female"
+	if err := s.SetGender(ctx, ana.ID, &female); err != nil {
+		t.Fatal(err)
+	}
+	if g := friendGender(); g == nil || *g != "female" {
+		t.Fatalf("friends see %v", g)
+	}
+	if err := s.SetGender(ctx, ana.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if g := friendGender(); g != nil {
+		t.Fatalf("a cleared gender is still %q", *g)
+	}
+}
+
 func TestBlocksAndReports(t *testing.T) {
 	f := setup(t)
 	s := NewSocial(f.pool)
@@ -248,6 +287,10 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		f.t.Fatal(err)
 	}
 	if err := s.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
+		f.t.Fatal(err)
+	}
+	female := "female"
+	if err := s.SetGender(ctx, ana.ID, &female); err != nil {
 		f.t.Fatal(err)
 	}
 	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.

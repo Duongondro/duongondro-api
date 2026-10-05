@@ -27,6 +27,36 @@ func (s *Server) UpdateMe(ctx context.Context, req api.UpdateMeRequestObject) (a
 	return api.UpdateMe204Response{}, nil
 }
 
+func (s *Server) SetGender(ctx context.Context, req api.SetGenderRequestObject) (api.SetGenderResponseObject, error) {
+	user, ok, err := s.authenticate(ctx, req.Params.Authorization)
+	if err != nil {
+		return nil, err
+	} else if !ok {
+		return api.SetGender401Response{}, nil
+	}
+	var gender *string
+	if req.Body.Gender != nil {
+		g := string(*req.Body.Gender)
+		gender = &g
+	}
+	if err := s.social.SetGender(ctx, user.ID, gender); err != nil {
+		if kind, body, ok := clientError(err); ok && kind == http.StatusBadRequest {
+			return api.SetGender400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
+		}
+		return nil, err
+	}
+	return api.SetGender204Response{}, nil
+}
+
+// genderDTO maps the stored gender; nil stays absent.
+func genderDTO(g *string) *api.Gender {
+	if g == nil {
+		return nil
+	}
+	out := api.Gender(*g)
+	return &out
+}
+
 func (s *Server) DeleteMe(ctx context.Context, req api.DeleteMeRequestObject) (api.DeleteMeResponseObject, error) {
 	user, ok, err := s.authenticate(ctx, req.Params.Authorization)
 	if err != nil {
@@ -166,7 +196,7 @@ func (s *Server) ListFriends(ctx context.Context, req api.ListFriendsRequestObje
 	}
 	out := api.ListFriends200JSONResponse{Friends: make([]api.Friend, len(friends))}
 	for i, f := range friends {
-		out.Friends[i] = api.Friend{UserId: f.ID, DisplayName: f.DisplayName, Since: f.CreatedAt, NotifyDone: f.NotifyDone}
+		out.Friends[i] = api.Friend{UserId: f.ID, DisplayName: f.DisplayName, Gender: genderDTO(f.Gender), Since: f.CreatedAt, NotifyDone: f.NotifyDone}
 		if f.IdentityPublicKey != nil {
 			key := f.IdentityPublicKey
 			out.Friends[i].IdentityPublicKey = &key

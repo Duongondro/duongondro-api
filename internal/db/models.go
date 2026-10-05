@@ -182,6 +182,7 @@ type User struct {
 	KeyVersion        int32     `json:"keyVersion"`
 	CreatedAt         time.Time `json:"createdAt"`
 	DisplayName       string    `json:"displayName"`
+	Gender            *string   `json:"gender"`
 }
 
 type WebauthnSession struct {
