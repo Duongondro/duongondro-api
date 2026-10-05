@@ -13,7 +13,6 @@ Conventions: `‖` is concatenation; `u32be(x)` is a 4-byte big-endian integer; 
 | Identity key | Ed25519, 32-byte seed | first device | Signs statements and wraps |
 | Device key | P-256 | each device, hardware where possible | Receives wraps |
 | Share key `S` | 32, random | sharer | Seals progress summaries for one friend |
-| Profile key `K` | 32, random, with a version | first device; a new one on every unfriend or block | Seals the profile for friends |
 | Recovery secret `R` | 16 bytes, random | first device | Shown to the user; word encoding is specified separately |
 
 ## Sealed session
@@ -55,7 +54,7 @@ aad       = uuid(user) ‖ u32be(keyVersion) ‖ uuid(recipientDevice) ‖ u8(ki
 box       = nonce(12) ‖ ChaCha20-Poly1305(wrap_key, nonce, secret, aad)          60 bytes
 ```
 
-`kind`: 1 = practice key, 2 = identity seed, 3 = share key, 4 = profile key (sent to a friend's devices; `keyVersion` is the profile key's version). The server stores `epk` (65 bytes), `box` and an authenticator:
+`kind`: 1 = practice key, 2 = identity seed, 3 = share key. The server stores `epk` (65 bytes), `box` and an authenticator:
 
 | Authenticator | Used when | Value |
 | --- | --- | --- |
@@ -90,27 +89,6 @@ mac   = HMAC(pin, inviterIdentityPk)                                    stored w
 ```
 
 `secret` is the 10 bytes behind the 16 base32 characters of the link fragment. The invitee checks `mac` before redeeming; the server, knowing only `auth`, cannot forge it, even for a reusable invite redeemed many times.
-
-## Profiles
-
-*Specified, not yet implemented* (design: Social › Profiles).
-
-```
-padded  = json ‖ 0x80 ‖ 0x00…   (zero bytes up to the next multiple of 64)
-aad     = uuid(user) ‖ u32be(profileKeyVersion)                     20 bytes
-profile = nonce(12) ‖ ChaCha20-Poly1305(K, nonce, padded, aad)
-```
-
-`json` holds `name` (string, at most 64 code points), `gender` (optional: `male`, `female` or `nonbinary`) and `updatedAt` (Unix milliseconds). The server stores the latest `profile` per user with its version, checks only its size, and serves it to the user and their friends. A friend receives `K` as a wrap of kind 4; the person's own devices keep the friends' keys they received in their private settings blob, sealed under `seal_key`.
-
-An invite carries a snapshot for the screen before accepting:
-
-```
-invite_profile_key = HKDF(secret, salt = "", info = "duongondro/v1/invite-profile")
-invite_profile     = nonce(12) ‖ ChaCha20-Poly1305(invite_profile_key, nonce, padded, aad = ascii(inviteId))
-```
-
-stored with the invite record and opened by the invitee only after the invite's `mac` checks. It is never used once the two are friends.
 
 ## Recovery
 
