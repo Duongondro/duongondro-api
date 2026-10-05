@@ -31,7 +31,7 @@ sealed    = nonce(12) ‖ ChaCha20-Poly1305(seal_key, nonce, padded, aad)   (cip
 | `practice` | string | Catalogue id (`dorje-sempa`) or a custom practice's id |
 | `count` | integer | Repetitions in this sitting (a mala's worth, or 0 for streak-only) |
 | `day` | string | The civil day the session counts for; written for other readers, derivable from `start`, `tz` and `chosenDay` |
-| `chosenDay` | string, optional | Present when the session counts for another day than its start's: the night rule (logged before 02:00 counts for the previous day) or the after-midnight sheet |
+| `chosenDay` | string, optional | Present when the session counts for another day than its start's: the night rule (logged before 02:00, or within 40 minutes of a session that counted so, counts for the previous day) or the after-midnight sheet |
 | `start` | integer | When the sitting started |
 | `exact` | boolean, optional | Whether `start` was recorded (true) or estimated; default false |
 | `tz` | string | IANA time zone the session was logged in |
