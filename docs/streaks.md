@@ -7,7 +7,7 @@ The normative description of how Duongöndro counts streaks. `internal/streak` i
 For one practice (or, for the headline streak on Today, all practices merged):
 
 - **Events**, each with a `kind`:
-  - `session`: a logged practice, with `start` (an instant), `tz` (the IANA time zone the phone was in at the start) and optionally `day` (`YYYY-MM-DD`), the user's explicit choice in the after-midnight sheet.
+  - `session`: a logged practice, with `start` (an instant), `tz` (the IANA time zone the phone was in at the start) and optionally `day` (`YYYY-MM-DD`), set by the phone when the session counts for another day than its start's: the night rule (a session logged before 02:00 counts for the previous day) or the person's answer in the after-midnight sheet (design: Social › Which day a session counts for).
   - `bardo`: a freeze covering one missed day, with `day` and `tz`; it has no start.
 - **Seed** (optional): an imported streak `{days, lastDay, tz}`.
 - **Now** and **nowTz**: the moment of evaluation and the phone's current time zone.
