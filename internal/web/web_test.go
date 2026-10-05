@@ -1,10 +1,14 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+
+	webfs "github.com/Duongondro/duongondro-api/web"
 )
 
 func get(t *testing.T, method, target string) *httptest.ResponseRecorder {
@@ -40,9 +44,6 @@ func TestRoutes(t *testing.T) {
 		{"/f/7K2MQ9XA", "Add a friend", "no-store"},
 		{"/m", "Open this link on your phone", "no-store"},
 		{"/m/", "Open this link on your phone", "no-store"},
-		{"/magic.js", "replaceState", "public, max-age=604800"},
-		{"/site.css", "--ground", "public, max-age=604800"},
-		{"/invite.js", "location.hash", "public, max-age=604800"},
 		{"/favicon.svg", "<svg", "public, max-age=604800"},
 		{"/robots.txt", "Disallow: /i/", "public, max-age=604800"},
 		{"/fonts/ibm-plex-sans-regular-latin1.woff2", "", "public, max-age=31536000, immutable"},
@@ -62,6 +63,62 @@ func TestRoutes(t *testing.T) {
 			t.Errorf("%s: Cache-Control = %q, want %q", tc.path, got, tc.cache)
 		}
 		checkSecurityHeaders(t, rec)
+	}
+}
+
+// The pages' scripts and stylesheet are Astro's hashed files under /_assets/:
+// each one a page links to is served, cached for a year, and has the content
+// it should.
+func TestAssets(t *testing.T) {
+	ref := regexp.MustCompile(`(?:src|href)="(/_assets/[^"]+)"`)
+	seen := map[string]bool{}
+	for _, page := range []string{"/", "/privacy/", "/i/x", "/f/x", "/m"} {
+		for _, m := range ref.FindAllStringSubmatch(get(t, http.MethodGet, page).Body.String(), -1) {
+			seen[m[1]] = true
+		}
+	}
+	var css, magic, invite bool
+	for p := range seen {
+		rec := get(t, http.MethodGet, p)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status %d", p, rec.Code)
+			continue
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+			t.Errorf("%s: Cache-Control = %q", p, got)
+		}
+		checkSecurityHeaders(t, rec)
+		body := rec.Body.String()
+		css = css || strings.HasSuffix(p, ".css") && strings.Contains(body, "--ground")
+		magic = magic || strings.Contains(body, "replaceState")
+		invite = invite || strings.Contains(body, "location.hash") && strings.Contains(body, "clipboard")
+	}
+	if !css || !magic || !invite {
+		t.Errorf("linked assets: stylesheet %v, magic-link script %v, invite script %v (%v)", css, magic, invite, seen)
+	}
+}
+
+// The CSP allows no inline script or style, so the build must have none.
+func TestNoInlineScriptsOrStyles(t *testing.T) {
+	inline := regexp.MustCompile(`<script(?:\s[^>]*)?>`)
+	err := fs.WalkDir(webfs.FS, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
+			return err
+		}
+		b, _ := fs.ReadFile(webfs.FS, p)
+		s := string(b)
+		for _, tag := range inline.FindAllString(s, -1) {
+			if !strings.Contains(tag, " src=") {
+				t.Errorf("%s: inline script %s", p, tag)
+			}
+		}
+		if strings.Contains(s, "<style") || strings.Contains(s, " style=") {
+			t.Errorf("%s: inline style", p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -103,7 +160,7 @@ func TestNotFoundAndMethods(t *testing.T) {
 }
 
 func TestNoExternalOrigins(t *testing.T) {
-	for _, p := range []string{"/", "/privacy/", "/i/x", "/f/x", "/site.css", "/invite.js"} {
+	for _, p := range []string{"/", "/privacy/", "/i/x", "/f/x", "/m"} {
 		body := get(t, http.MethodGet, p).Body.String()
 		for _, bad := range []string{"src=\"http", "href=\"http://", "url(http", "@import", "fonts.googleapis", "style=\""} {
 			if strings.Contains(body, bad) {

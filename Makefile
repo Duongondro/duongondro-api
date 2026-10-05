@@ -4,7 +4,7 @@ DATABASE_URL      ?= postgres://$(USER)@localhost/duongondro
 TEST_DATABASE_URL ?= postgres://$(USER)@localhost/duongondro_test
 export TEST_DATABASE_URL
 
-.PHONY: test vet gen db-setup db-new migrate serve build release deploy vectors
+.PHONY: test vet gen db-setup db-new migrate serve build release deploy vectors web
 
 test: vet             ## gofmt, vet (release and DEV), every test (DEV ones too)
 	go test ./...
@@ -56,3 +56,12 @@ release:
 # github.com/moroz/shared-infrastructure sets up the service, database and env there.
 deploy:
 	cd deploy && mise exec -- ansible-playbook deploy.yml
+
+# The website is built in ../duongondro-landing (Astro, Tailwind, Svelte) and its dist/
+# synced into web/, which is committed as generated output and embedded in the binary.
+# Run after changing the site, then commit web/. Never edit web/ by hand.
+LANDING ?= ../duongondro-landing
+web:                    ## Build ../duongondro-landing and sync its dist/ into web/
+	cd $(LANDING) && npm ci && npm run build
+	rsync -a --delete --exclude README.md --exclude embed.go $(LANDING)/dist/ web/
+	@echo "web/ now holds $(LANDING) at $$(git -C $(LANDING) rev-parse --short HEAD)$$(test -z "$$(git -C $(LANDING) status --porcelain)" || echo -dirty)"

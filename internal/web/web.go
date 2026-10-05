@@ -19,10 +19,10 @@ const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 's
 	"object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 const (
-	cacheNone   = "no-store"
-	cachePage   = "public, max-age=300"
-	cacheAssets = "public, max-age=604800"
-	cacheFonts  = "public, max-age=31536000, immutable"
+	cacheNone      = "no-store"
+	cachePage      = "public, max-age=300"
+	cacheAssets    = "public, max-age=604800"
+	cacheImmutable = "public, max-age=31536000, immutable"
 )
 
 // Handler returns the website handler. It serves GET and HEAD only.
@@ -82,8 +82,10 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func cacheFor(name string) string {
 	switch {
-	case strings.HasPrefix(name, "fonts/"):
-		return cacheFonts
+	// Astro's build output carries a content hash in every name under _assets/,
+	// and the fonts never change under one name.
+	case strings.HasPrefix(name, "_assets/"), strings.HasPrefix(name, "fonts/"):
+		return cacheImmutable
 	case strings.HasSuffix(name, ".html"):
 		return cachePage
 	default:
