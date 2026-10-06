@@ -188,7 +188,7 @@ type Ceremony struct {
 	Options   any
 }
 
-func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, userID *uuid.UUID, g gate) (uuid.UUID, error) {
+func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, userID *uuid.UUID, g gate, profile SignUpProfile) (uuid.UUID, error) {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return uuid.UUID{}, err
@@ -197,7 +197,7 @@ func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, u
 		return uuid.UUID{}, err
 	}
 	return s.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: raw, UserID: userID, InviteID: g.inviteID,
-		AdmissionID: g.admissionID})
+		AdmissionID: g.admissionID, Username: profile.Username, DisplayName: profile.DisplayName, Gender: profile.Gender})
 }
 
 func (s *SignIn) consumeCeremony(ctx context.Context, id uuid.UUID) (db.WebauthnSession, webauthn.SessionData, error) {
@@ -211,20 +211,71 @@ func (s *SignIn) consumeCeremony(ctx context.Context, id uuid.UUID) (db.Webauthn
 	return row, data, json.Unmarshal(row.Data, &data)
 }
 
+// SignUpProfile is the profile a passkey sign-up may carry, each field optional, under
+// PATCH /api/me's rules; it names the passkey and is set on the new account.
+type SignUpProfile struct {
+	Username, DisplayName, Gender *string
+}
+
+// clean validates the profile and returns it normalized.
+func (p SignUpProfile) clean() (SignUpProfile, error) {
+	var out SignUpProfile
+	if p.Username != nil {
+		name, err := cleanUsername(*p.Username)
+		if err != nil {
+			return out, err
+		}
+		out.Username = &name
+	}
+	if p.DisplayName != nil {
+		name, err := cleanDisplayName(*p.DisplayName)
+		if err != nil {
+			return out, err
+		}
+		out.DisplayName = &name
+	}
+	if p.Gender != nil {
+		if err := checkGender(*p.Gender); err != nil {
+			return out, err
+		}
+		out.Gender = p.Gender
+	}
+	return out, nil
+}
+
 // BeginPasskeySignUp starts creating an account with a passkey; the invitation or
-// admission code is checked now and again when the ceremony finishes.
-func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof) (Ceremony, error) {
+// admission code is checked now and again when the ceremony finishes, and so is the
+// username, if the profile has one.
+func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof, profile SignUpProfile) (Ceremony, error) {
+	profile, err := profile.clean()
+	if err != nil {
+		return Ceremony{}, err
+	}
 	g, err := s.checkProof(ctx, proof)
 	if err != nil {
 		return Ceremony{}, err
 	}
+	if profile.Username != nil {
+		if taken, err := s.q.UsernameTaken(ctx, profile.Username); err != nil {
+			return Ceremony{}, err
+		} else if taken {
+			return Ceremony{}, conflict("that username is taken")
+		}
+	}
 	id := uuid.NewV7()
-	options, data, err := s.web.BeginRegistration(&passkeyUser{id: id},
+	u := &passkeyUser{id: id}
+	if profile.Username != nil {
+		u.name = *profile.Username
+	}
+	if profile.DisplayName != nil {
+		u.displayName = *profile.DisplayName
+	}
+	options, data, err := s.web.BeginRegistration(u,
 		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired))
 	if err != nil {
 		return Ceremony{}, err
 	}
-	sid, err := s.saveCeremony(ctx, data, &id, g)
+	sid, err := s.saveCeremony(ctx, data, &id, g, profile)
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 
@@ -253,7 +304,7 @@ func (s *SignIn) BeginPasskeyAdd(ctx context.Context, userID uuid.UUID) (Ceremon
 	if err != nil {
 		return Ceremony{}, err
 	}
-	sid, err := s.saveCeremony(ctx, data, &userID, gate{})
+	sid, err := s.saveCeremony(ctx, data, &userID, gate{}, SignUpProfile{})
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 
@@ -310,6 +361,17 @@ func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession,
 			if _, err := createAccount(ctx, q, g, row.UserID); err != nil {
 				return err
 			}
+			if row.Username != nil || row.DisplayName != nil || row.Gender != nil {
+				p := db.UpdateProfileParams{ID: *row.UserID, SetDisplayName: row.DisplayName != nil,
+					SetUsername: row.Username != nil, Username: row.Username, SetGender: row.Gender != nil, Gender: row.Gender}
+				if row.DisplayName != nil {
+					p.DisplayName = *row.DisplayName
+				}
+				// The username may have been taken since the ceremony began.
+				if err := usernameConflict(q.UpdateProfile(ctx, p)); err != nil {
+					return err
+				}
+			}
 		}
 		return q.CreateCredential(ctx, db.CreateCredentialParams{ID: cred.ID, UserID: *row.UserID, Data: raw})
 	})
@@ -336,7 +398,7 @@ func (s *SignIn) BeginPasskeySignIn(ctx context.Context) (Ceremony, error) {
 	if err != nil {
 		return Ceremony{}, err
 	}
-	sid, err := s.saveCeremony(ctx, data, nil, gate{})
+	sid, err := s.saveCeremony(ctx, data, nil, gate{}, SignUpProfile{})
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 

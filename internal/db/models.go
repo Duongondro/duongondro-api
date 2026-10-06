@@ -206,4 +206,7 @@ type WebauthnSession struct {
 	InviteID    *string    `json:"inviteId"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	AdmissionID *uuid.UUID `json:"admissionId"`
+	Username    *string    `json:"username"`
+	DisplayName *string    `json:"displayName"`
+	Gender      *string    `json:"gender"`
 }

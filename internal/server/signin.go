@@ -56,15 +56,19 @@ func credentialJSON(m map[string]any) json.RawMessage {
 }
 
 func (s *Server) BeginPasskeySignUp(ctx context.Context, req api.BeginPasskeySignUpRequestObject) (api.BeginPasskeySignUpResponseObject, error) {
-	proof := signUpProof(req.Body.Invite, req.Body.AdmissionCode)
+	b := req.Body
+	proof := signUpProof(b.Invite, b.AdmissionCode)
 	if proof == nil {
 		proof = &service.SignUpProof{}
 	}
-	c, err := s.signIn.BeginPasskeySignUp(ctx, *proof)
+	profile := service.SignUpProfile{Username: b.Username, DisplayName: b.DisplayName, Gender: (*string)(b.Gender)}
+	c, err := s.signIn.BeginPasskeySignUp(ctx, *proof, profile)
 	if err != nil {
 		switch kind, body, ok := clientError(err); {
 		case ok && kind == http.StatusBadRequest:
 			return api.BeginPasskeySignUp400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
+		case ok && kind == http.StatusConflict:
+			return api.BeginPasskeySignUp409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
 			return api.BeginPasskeySignUp404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errNoSuchProof))}, nil
 		}
@@ -89,6 +93,8 @@ func (s *Server) FinishPasskey(ctx context.Context, req api.FinishPasskeyRequest
 		switch kind, body, ok := clientError(err); {
 		case ok && kind == http.StatusBadRequest:
 			return api.FinishPasskey400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
+		case ok && kind == http.StatusConflict:
+			return api.FinishPasskey409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
 			return api.FinishPasskey404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errProofGone))}, nil
 		}

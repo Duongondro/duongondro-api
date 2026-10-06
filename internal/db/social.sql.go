@@ -523,3 +523,14 @@ func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) er
 	)
 	return err
 }
+
+const usernameTaken = `-- name: UsernameTaken :one
+SELECT EXISTS (SELECT 1 FROM users WHERE username = $1)
+`
+
+func (q *Queries) UsernameTaken(ctx context.Context, username *string) (bool, error) {
+	row := q.db.QueryRow(ctx, usernameTaken, username)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}

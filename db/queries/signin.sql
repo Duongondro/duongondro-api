@@ -17,7 +17,8 @@ UPDATE credentials SET data = $2, last_used_at = now() WHERE id = $1;
 DELETE FROM webauthn_sessions WHERE created_at <= now() - interval '5 minutes';
 
 -- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id) VALUES ($1, $2, $3, $4) RETURNING id;
+INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id, username, display_name, gender)
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;
 
 -- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'

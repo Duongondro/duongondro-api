@@ -227,19 +227,40 @@ func (s *Social) UpdateProfile(ctx context.Context, userID uuid.UUID, u ProfileU
 		p.DisplayName = name
 	}
 	if u.SetUsername && u.Username != nil {
-		name := strings.ToLower(*u.Username)
-		if !usernamePattern.MatchString(name) {
-			return invalid("username must be 3 to 32 of a-z, 0-9, dot and underscore")
+		name, err := cleanUsername(*u.Username)
+		if err != nil {
+			return err
 		}
 		p.Username = &name
 	}
 	if u.SetGender && u.Gender != nil {
-		if !genders[*u.Gender] {
-			return invalid("gender must be male, female or nonbinary")
+		if err := checkGender(*u.Gender); err != nil {
+			return err
 		}
 		p.Gender = u.Gender
 	}
-	err := s.q.UpdateProfile(ctx, p)
+	return usernameConflict(s.q.UpdateProfile(ctx, p))
+}
+
+// cleanUsername lowercases a username and checks it is 3 to 32 of a-z, 0-9, dot and
+// underscore.
+func cleanUsername(name string) (string, error) {
+	name = strings.ToLower(name)
+	if !usernamePattern.MatchString(name) {
+		return "", invalid("username must be 3 to 32 of a-z, 0-9, dot and underscore")
+	}
+	return name, nil
+}
+
+func checkGender(g string) error {
+	if !genders[g] {
+		return invalid("gender must be male, female or nonbinary")
+	}
+	return nil
+}
+
+// usernameConflict reports a taken username as a conflict.
+func usernameConflict(err error) error {
 	if repository.IsUniqueViolation(err, "users_username_key") {
 		return conflict("that username is taken")
 	}

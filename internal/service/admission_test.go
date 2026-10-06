@@ -54,30 +54,30 @@ func TestAdmissionCodes(t *testing.T) {
 		t.Fatal("the code is not stored as its SHA-256")
 	}
 
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: "ABCD"}); !isValidation(err) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: "ABCD"}, SignUpProfile{}); !isValidation(err) {
 		t.Fatalf("a malformed code: %v", err)
 	}
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: strings.Repeat("Z", AdmissionCodeLength)}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: strings.Repeat("Z", AdmissionCodeLength)}, SignUpProfile{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an unknown code: %v", err)
 	}
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{}); !isValidation(err) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{}, SignUpProfile{}); !isValidation(err) {
 		t.Fatalf("neither invite nor code: %v", err)
 	}
 	inviter := f.member()
 	auth := f.invite(social, inviter, "R00TC0DE")
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "R00TC0DE", Auth: auth}, AdmissionCode: stored}); !isValidation(err) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "R00TC0DE", Auth: auth}, AdmissionCode: stored}, SignUpProfile{}); !isValidation(err) {
 		t.Fatalf("both invite and code: %v", err)
 	}
 
 	// A passkey sign-up with the code makes a root of the invite tree, without friends.
 	phone := newAuthenticator()
-	ceremony, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: stored})
+	ceremony, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: stored}, SignUpProfile{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A second ceremony with the same code may begin, but only one can finish.
 	other := newAuthenticator()
-	second, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: stored})
+	second, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: stored}, SignUpProfile{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestAdmissionCodes(t *testing.T) {
 	if _, err := s.FinishPasskey(ctx, second.SessionID, other.create(t, second.Options)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a spent code made a second account: %v", err)
 	}
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: stored}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: stored}, SignUpProfile{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a spent code began a sign-up: %v", err)
 	}
 	// Signing in with the passkey still works, and is not a sign-up.
@@ -113,7 +113,7 @@ func TestAdmissionCodes(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `UPDATE admission_codes SET expires_at = now() - interval '1 second' WHERE used_at IS NULL`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: expired}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: expired}, SignUpProfile{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an expired code: %v", err)
 	}
 }

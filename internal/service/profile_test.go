@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 
@@ -82,5 +83,58 @@ func TestProfile(t *testing.T) {
 	c, _ = signIn.BeginPasskeyAdd(ctx, plain.ID)
 	if user := c.Options.(*protocol.CredentialCreation).Response.User; user.Name != "Duongöndro" || user.DisplayName != "Duongöndro" {
 		t.Fatalf("passkey names without a profile: %q / %q", user.Name, user.DisplayName)
+	}
+}
+
+// A passkey sign-up may carry the profile: it names the passkey and lands on the new
+// account; a taken username is a conflict when the ceremony begins or finishes.
+func TestPasskeySignUpWithProfile(t *testing.T) {
+	f := setup(t)
+	s, social := f.signIn(nil, nil, nil)
+	ctx := t.Context()
+	taken := f.member()
+	if err := social.UpdateProfile(ctx, taken.ID, ProfileUpdate{SetUsername: true, Username: ptr("taken")}); err != nil {
+		t.Fatal(err)
+	}
+	code, _ := f.admissionCode(time.Hour)
+	proof := SignUpProof{AdmissionCode: code}
+
+	if _, err := s.BeginPasskeySignUp(ctx, proof, SignUpProfile{Username: ptr("TAKEN")}); !isConflict(err) {
+		t.Fatalf("a taken username at begin: %v", err)
+	}
+	if _, err := s.BeginPasskeySignUp(ctx, proof, SignUpProfile{Username: ptr("x")}); !isValidation(err) {
+		t.Fatalf("a malformed username: %v", err)
+	}
+	if _, err := s.BeginPasskeySignUp(ctx, proof, SignUpProfile{Gender: ptr("robot")}); !isValidation(err) {
+		t.Fatalf("an unknown gender: %v", err)
+	}
+
+	// Taken between begin and finish: a conflict, no account, and the code unspent.
+	c, err := s.BeginPasskeySignUp(ctx, proof, SignUpProfile{Username: ptr("Racer")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := social.UpdateProfile(ctx, taken.ID, ProfileUpdate{SetUsername: true, Username: ptr("racer")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options)); !isConflict(err) {
+		t.Fatalf("a username taken during the ceremony: %v", err)
+	}
+
+	c, err = s.BeginPasskeySignUp(ctx, proof, SignUpProfile{Username: ptr("Cy.K"), DisplayName: ptr(" Cy "), Gender: ptr("nonbinary")})
+	if err != nil {
+		t.Fatalf("the code was spent by a failed sign-up: %v", err)
+	}
+	user := c.Options.(*protocol.CredentialCreation).Response.User
+	if user.Name != "cy.k" || user.DisplayName != "Cy" {
+		t.Fatalf("passkey user %q / %q", user.Name, user.DisplayName)
+	}
+	session, err := s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options))
+	if err != nil || !session.Created {
+		t.Fatalf("sign-up with a profile: %v", err)
+	}
+	got, err := f.q.GetUser(ctx, session.UserID)
+	if err != nil || got.Username == nil || *got.Username != "cy.k" || got.DisplayName != "Cy" || got.Gender == nil || *got.Gender != "nonbinary" {
+		t.Fatalf("the new account's profile: %v %v %q %v", err, got.Username, got.DisplayName, got.Gender)
 	}
 }

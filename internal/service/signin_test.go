@@ -145,11 +145,11 @@ func TestPasskeys(t *testing.T) {
 	inviter := f.member()
 	auth := f.invite(social, inviter, "P4SSK3YS")
 
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: random(32)}}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: random(32)}}, SignUpProfile{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("sign-up without the invite's auth: %v", err)
 	}
 	phone := newAuthenticator()
-	ceremony, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: auth}})
+	ceremony, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: auth}}, SignUpProfile{})
 	if err != nil {
 		t.Fatal(err)
 	}

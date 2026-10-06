@@ -1,6 +1,9 @@
 -- name: SetDisplayName :exec
 UPDATE users SET display_name = $2 WHERE id = $1;
 
+-- name: UsernameTaken :one
+SELECT EXISTS (SELECT 1 FROM users WHERE username = $1);
+
 -- name: UpdateProfile :exec
 -- Each field changes only when its set_ flag is true; username and gender may be set
 -- to NULL.

@@ -544,12 +544,14 @@ paths:
       description: |
         Starts creating an account with a passkey; the invitation or admission code is
         checked now and when it finishes. 404: no such live invitation, or the code is
-        wrong, spent or expired.
+        wrong, spent or expired. The optional profile (as PATCH /api/me takes it) is
+        set on the account when it is made and names the passkey; 409: the username is
+        taken, now or by the time the ceremony finishes.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/SignUpProof"}
+            schema: {$ref: "#/components/schemas/PasskeySignUp"}
       responses:
         "200":
           description: Options for the platform authenticator.
@@ -558,6 +560,7 @@ paths:
               schema: {$ref: "#/components/schemas/Ceremony"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/passkeys/sign-in:
     post:
@@ -588,6 +591,7 @@ paths:
               schema: {$ref: "#/components/schemas/SignInResult"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/nonces:
     post:
@@ -1170,12 +1174,19 @@ components:
         A bootstrap admission code, 16 Crockford base32 characters, single use. Read
         leniently: case, spaces and hyphens are ignored, O is read as 0 and I and L as 1.
         The account it makes has no inviter.
-    SignUpProof:
+    PasskeySignUp:
       type: object
-      description: Exactly one of invite and admissionCode.
+      description: Exactly one of invite and admissionCode, and optionally the profile.
       properties:
         invite: {$ref: "#/components/schemas/InviteProof"}
         admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          description: "3 to 32 of a-z, 0-9, dot and underscore; stored lowercased, unique regardless of case"
+        displayName: {type: string, maxLength: 64}
+        gender: {$ref: "#/components/schemas/Gender"}
     Ceremony:
       type: object
       required: [sessionId, options]

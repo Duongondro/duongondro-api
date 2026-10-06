@@ -48,7 +48,7 @@ func (q *Queries) ConsumeNonce(ctx context.Context, nonceHash []byte) (int64, er
 
 const consumeWebauthnSession = `-- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
-RETURNING id, data, user_id, invite_id, created_at, admission_id
+RETURNING id, data, user_id, invite_id, created_at, admission_id, username, display_name, gender
 `
 
 func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (WebauthnSession, error) {
@@ -61,6 +61,9 @@ func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (Web
 		&i.InviteID,
 		&i.CreatedAt,
 		&i.AdmissionID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Gender,
 	)
 	return i, err
 }
@@ -166,7 +169,8 @@ func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, err
 }
 
 const createWebauthnSession = `-- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id) VALUES ($1, $2, $3, $4) RETURNING id
+INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id, username, display_name, gender)
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
 `
 
 type CreateWebauthnSessionParams struct {
@@ -174,6 +178,9 @@ type CreateWebauthnSessionParams struct {
 	UserID      *uuid.UUID `json:"userId"`
 	InviteID    *string    `json:"inviteId"`
 	AdmissionID *uuid.UUID `json:"admissionId"`
+	Username    *string    `json:"username"`
+	DisplayName *string    `json:"displayName"`
+	Gender      *string    `json:"gender"`
 }
 
 func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnSessionParams) (uuid.UUID, error) {
@@ -182,6 +189,9 @@ func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnS
 		arg.UserID,
 		arg.InviteID,
 		arg.AdmissionID,
+		arg.Username,
+		arg.DisplayName,
+		arg.Gender,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
