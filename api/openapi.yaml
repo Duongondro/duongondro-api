@@ -846,7 +846,7 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: No account uses this sign-in; an invitation is needed to create one.
+      description: No account uses this sign-in; an invitation (or admission code) is needed to create one.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}

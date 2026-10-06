@@ -169,8 +169,9 @@ func (s *Social) Redeem(ctx context.Context, user db.User, id string, auth, payl
 	return inviter, err
 }
 
-// CheckInvite is the sign-up gate: an account is created only with a live invite
-// and its auth. Every sign-in method can sign in; none can sign up without this.
+// CheckInvite is the invitation half of the sign-up gate (SignIn.checkProof): an
+// account is created only with a live invite and its auth, or an unused admission
+// code. Every sign-in method can sign in; none can sign up without one of them.
 func (s *Social) CheckInvite(ctx context.Context, id string, auth []byte) (db.Invite, error) {
 	inv, err := s.Invite(ctx, id)
 	if err != nil {
