@@ -14,8 +14,8 @@ import (
 
 const consumeMagicLink = `-- name: ConsumeMagicLink :one
 DELETE FROM magic_links
-WHERE token_hash = $1 AND dead_at IS NULL AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, dead_at
+WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
+RETURNING token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at
 `
 
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
@@ -29,7 +29,7 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 		&i.AdmissionID,
 		&i.CodeHash,
 		&i.WrongCodes,
-		&i.DeadAt,
+		&i.CodeDeadAt,
 	)
 	return i, err
 }
@@ -350,13 +350,13 @@ func (q *Queries) InviterOf(ctx context.Context, id string) (uuid.UUID, error) {
 	return inviter_id, err
 }
 
-const killMagicLinks = `-- name: KillMagicLinks :exec
-UPDATE magic_links SET dead_at = now() WHERE lower(email) = lower($1) AND dead_at IS NULL
+const killMagicLinkCodes = `-- name: KillMagicLinkCodes :exec
+UPDATE magic_links SET code_dead_at = now() WHERE lower(email) = lower($1) AND code_dead_at IS NULL
 `
 
-// A newer link to the address makes the older ones unusable, link and code.
-func (q *Queries) KillMagicLinks(ctx context.Context, lower string) error {
-	_, err := q.db.Exec(ctx, killMagicLinks, lower)
+// A newer mail to the address makes the older codes unusable; their links still work.
+func (q *Queries) KillMagicLinkCodes(ctx context.Context, lower string) error {
+	_, err := q.db.Exec(ctx, killMagicLinkCodes, lower)
 	return err
 }
 
@@ -432,14 +432,14 @@ func (q *Queries) LockEmail(ctx context.Context, email string) error {
 }
 
 const lockLiveMagicLinkForEmail = `-- name: LockLiveMagicLinkForEmail :one
-SELECT token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, dead_at FROM magic_links
-WHERE lower(email) = lower($1) AND dead_at IS NULL AND code_hash IS NOT NULL
+SELECT token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at FROM magic_links
+WHERE lower(email) = lower($1) AND code_dead_at IS NULL AND code_hash IS NOT NULL
     AND created_at > now() - interval '15 minutes'
 ORDER BY created_at DESC LIMIT 1
 FOR UPDATE
 `
 
-// The one live link to an address (a newer one kills the older), for a typed code.
+// The one live code to an address (a newer mail kills the older), for a typed code.
 func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, lower string) (MagicLink, error) {
 	row := q.db.QueryRow(ctx, lockLiveMagicLinkForEmail, lower)
 	var i MagicLink
@@ -451,7 +451,7 @@ func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, lower string) (
 		&i.AdmissionID,
 		&i.CodeHash,
 		&i.WrongCodes,
-		&i.DeadAt,
+		&i.CodeDeadAt,
 	)
 	return i, err
 }
@@ -491,7 +491,7 @@ func (q *Queries) PurgeExpiredWebauthnSessions(ctx context.Context) (int64, erro
 
 const recordWrongMagicLinkCode = `-- name: RecordWrongMagicLinkCode :exec
 UPDATE magic_links SET wrong_codes = wrong_codes + 1,
-    dead_at = CASE WHEN wrong_codes + 1 >= $1::smallint THEN now() ELSE dead_at END
+    code_dead_at = CASE WHEN wrong_codes + 1 >= $1::smallint THEN now() ELSE code_dead_at END
 WHERE token_hash = $2
 `
 
@@ -500,7 +500,7 @@ type RecordWrongMagicLinkCodeParams struct {
 	TokenHash []byte `json:"tokenHash"`
 }
 
-// The fifth wrong code kills the row.
+// The fifth wrong code kills the code; the link still works.
 func (q *Queries) RecordWrongMagicLinkCode(ctx context.Context, arg RecordWrongMagicLinkCodeParams) error {
 	_, err := q.db.Exec(ctx, recordWrongMagicLinkCode, arg.MaxWrong, arg.TokenHash)
 	return err

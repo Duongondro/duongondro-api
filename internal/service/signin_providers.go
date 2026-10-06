@@ -47,12 +47,13 @@ const magicLinksPerWindow = 3
 // per link and three links per address per 15 minutes, out of reach.
 const MagicLinkCodeLength = 8
 
-// maxWrongCodes kills a link row on its fifth wrong code.
+// maxWrongCodes kills a link's code on its fifth wrong guess; the link itself still
+// works, so guessing cannot lock anyone out.
 const maxWrongCodes = 5
 
-// errWrongCode answers a typed code that is wrong, or whose link expired, was used,
-// was replaced by a newer one or took too many wrong codes: all alike, so the answer
-// never says whether the address has a link at all.
+// errWrongCode answers a typed code that is wrong, or whose link expired or was used,
+// or whose code was replaced by a newer mail or took too many wrong guesses: all
+// with the same status and body.
 var errWrongCode = invalid("this code is wrong or has expired; ask for a new sign-in mail")
 
 // linkCodeHash binds a typed code to its row: SHA-256 over the token hash and the
@@ -256,8 +257,8 @@ func normalizeEmail(email string) (string, error) {
 }
 
 // RequestMagicLink mails a single-use sign-in link valid for 15 minutes, with a code
-// that does the same when typed into the app; a newer link to the address makes the
-// older ones unusable. Every
+// that does the same when typed into the app; a newer mail to the address makes the
+// older codes unusable, though not the older links. Every
 // address is treated alike, so the answer and its timing never reveal who has an
 // account: the per-address limit applies to all of them, a link is recorded either
 // way, and the mail goes out in the background, but only to an address with an
@@ -306,7 +307,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 			return err
 		}
 		send = err == nil || g != (gate{})
-		if err := q.KillMagicLinks(ctx, email); err != nil {
+		if err := q.KillMagicLinkCodes(ctx, email); err != nil {
 			return err
 		}
 		sum := sha256.Sum256([]byte(token))
@@ -340,8 +341,9 @@ func (s *SignIn) RedeemMagicLink(ctx context.Context, token string) (Session, er
 }
 
 // RedeemMagicLinkCode signs in with the code from a link's mail, typed with the
-// address it went to, as RedeemMagicLink does with the link. Only the newest live link
-// to the address counts; a wrong code counts against it, and the fifth kills it. The
+// address it went to, as RedeemMagicLink does with the link. Only the newest mail's
+// code counts; a wrong code counts against it, and the fifth kills the code (not the
+// link). The
 // code is read like an admission code (any case, spaces and hyphens ignored, O as 0,
 // I and L as 1).
 func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (Session, error) {

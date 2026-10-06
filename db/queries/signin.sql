@@ -46,27 +46,27 @@ SELECT count(*) FROM magic_links WHERE lower(email) = lower($1) AND created_at >
 -- name: CreateMagicLink :exec
 INSERT INTO magic_links (token_hash, email, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5);
 
--- name: KillMagicLinks :exec
--- A newer link to the address makes the older ones unusable, link and code.
-UPDATE magic_links SET dead_at = now() WHERE lower(email) = lower($1) AND dead_at IS NULL;
+-- name: KillMagicLinkCodes :exec
+-- A newer mail to the address makes the older codes unusable; their links still work.
+UPDATE magic_links SET code_dead_at = now() WHERE lower(email) = lower($1) AND code_dead_at IS NULL;
 
 -- name: ConsumeMagicLink :one
 DELETE FROM magic_links
-WHERE token_hash = $1 AND dead_at IS NULL AND created_at > now() - interval '15 minutes'
+WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
 RETURNING *;
 
 -- name: LockLiveMagicLinkForEmail :one
--- The one live link to an address (a newer one kills the older), for a typed code.
+-- The one live code to an address (a newer mail kills the older), for a typed code.
 SELECT * FROM magic_links
-WHERE lower(email) = lower($1) AND dead_at IS NULL AND code_hash IS NOT NULL
+WHERE lower(email) = lower($1) AND code_dead_at IS NULL AND code_hash IS NOT NULL
     AND created_at > now() - interval '15 minutes'
 ORDER BY created_at DESC LIMIT 1
 FOR UPDATE;
 
 -- name: RecordWrongMagicLinkCode :exec
--- The fifth wrong code kills the row.
+-- The fifth wrong code kills the code; the link still works.
 UPDATE magic_links SET wrong_codes = wrong_codes + 1,
-    dead_at = CASE WHEN wrong_codes + 1 >= sqlc.arg(max_wrong)::smallint THEN now() ELSE dead_at END
+    code_dead_at = CASE WHEN wrong_codes + 1 >= sqlc.arg(max_wrong)::smallint THEN now() ELSE code_dead_at END
 WHERE token_hash = sqlc.arg(token_hash);
 
 -- name: DeleteMagicLink :exec

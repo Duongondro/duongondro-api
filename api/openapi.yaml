@@ -631,7 +631,8 @@ paths:
       description: |
         Mails a single-use sign-in link (15 minutes) and an 8-character code that
         does the same when typed into the app, shown as XXXX XXXX. A newer request
-        for the address makes the older links and codes unusable. The answer is the
+        for the address makes the older codes unusable; older links still work until
+        used or expired. The answer is the
         same whether or not an account uses the address, which therefore is never
         revealed.
       requestBody:
@@ -649,8 +650,8 @@ paths:
       operationId: redeemMagicLink
       description: |
         Signs in with the link's token, or with the address and the code from the
-        mail. A wrong code counts against the newest link to the address; the fifth
-        kills it, link and all. A wrong, expired, used or replaced code is the same
+        mail. A wrong code counts against the newest mail's code; the fifth kills that
+        code, though not its link. A wrong, expired, used or replaced code is the same
         400, whether or not the address has a link.
       requestBody:
         required: true

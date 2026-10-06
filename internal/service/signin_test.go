@@ -409,7 +409,7 @@ func TestMagicLinkCodes(t *testing.T) {
 		t.Fatalf("a malformed address: %v", err)
 	}
 
-	// Five wrong codes kill the link, code and token alike.
+	// Five wrong codes kill the code, but not the link: guessing locks nobody out.
 	code, token = request("bo@example.com")
 	for i := 0; i < maxWrongCodes; i++ {
 		if _, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", wrongCode(code)); !isValidation(err) {
@@ -419,31 +419,31 @@ func TestMagicLinkCodes(t *testing.T) {
 	if _, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", code); !isValidation(err) {
 		t.Fatalf("the right code after five wrong ones: %v", err)
 	}
-	if _, err := s.RedeemMagicLink(ctx, token); !isValidation(err) {
+	if session, err := s.RedeemMagicLink(ctx, token); err != nil || !session.Created {
 		t.Fatalf("the link after five wrong codes: %v", err)
 	}
 	// Four wrong codes leave the right one working.
-	code, _ = request("bo@example.com")
+	code, _ = request("bo2@example.com")
 	for i := 0; i < maxWrongCodes-1; i++ {
-		_, _ = s.RedeemMagicLinkCode(ctx, "bo@example.com", wrongCode(code))
+		_, _ = s.RedeemMagicLinkCode(ctx, "bo2@example.com", wrongCode(code))
 	}
-	if session, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", code); err != nil || !session.Created {
+	if session, err := s.RedeemMagicLinkCode(ctx, "bo2@example.com", code); err != nil || !session.Created {
 		t.Fatalf("the right code after four wrong ones: %v", err)
 	}
 
-	// A newer mail makes the older link and code unusable.
+	// A newer mail makes the older code unusable, but not the older link.
 	oldCode, oldToken := request("cy@example.com")
 	newCode, newToken := request("cy@example.com")
-	if _, err := s.RedeemMagicLink(ctx, oldToken); !isValidation(err) {
-		t.Fatalf("an older link after a newer one: %v", err)
-	}
 	if oldCode != newCode {
 		if _, err := s.RedeemMagicLinkCode(ctx, "cy@example.com", oldCode); !isValidation(err) {
 			t.Fatalf("an older code after a newer one: %v", err)
 		}
 	}
-	if session, err := s.RedeemMagicLink(ctx, newToken); err != nil || !session.Created {
-		t.Fatalf("the newest link: %v", err)
+	if session, err := s.RedeemMagicLink(ctx, oldToken); err != nil || !session.Created {
+		t.Fatalf("an older link after a newer mail: %v", err)
+	}
+	if session, err := s.RedeemMagicLink(ctx, newToken); err != nil || session.Created {
+		t.Fatalf("the newest link signs in to the account the older one made: %v", err)
 	}
 
 	// An expired code is refused like a wrong one.
@@ -454,7 +454,7 @@ func TestMagicLinkCodes(t *testing.T) {
 	if _, err := s.RedeemMagicLinkCode(ctx, "di@example.com", code); !isValidation(err) {
 		t.Fatalf("an expired code: %v", err)
 	}
-	// The per-address limit still holds with codes: dead links count.
+	// The per-address limit still holds with codes: rows with dead codes count.
 	if _, err := f.pool.Exec(ctx, `DELETE FROM magic_links`); err != nil {
 		t.Fatal(err)
 	}

@@ -121,7 +121,7 @@ type MagicLink struct {
 	AdmissionID *uuid.UUID `json:"admissionId"`
 	CodeHash    []byte     `json:"codeHash"`
 	WrongCodes  int16      `json:"wrongCodes"`
-	DeadAt      *time.Time `json:"deadAt"`
+	CodeDeadAt  *time.Time `json:"codeDeadAt"`
 }
 
 type Nudge struct {
