@@ -136,6 +136,9 @@ func admit(ctx context.Context, args []string) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("admit takes no arguments, only -n and -days")
 	}
+	if *n < 1 || *n > 1000 {
+		return fmt.Errorf("-n must be between 1 and 1000")
+	}
 	if *days < 1 || *days > 365 {
 		return fmt.Errorf("-days must be between 1 and 365")
 	}

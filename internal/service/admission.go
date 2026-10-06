@@ -78,13 +78,14 @@ func hashCode(normalized string) []byte {
 // (the first ones, while nobody has an account). Each admits one account, as a root
 // of the invite tree.
 type Admissions struct {
-	q *db.Queries
+	pool *pgxpool.Pool
+	q    *db.Queries
 }
 
-func NewAdmissions(pool *pgxpool.Pool) *Admissions { return &Admissions{q: db.New(pool)} }
+func NewAdmissions(pool *pgxpool.Pool) *Admissions { return &Admissions{pool: pool, q: db.New(pool)} }
 
-// Issue stores n fresh codes valid for lifetime and returns them, normalized; the
-// server keeps only their SHA-256.
+// Issue stores n fresh codes valid for lifetime, all or none, and returns them,
+// normalized; the server keeps only their SHA-256.
 func (a *Admissions) Issue(ctx context.Context, n int, lifetime time.Duration) ([]string, error) {
 	if n < 1 || n > 1000 {
 		return nil, fmt.Errorf("issue between 1 and 1000 codes, not %d", n)
@@ -94,15 +95,22 @@ func (a *Admissions) Issue(ctx context.Context, n int, lifetime time.Duration) (
 	}
 	expires := time.Now().Add(lifetime)
 	codes := make([]string, n)
-	for i := range codes {
-		code, err := randomCode(AdmissionCodeLength)
-		if err != nil {
-			return nil, err
+	err := pgx.BeginTxFunc(ctx, a.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := a.q.WithTx(tx)
+		for i := range codes {
+			code, err := randomCode(AdmissionCodeLength)
+			if err != nil {
+				return err
+			}
+			if err := q.CreateAdmissionCode(ctx, db.CreateAdmissionCodeParams{CodeHash: hashCode(code), ExpiresAt: expires}); err != nil {
+				return err
+			}
+			codes[i] = code
 		}
-		if err := a.q.CreateAdmissionCode(ctx, db.CreateAdmissionCodeParams{CodeHash: hashCode(code), ExpiresAt: expires}); err != nil {
-			return nil, err
-		}
-		codes[i] = code
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return codes, nil
 }
