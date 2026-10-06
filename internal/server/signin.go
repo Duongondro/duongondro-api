@@ -10,12 +10,29 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/service"
 )
 
-func inviteProof(p *api.InviteProof) *service.InviteProof {
-	if p == nil {
+// signUpProof is the invitation or admission code a request carries; nil when it
+// carries neither (a plain sign-in).
+func signUpProof(invite *api.InviteProof, code *api.AdmissionCode) *service.SignUpProof {
+	if invite == nil && code == nil {
 		return nil
 	}
-	return &service.InviteProof{ID: p.Id, Auth: p.Auth}
+	p := &service.SignUpProof{}
+	if invite != nil {
+		p.Invite = &service.InviteProof{ID: invite.Id, Auth: invite.Auth}
+	}
+	if code != nil {
+		p.AdmissionCode = *code
+	}
+	return p
 }
+
+// errNoSuchProof answers a sign-up whose invitation or admission code is unknown,
+// spent, revoked or expired.
+var errNoSuchProof = errors.New("no such invitation or admission code")
+
+// errProofGone answers a sign-up whose invitation or admission code stopped being
+// valid between the request and its completion.
+var errProofGone = errors.New("the invitation or admission code is no longer valid")
 
 func ceremony(c service.Ceremony) (api.Ceremony, error) {
 	raw, err := json.Marshal(c.Options)
@@ -39,13 +56,17 @@ func credentialJSON(m map[string]any) json.RawMessage {
 }
 
 func (s *Server) BeginPasskeySignUp(ctx context.Context, req api.BeginPasskeySignUpRequestObject) (api.BeginPasskeySignUpResponseObject, error) {
-	c, err := s.signIn.BeginPasskeySignUp(ctx, *inviteProof(&req.Body.Invite))
+	proof := signUpProof(req.Body.Invite, req.Body.AdmissionCode)
+	if proof == nil {
+		proof = &service.SignUpProof{}
+	}
+	c, err := s.signIn.BeginPasskeySignUp(ctx, *proof)
 	if err != nil {
 		switch kind, body, ok := clientError(err); {
 		case ok && kind == http.StatusBadRequest:
 			return api.BeginPasskeySignUp400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
-			return api.BeginPasskeySignUp404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errors.New("no such invitation")))}, nil
+			return api.BeginPasskeySignUp404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errNoSuchProof))}, nil
 		}
 		return nil, err
 	}
@@ -69,7 +90,7 @@ func (s *Server) FinishPasskey(ctx context.Context, req api.FinishPasskeyRequest
 		case ok && kind == http.StatusBadRequest:
 			return api.FinishPasskey400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
-			return api.FinishPasskey404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errors.New("the invitation is no longer valid")))}, nil
+			return api.FinishPasskey404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errProofGone))}, nil
 		}
 		return nil, err
 	}
@@ -114,7 +135,7 @@ func (s *Server) ProviderSignIn(ctx context.Context, req api.ProviderSignInReque
 	if b.AuthorizationCode != nil {
 		code = *b.AuthorizationCode
 	}
-	session, err := s.signIn.ProviderSignIn(ctx, string(req.Provider), b.IdToken, b.Nonce, code, inviteProof(b.Invite))
+	session, err := s.signIn.ProviderSignIn(ctx, string(req.Provider), b.IdToken, b.Nonce, code, signUpProof(b.Invite, b.AdmissionCode))
 	if errors.Is(err, service.ErrNoAccount) {
 		return api.ProviderSignIn403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
 	}
@@ -123,7 +144,7 @@ func (s *Server) ProviderSignIn(ctx context.Context, req api.ProviderSignInReque
 		case ok && kind == http.StatusBadRequest:
 			return api.ProviderSignIn400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
-			return api.ProviderSignIn404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errors.New("no such invitation")))}, nil
+			return api.ProviderSignIn404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errNoSuchProof))}, nil
 		}
 		return nil, err
 	}
@@ -156,7 +177,7 @@ func (s *Server) LinkProvider(ctx context.Context, req api.LinkProviderRequestOb
 }
 
 func (s *Server) RequestMagicLink(ctx context.Context, req api.RequestMagicLinkRequestObject) (api.RequestMagicLinkResponseObject, error) {
-	err := s.signIn.RequestMagicLink(ctx, req.Body.Email, inviteProof(req.Body.Invite), s.magicLinkBase)
+	err := s.signIn.RequestMagicLink(ctx, req.Body.Email, signUpProof(req.Body.Invite, req.Body.AdmissionCode), s.magicLinkBase)
 	if errors.Is(err, service.ErrMailRateLimited) {
 		return api.RequestMagicLink429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
 	}
@@ -165,7 +186,7 @@ func (s *Server) RequestMagicLink(ctx context.Context, req api.RequestMagicLinkR
 		case ok && kind == http.StatusBadRequest:
 			return api.RequestMagicLink400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
-			return api.RequestMagicLink404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errors.New("no such invitation")))}, nil
+			return api.RequestMagicLink404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errNoSuchProof))}, nil
 		}
 		return nil, err
 	}
@@ -182,7 +203,7 @@ func (s *Server) RedeemMagicLink(ctx context.Context, req api.RedeemMagicLinkReq
 		case ok && kind == http.StatusBadRequest:
 			return api.RedeemMagicLink400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		case ok && kind == http.StatusNotFound:
-			return api.RedeemMagicLink404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errors.New("the invitation is no longer valid")))}, nil
+			return api.RedeemMagicLink404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(errProofGone))}, nil
 		}
 		return nil, err
 	}

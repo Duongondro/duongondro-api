@@ -166,3 +166,18 @@ func TestWebsiteHosts(t *testing.T) {
 		t.Fatalf("website on the API host: %d", rec.Code)
 	}
 }
+
+// A sign-up carries an invitation or an admission code; an unknown code is a 404,
+// like an unknown invitation, and neither is a 400.
+func TestSignUpProofOverHTTP(t *testing.T) {
+	e := newTestServer(t, "server_signup_tests")
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": "zzzz-zzzz-zzzz-zzzz"}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown admission code: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no proof: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"invite": map[string]any{"id": "7K2MQ9XA", "auth": make([]byte, 32)}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown invitation: %d %s", rec.Code, rec.Body)
+	}
+}

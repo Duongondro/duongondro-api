@@ -57,9 +57,9 @@ func (s *SignIn) NewNonce(ctx context.Context) (string, error) {
 	return nonce, s.q.CreateNonce(ctx, sum[:])
 }
 
-// ProviderSignIn signs in with an Apple or Google ID token, or, with an invite and no
-// account for that provider subject, creates one.
-func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, authCode string, invite *InviteProof) (Session, error) {
+// ProviderSignIn signs in with an Apple or Google ID token, or, with an invite or
+// admission code and no account for that provider subject, creates one.
+func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, authCode string, proof *SignUpProof) (Session, error) {
 	claims, err := s.verify(ctx, provider, idToken, nonce)
 	if err != nil {
 		return Session{}, err
@@ -71,27 +71,30 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, err
 	}
-	if invite == nil {
+	if proof == nil {
 		return Session{}, ErrNoAccount
 	}
-	inv, err := s.social.CheckInvite(ctx, invite.ID, invite.Auth)
+	g, err := s.checkProof(ctx, *proof)
 	if err != nil {
 		return Session{}, err
 	}
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if user, err = createAccount(ctx, q, inv.ID, nil); err != nil {
+		if user, err = createAccount(ctx, q, g, nil); err != nil {
 			return err
 		}
 		return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider, Subject: claims.Subject, UserID: user.ID,
 			Email: verifiedEmail(claims)})
 	})
-	if repository.IsUniqueViolation(err, "") {
-		// The same account signed up twice at once; the other request made it.
-		identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
-		if err != nil {
+	if repository.IsUniqueViolation(err, "") || (errors.Is(err, ErrNotFound) && g.admissionID != nil) {
+		// The same account signed up twice at once; the other request made it (and,
+		// with an admission code, spent it).
+		identity, lookupErr := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
+		if errors.Is(lookupErr, pgx.ErrNoRows) && errors.Is(err, ErrNotFound) {
 			return Session{}, err
+		} else if lookupErr != nil {
+			return Session{}, lookupErr
 		}
 		return s.session(ctx, identity.UserID, false)
 	} else if err != nil {
@@ -235,9 +238,11 @@ func normalizeEmail(email string) (string, error) {
 // address is treated alike, so the answer and its timing never reveal who has an
 // account: the per-address limit applies to all of them, a link is recorded either
 // way, and the mail goes out in the background, but only to an address with an
-// account or with an invite. A magic link proves control of an inbox, not ownership
-// of the practice data, which still needs an enrolled device or the recovery code.
-func (s *SignIn) RequestMagicLink(ctx context.Context, email string, invite *InviteProof, linkBase string) error {
+// account or with an invite or admission code, which is checked now and spent only
+// when the link makes the account. A magic link proves control of an inbox, not
+// ownership of the practice data, which still needs an enrolled device or the
+// recovery code.
+func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *SignUpProof, linkBase string) error {
 	if s.mailer == nil {
 		return invalid("magic links are not configured on this server")
 	}
@@ -245,13 +250,11 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, invite *Inv
 	if err != nil {
 		return err
 	}
-	var inviteID *string
-	if invite != nil {
-		inv, err := s.social.CheckInvite(ctx, invite.ID, invite.Auth)
-		if err != nil {
+	var g gate
+	if proof != nil {
+		if g, err = s.checkProof(ctx, *proof); err != nil {
 			return err
 		}
-		inviteID = &inv.ID
 	}
 	token, err := auth.RandomToken()
 	if err != nil {
@@ -275,9 +278,10 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, invite *Inv
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		send = err == nil || inviteID != nil
+		send = err == nil || g != (gate{})
 		sum := sha256.Sum256([]byte(token))
-		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: inviteID})
+		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: g.inviteID,
+			AdmissionID: g.admissionID})
 	})
 	if err != nil || !send {
 		return err
@@ -293,7 +297,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, invite *Inv
 }
 
 // RedeemMagicLink signs in with a link's token, creating the account when the link
-// was requested with an invite and the address has none yet.
+// was requested with an invite or admission code and the address has none yet.
 func (s *SignIn) RedeemMagicLink(ctx context.Context, token string) (Session, error) {
 	sum := sha256.Sum256([]byte(token))
 	link, err := s.q.ConsumeMagicLink(ctx, sum[:])
@@ -308,23 +312,27 @@ func (s *SignIn) RedeemMagicLink(ctx context.Context, token string) (Session, er
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, err
 	}
-	if link.InviteID == nil {
+	g := gate{inviteID: link.InviteID, admissionID: link.AdmissionID}
+	if g == (gate{}) {
 		return Session{}, ErrNoAccount
 	}
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if user, err = createAccount(ctx, q, *link.InviteID, nil); err != nil {
+		if user, err = createAccount(ctx, q, g, nil); err != nil {
 			return err
 		}
 		email := link.Email
 		return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: "email", Subject: link.Email, UserID: user.ID, Email: &email})
 	})
-	if repository.IsUniqueViolation(err, "") {
-		// Two links for one address redeemed at once: the other made the account.
-		identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: link.Email})
-		if err != nil {
+	if repository.IsUniqueViolation(err, "") || (errors.Is(err, ErrNotFound) && g.admissionID != nil) {
+		// Two links for one address redeemed at once: the other made the account (and,
+		// with an admission code, spent it).
+		identity, lookupErr := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: link.Email})
+		if errors.Is(lookupErr, pgx.ErrNoRows) && errors.Is(err, ErrNotFound) {
 			return Session{}, err
+		} else if lookupErr != nil {
+			return Session{}, lookupErr
 		}
 		return s.session(ctx, identity.UserID, false)
 	} else if err != nil {

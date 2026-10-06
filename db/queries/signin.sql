@@ -17,7 +17,7 @@ UPDATE credentials SET data = $2, last_used_at = now() WHERE id = $1;
 DELETE FROM webauthn_sessions WHERE created_at <= now() - interval '5 minutes';
 
 -- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id) VALUES ($1, $2, $3) RETURNING id;
+INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id) VALUES ($1, $2, $3, $4) RETURNING id;
 
 -- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
@@ -44,7 +44,7 @@ DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes';
 SELECT count(*) FROM magic_links WHERE lower(email) = lower($1) AND created_at > now() - interval '15 minutes';
 
 -- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email, invite_id) VALUES ($1, $2, $3);
+INSERT INTO magic_links (token_hash, email, invite_id, admission_id) VALUES ($1, $2, $3, $4);
 
 -- name: ConsumeMagicLink :one
 DELETE FROM magic_links WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'

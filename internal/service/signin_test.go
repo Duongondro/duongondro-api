@@ -145,11 +145,11 @@ func TestPasskeys(t *testing.T) {
 	inviter := f.member()
 	auth := f.invite(social, inviter, "P4SSK3YS")
 
-	if _, err := s.BeginPasskeySignUp(ctx, InviteProof{ID: "P4SSK3YS", Auth: random(32)}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: random(32)}}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("sign-up without the invite's auth: %v", err)
 	}
 	phone := newAuthenticator()
-	ceremony, err := s.BeginPasskeySignUp(ctx, InviteProof{ID: "P4SSK3YS", Auth: auth})
+	ceremony, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: auth}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,16 +236,16 @@ func TestProviders(t *testing.T) {
 		t.Fatal("a code was exchanged for a sign-in that made no account")
 	}
 	// The nonce was used up by that attempt; a replay of the token is refused.
-	if _, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
+	if _, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "", &SignUpProof{Invite: &InviteProof{ID: "APP1EGGG", Auth: auth}}); !isValidation(err) {
 		t.Fatalf("a replayed token: %v", err)
 	}
 	// A nonce the server never issued is refused, even when the token carries it.
 	verifier.claims["forged"] = oidc.Claims{Subject: "001.ana", Nonce: "made-up"}
-	if _, err := s.ProviderSignIn(ctx, "google", "forged", "made-up", "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
+	if _, err := s.ProviderSignIn(ctx, "google", "forged", "made-up", "", &SignUpProof{Invite: &InviteProof{ID: "APP1EGGG", Auth: auth}}); !isValidation(err) {
 		t.Fatalf("a nonce never issued: %v", err)
 	}
 	tok, nonce = token("apple", "001.ana")
-	created, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "code", &InviteProof{ID: "APP1EGGG", Auth: auth})
+	created, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "code", &SignUpProof{Invite: &InviteProof{ID: "APP1EGGG", Auth: auth}})
 	if err != nil || !created.Created {
 		t.Fatalf("sign-up with Apple: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestMagicLinks(t *testing.T) {
 	if err := s.RequestMagicLink(ctx, "not an address", nil, base); !isValidation(err) {
 		t.Fatalf("bad address: %v", err)
 	}
-	if err := s.RequestMagicLink(ctx, "Bo@Example.com", &InviteProof{ID: "MAG1CK1N", Auth: auth}, base); err != nil {
+	if err := s.RequestMagicLink(ctx, "Bo@Example.com", &SignUpProof{Invite: &InviteProof{ID: "MAG1CK1N", Auth: auth}}, base); err != nil {
 		t.Fatal(err)
 	}
 	signUp := token()

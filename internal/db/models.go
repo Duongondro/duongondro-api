@@ -10,6 +10,15 @@ import (
 	"uuid"
 )
 
+type AdmissionCode struct {
+	ID        uuid.UUID  `json:"id"`
+	CodeHash  []byte     `json:"codeHash"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt time.Time  `json:"expiresAt"`
+	UsedBy    *uuid.UUID `json:"usedBy"`
+	UsedAt    *time.Time `json:"usedAt"`
+}
+
 type AuthIdentity struct {
 	Provider     string    `json:"provider"`
 	Subject      string    `json:"subject"`
@@ -105,10 +114,11 @@ type KeyWrap struct {
 }
 
 type MagicLink struct {
-	TokenHash []byte    `json:"tokenHash"`
-	Email     string    `json:"email"`
-	InviteID  *string   `json:"inviteId"`
-	CreatedAt time.Time `json:"createdAt"`
+	TokenHash   []byte     `json:"tokenHash"`
+	Email       string     `json:"email"`
+	InviteID    *string    `json:"inviteId"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
 }
 
 type Nudge struct {
@@ -185,9 +195,10 @@ type User struct {
 }
 
 type WebauthnSession struct {
-	ID        uuid.UUID  `json:"id"`
-	Data      []byte     `json:"data"`
-	UserID    *uuid.UUID `json:"userId"`
-	InviteID  *string    `json:"inviteId"`
-	CreatedAt time.Time  `json:"createdAt"`
+	ID          uuid.UUID  `json:"id"`
+	Data        []byte     `json:"data"`
+	UserID      *uuid.UUID `json:"userId"`
+	InviteID    *string    `json:"inviteId"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
 }

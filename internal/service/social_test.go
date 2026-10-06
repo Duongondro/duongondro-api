@@ -264,6 +264,10 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	if _, err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: []byte(`{}`), UserID: &ana.ID}); err != nil {
 		f.t.Fatal(err)
 	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO admission_codes (code_hash, expires_at, used_by, used_at)
+		VALUES ($1, now() + interval '1 day', $2, now())`, random(32), ana.ID); err != nil {
+		f.t.Fatal(err)
+	}
 	nudges := NewNudges(f.pool, nil)
 	if err := nudges.PutToken(ctx, ana.ID, dev.ID, "apns", boToken); err != nil {
 		f.t.Fatal(err)

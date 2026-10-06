@@ -6,8 +6,11 @@
 //	duongondro-api reapply-purges
 //	                         after restoring a backup, delete again every account
 //	                         purged since (only hashes of their ids are kept)
+//	duongondro-api admit [-n 5] [-days 30]
+//	                         print fresh single-use admission codes, the sign-up
+//	                         gate for members nobody can invite (the first ones)
 //
-// DATABASE_URL is required for both. Migrations are not applied by serve: the
+// DATABASE_URL is required for all of them. Migrations are not applied by serve: the
 // service script runs migrate first, as in CodeShare.
 //
 // serve also reads:
@@ -39,6 +42,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -78,8 +82,10 @@ func main() {
 		err = runMigrate(ctx)
 	case "reapply-purges":
 		err = reapplyPurges(ctx)
+	case "admit":
+		err = admit(ctx, os.Args[2:])
 	default:
-		err = fmt.Errorf("unknown command %q (serve, migrate or reapply-purges)", command)
+		err = fmt.Errorf("unknown command %q (serve, migrate, reapply-purges or admit)", command)
 	}
 	if err != nil {
 		slog.Error("fatal", "error", err.Error())
@@ -116,6 +122,37 @@ func reapplyPurges(ctx context.Context) error {
 		slog.Info("reapplied purges", "accounts", n)
 	}
 	return err
+}
+
+// admit prints n fresh admission codes, one per line in groups of four, valid for
+// days days. Only their hashes are stored: the printout is the only copy.
+func admit(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("admit", flag.ContinueOnError)
+	n := flags.Int("n", 5, "how many codes to print (1 to 1000)")
+	days := flags.Int("days", int(service.DefaultAdmissionLifetime/(24*time.Hour)), "days until the codes expire (1 to 365)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("admit takes no arguments, only -n and -days")
+	}
+	if *days < 1 || *days > 365 {
+		return fmt.Errorf("-days must be between 1 and 365")
+	}
+	pool, err := openPool(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	codes, err := service.NewAdmissions(pool).Issue(ctx, *n, time.Duration(*days)*24*time.Hour)
+	if err != nil {
+		return err
+	}
+	for _, c := range codes {
+		fmt.Println(service.FormatCode(c))
+	}
+	slog.Info("issued admission codes", "count", len(codes), "days", *days)
+	return nil
 }
 
 // required fails startup when a key file is configured without the ids it needs, so a

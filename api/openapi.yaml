@@ -12,7 +12,8 @@ info:
     from it too.
 
     Every sign-in ends in a bearer token. An account is created only with a valid
-    invitation; signing in never grants keys. The DEV build's POST /api/dev/session is
+    invitation or an unused admission code (`duongondro-api admit`, for the first
+    members, whom nobody can invite); signing in never grants keys. The DEV build's POST /api/dev/session is
     registered outside this file, so a release build has no trace of it.
 servers:
   - url: https://api.duongondro.app
@@ -535,12 +536,15 @@ paths:
   /api/auth/passkeys/sign-up:
     post:
       operationId: beginPasskeySignUp
-      description: Starts creating an account with a passkey; the invitation is checked now and when it finishes.
+      description: |
+        Starts creating an account with a passkey; the invitation or admission code is
+        checked now and when it finishes. 404: no such live invitation, or the code is
+        wrong, spent or expired.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/InviteProofBody"}
+            schema: {$ref: "#/components/schemas/SignUpProof"}
       responses:
         "200":
           description: Options for the platform authenticator.
@@ -597,9 +601,9 @@ paths:
     post:
       operationId: providerSignIn
       description: |
-        Signs in with a Sign in with Apple or Google ID token; with an invitation and
-        no account for that provider account, creates one. 403 means no account uses
-        it and an invitation is needed.
+        Signs in with a Sign in with Apple or Google ID token; with an invitation or
+        admission code and no account for that provider account, creates one. 403
+        means no account uses it and an invitation is needed.
       parameters: [{$ref: "#/components/parameters/Provider"}]
       requestBody:
         required: true
@@ -1127,11 +1131,19 @@ components:
       properties:
         id: {type: string, minLength: 8, maxLength: 8}
         auth: {type: string, format: byte}
-    InviteProofBody:
+    AdmissionCode:
+      type: string
+      maxLength: 64
+      description: |
+        A bootstrap admission code, 16 Crockford base32 characters, single use. Read
+        leniently: case, spaces and hyphens are ignored, O is read as 0 and I and L as 1.
+        The account it makes has no inviter.
+    SignUpProof:
       type: object
-      required: [invite]
+      description: Exactly one of invite and admissionCode.
       properties:
         invite: {$ref: "#/components/schemas/InviteProof"}
+        admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
     Ceremony:
       type: object
       required: [sessionId, options]
@@ -1155,7 +1167,7 @@ components:
       properties:
         token: {type: string, description: "Bearer token; send as Authorization: Bearer <token>"}
         userId: {$ref: "#/components/schemas/UUID"}
-        created: {type: boolean, description: A new account was made with the invitation}
+        created: {type: boolean, description: A new account was made with the invitation or admission code}
     ProviderSignIn:
       type: object
       required: [idToken, nonce]
@@ -1164,6 +1176,7 @@ components:
         nonce: {type: string, maxLength: 256, description: The raw nonce the app gave the provider}
         authorizationCode: {type: string, maxLength: 1024, description: "Apple only: kept to revoke the authorisation when the account is deleted"}
         invite: {$ref: "#/components/schemas/InviteProof"}
+        admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
     ProviderLink:
       type: object
       required: [idToken, nonce]
@@ -1177,6 +1190,7 @@ components:
       properties:
         email: {type: string, maxLength: 320}
         invite: {$ref: "#/components/schemas/InviteProof"}
+        admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
     MagicLinkToken:
       type: object
       required: [token]

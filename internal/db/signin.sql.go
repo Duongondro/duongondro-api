@@ -14,7 +14,7 @@ import (
 
 const consumeMagicLink = `-- name: ConsumeMagicLink :one
 DELETE FROM magic_links WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, email, invite_id, created_at
+RETURNING token_hash, email, invite_id, created_at, admission_id
 `
 
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
@@ -25,6 +25,7 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 		&i.Email,
 		&i.InviteID,
 		&i.CreatedAt,
+		&i.AdmissionID,
 	)
 	return i, err
 }
@@ -43,7 +44,7 @@ func (q *Queries) ConsumeNonce(ctx context.Context, nonceHash []byte) (int64, er
 
 const consumeWebauthnSession = `-- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
-RETURNING id, data, user_id, invite_id, created_at
+RETURNING id, data, user_id, invite_id, created_at, admission_id
 `
 
 func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (WebauthnSession, error) {
@@ -55,6 +56,7 @@ func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (Web
 		&i.UserID,
 		&i.InviteID,
 		&i.CreatedAt,
+		&i.AdmissionID,
 	)
 	return i, err
 }
@@ -109,17 +111,23 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 }
 
 const createMagicLink = `-- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email, invite_id) VALUES ($1, $2, $3)
+INSERT INTO magic_links (token_hash, email, invite_id, admission_id) VALUES ($1, $2, $3, $4)
 `
 
 type CreateMagicLinkParams struct {
-	TokenHash []byte  `json:"tokenHash"`
-	Email     string  `json:"email"`
-	InviteID  *string `json:"inviteId"`
+	TokenHash   []byte     `json:"tokenHash"`
+	Email       string     `json:"email"`
+	InviteID    *string    `json:"inviteId"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
 }
 
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
-	_, err := q.db.Exec(ctx, createMagicLink, arg.TokenHash, arg.Email, arg.InviteID)
+	_, err := q.db.Exec(ctx, createMagicLink,
+		arg.TokenHash,
+		arg.Email,
+		arg.InviteID,
+		arg.AdmissionID,
+	)
 	return err
 }
 
@@ -150,17 +158,23 @@ func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, err
 }
 
 const createWebauthnSession = `-- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id) VALUES ($1, $2, $3) RETURNING id
+INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id) VALUES ($1, $2, $3, $4) RETURNING id
 `
 
 type CreateWebauthnSessionParams struct {
-	Data     []byte     `json:"data"`
-	UserID   *uuid.UUID `json:"userId"`
-	InviteID *string    `json:"inviteId"`
+	Data        []byte     `json:"data"`
+	UserID      *uuid.UUID `json:"userId"`
+	InviteID    *string    `json:"inviteId"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
 }
 
 func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnSessionParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createWebauthnSession, arg.Data, arg.UserID, arg.InviteID)
+	row := q.db.QueryRow(ctx, createWebauthnSession,
+		arg.Data,
+		arg.UserID,
+		arg.InviteID,
+		arg.AdmissionID,
+	)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
