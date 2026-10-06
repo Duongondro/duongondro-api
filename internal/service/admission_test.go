@@ -176,3 +176,49 @@ func sha(s string) []byte {
 	sum := sha256.Sum256([]byte(s))
 	return sum[:]
 }
+
+// Sign-ups racing on one admission code make exactly one account: the code's row is
+// locked while it is spent.
+func TestAdmissionCodeRace(t *testing.T) {
+	f := setup(t)
+	s, _ := f.signIn(nil, nil, nil)
+	ctx := t.Context()
+	code, _ := f.admissionCode(time.Hour)
+	const racers = 8
+	ceremonies := make([]Ceremony, racers)
+	phones := make([]*authenticator, racers)
+	for i := range ceremonies {
+		c, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: code}, SignUpProfile{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ceremonies[i], phones[i] = c, newAuthenticator()
+	}
+	responses := make([][]byte, racers)
+	for i, c := range ceremonies {
+		responses[i] = phones[i].create(t, c.Options)
+	}
+	errs := make(chan error, racers)
+	start := make(chan struct{})
+	for i := range ceremonies {
+		go func() {
+			<-start
+			_, err := s.FinishPasskey(ctx, ceremonies[i].SessionID, responses[i])
+			errs <- err
+		}()
+	}
+	close(start)
+	made := 0
+	for range racers {
+		if err := <-errs; err == nil {
+			made++
+		} else if !errors.Is(err, ErrNotFound) {
+			t.Errorf("a losing racer: %v", err)
+		}
+	}
+	var users int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&users)
+	if made != 1 || users != 1 {
+		t.Fatalf("%d sign-ups succeeded and %d accounts exist; want 1 and 1", made, users)
+	}
+}
