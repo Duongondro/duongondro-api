@@ -104,7 +104,7 @@ func TestNudges(t *testing.T) {
 	}
 
 	// A public streak within two hours of its deadline is nudged once.
-	st := e2ee.Streak{Current: 7, Day: "2026-10-04", Deadline: time.Now().Add(90 * time.Minute).UnixMilli(), Longest: 7, Practice: "mandala", Seq: 1, User: bo.ID.String()}
+	st := e2ee.Streak{Current: 7, Day: today(0), Deadline: time.Now().Add(90 * time.Minute).UnixMilli(), Longest: 7, Practice: "mandala", Seq: 1, User: bo.ID.String()}
 	payload, sig := sign(bo, e2ee.TypeStreak, st)
 	if _, _, err := social.PutStreak(ctx, bo.User, "mandala", payload, sig); err != nil {
 		t.Fatal(err)

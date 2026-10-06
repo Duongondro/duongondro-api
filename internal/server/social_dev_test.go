@@ -60,7 +60,7 @@ func TestFriendsOverHTTP(t *testing.T) {
 		t.Fatalf("redeem: %d %s", rec.Code, rec.Body)
 	}
 
-	st := e2ee.Streak{Current: 3, Day: "2026-10-04", Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 3, Practice: "dorje-sempa", Seq: 1, User: ana.id}
+	st := e2ee.Streak{Current: 3, Day: today(0), Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 3, Practice: "dorje-sempa", Seq: 1, User: ana.id}
 	if rec := serve(t, e, http.MethodPut, "/api/streaks/dorje-sempa", ana.token, statement(ana, e2ee.TypeStreak, st)); rec.Code != http.StatusNoContent {
 		t.Fatalf("put streak: %d %s", rec.Code, rec.Body)
 	}
@@ -94,4 +94,10 @@ func TestFriendsOverHTTP(t *testing.T) {
 	if len(friends.Friends) != 0 {
 		t.Fatalf("the purged friend is still listed: %s", rec.Body)
 	}
+}
+
+// today is the UTC civil day offset days from now, for streak statements whose
+// deadline the tests take from the clock.
+func today(offset int) string {
+	return time.Now().UTC().AddDate(0, 0, offset).Format("2006-01-02")
 }

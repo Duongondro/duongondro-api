@@ -353,3 +353,9 @@ func TestRecovery(t *testing.T) {
 		t.Fatalf("boxes: %v %d", err, len(boxes))
 	}
 }
+
+// today is the UTC civil day offset days from now, for streak statements whose
+// deadline the tests take from the clock.
+func today(offset int) string {
+	return time.Now().UTC().AddDate(0, 0, offset).Format("2006-01-02")
+}

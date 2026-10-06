@@ -153,7 +153,7 @@ func TestStreaks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := e2ee.Streak{Current: 42, Day: "2026-10-04", Deadline: time.Now().Add(30 * time.Hour).UnixMilli(), Longest: 42, Practice: "dorje-sempa", Seq: 1, User: ana.ID.String()}
+	st := e2ee.Streak{Current: 42, Day: today(0), Deadline: time.Now().Add(30 * time.Hour).UnixMilli(), Longest: 42, Practice: "dorje-sempa", Seq: 1, User: ana.ID.String()}
 	payload, sig := sign(ana, e2ee.TypeStreak, st)
 	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); !isValidation(err) {
 		t.Fatalf("path and statement disagree: %v", err)
@@ -181,7 +181,7 @@ func TestStreaks(t *testing.T) {
 		t.Fatalf("same day again: %v newDay=%v", err, newDay)
 	}
 	next := st
-	next.Seq, next.Day, next.Current, next.Longest = 3, "2026-10-05", 43, 43
+	next.Seq, next.Day, next.Current, next.Longest = 3, today(1), 43, 43
 	payload, sig = sign(ana, e2ee.TypeStreak, next)
 	if _, newDay, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); err != nil || !newDay {
 		t.Fatalf("next day: %v newDay=%v", err, newDay)
@@ -242,7 +242,7 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	if err := s.Block(ctx, ana.ID, stranger.ID); err != nil {
 		f.t.Fatal(err)
 	}
-	st := e2ee.Streak{Current: 1, Day: "2026-10-04", Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 1, Practice: "mandala", Seq: 1, User: ana.ID.String()}
+	st := e2ee.Streak{Current: 1, Day: today(0), Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 1, Practice: "mandala", Seq: 1, User: ana.ID.String()}
 	payload, sig = sign(ana, e2ee.TypeStreak, st)
 	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); err != nil {
 		f.t.Fatal(err)
