@@ -107,6 +107,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 	// invite ids cannot be guessed and sign-ups cannot be scripted (design: Social).
 	e.Use(rateLimitPrefix("/api/invites", inviteRateLimit))
 	e.Use(rateLimitPrefix("/api/auth/", authRateLimit))
+	e.Use(rateLimitRoute(http.MethodPatch, "/api/me", profileRateLimit))
 	registerWellKnown(e, cfg.WellKnown)
 	serveWebsite(e, cfg.WebHosts)
 	// Sign-in without any method; only in DEV builds.

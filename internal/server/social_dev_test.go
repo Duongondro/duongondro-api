@@ -147,3 +147,20 @@ func TestProfileOverHTTP(t *testing.T) {
 		t.Fatalf("bo: %v", m)
 	}
 }
+
+// PATCH /api/me is rate-limited, so its 409 cannot be used to list usernames.
+func TestProfilePatchIsRateLimited(t *testing.T) {
+	e := newTestServer(t, "server_profile_limit_tests")
+	ana := newDevUser(t, e)
+	limited := false
+	for i := 0; i <= profileRateLimit.Requests && !limited; i++ {
+		rec := serve(t, e, http.MethodPatch, "/api/me", ana.token, map[string]any{"username": "probe"})
+		limited = rec.Code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("PATCH /api/me is not rate-limited")
+	}
+	if rec := serve(t, e, http.MethodGet, "/api/me", ana.token, nil); rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/me is limited too: %d", rec.Code)
+	}
+}

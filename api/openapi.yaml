@@ -55,7 +55,8 @@ paths:
         Changes the profile: the display name friends see, the username that names
         the account's passkeys (never shown to friends) and the gender friends'
         phones use for grammatical forms. An absent field stays as it is; null clears
-        username or gender. 409: the username is taken (case-insensitively).
+        username or gender. 409: the username is taken (case-insensitively). Limited
+        to 10 a minute per address, so the 409 cannot be used to list usernames.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true
@@ -67,6 +68,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
     delete:
       operationId: deleteMe
       description: |
