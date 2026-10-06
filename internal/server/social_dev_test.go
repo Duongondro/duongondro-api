@@ -101,3 +101,49 @@ func TestFriendsOverHTTP(t *testing.T) {
 func today(offset int) string {
 	return time.Now().UTC().AddDate(0, 0, offset).Format("2006-01-02")
 }
+
+// PATCH /api/me: absent fields stay, null clears, a taken username is a 409; the
+// display name alone, as the iOS app sends it, still works.
+func TestProfileOverHTTP(t *testing.T) {
+	e := newTestServer(t, "server_profile_tests")
+	ana, bo := newDevUser(t, e), newDevUser(t, e)
+	me := func(u devUser) map[string]any {
+		t.Helper()
+		rec := serve(t, e, http.MethodGet, "/api/me", u.token, nil)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	patch := func(u devUser, body string, want int) {
+		t.Helper()
+		var v any
+		_ = json.Unmarshal([]byte(body), &v)
+		if rec := serve(t, e, http.MethodPatch, "/api/me", u.token, v); rec.Code != want {
+			t.Fatalf("PATCH %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	patch(ana, `{"displayName": "Ana", "username": "Ana_K", "gender": "female"}`, http.StatusNoContent)
+	if m := me(ana); m["displayName"] != "Ana" || m["username"] != "ana_k" || m["gender"] != "female" {
+		t.Fatalf("me: %v", m)
+	}
+	patch(ana, `{"displayName": "Ania"}`, http.StatusNoContent)
+	if m := me(ana); m["displayName"] != "Ania" || m["username"] != "ana_k" || m["gender"] != "female" {
+		t.Fatalf("a display-name PATCH changed the rest: %v", m)
+	}
+	patch(bo, `{"username": "ANA_K"}`, http.StatusConflict)
+	patch(bo, `{"username": "a"}`, http.StatusBadRequest)
+	patch(bo, `{"gender": "robot"}`, http.StatusBadRequest)
+	patch(ana, `{"gender": null}`, http.StatusNoContent)
+	if m := me(ana); m["username"] != "ana_k" {
+		t.Fatalf("clearing the gender touched the username: %v", m)
+	} else if _, ok := m["gender"]; ok {
+		t.Fatalf("gender not cleared: %v", m)
+	}
+	patch(ana, `{"username": null}`, http.StatusNoContent)
+	if _, ok := me(ana)["username"]; ok {
+		t.Fatal("username not cleared")
+	}
+	if m := me(bo); m["displayName"] != "" {
+		t.Fatalf("bo: %v", m)
+	}
+}

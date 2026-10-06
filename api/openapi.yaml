@@ -51,7 +51,11 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
     patch:
       operationId: updateMe
-      description: Sets the display name friends see.
+      description: |
+        Changes the profile: the display name friends see, the username that names
+        the account's passkeys (never shown to friends) and the gender friends'
+        phones use for grammatical forms. An absent field stays as it is; null clears
+        username or gender. 409: the username is taken (case-insensitively).
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true
@@ -62,6 +66,7 @@ paths:
         "204": {description: Updated.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
     delete:
       operationId: deleteMe
       description: |
@@ -884,6 +889,8 @@ components:
         identityPublicKey: {type: string, format: byte, description: Ed25519, 32 bytes}
         keyVersion: {type: integer, description: Current version of the practice key}
         displayName: {type: string}
+        username: {type: string, description: "Absent until set; lowercase"}
+        gender: {$ref: "#/components/schemas/Gender"}
         devices:
           type: array
           items: {$ref: "#/components/schemas/Device"}
@@ -1027,11 +1034,25 @@ components:
         logs:
           type: array
           items: {$ref: "#/components/schemas/PracticeLog"}
+    Gender:
+      type: string
+      enum: [male, female, nonbinary]
+      description: Absent when not given.
     MeUpdate:
       type: object
-      required: [displayName]
+      description: Absent fields stay as they are; null clears username or gender.
       properties:
         displayName: {type: string, maxLength: 64}
+        username:
+          type: string
+          nullable: true
+          minLength: 3
+          maxLength: 32
+          description: "3 to 32 of a-z, 0-9, dot and underscore; stored lowercased, unique regardless of case"
+        gender:
+          type: string
+          nullable: true
+          enum: [male, female, nonbinary]
     InviteInput:
       type: object
       required: [id, auth, expiresAt, payload, signature, mac]
@@ -1083,6 +1104,7 @@ components:
       properties:
         userId: {$ref: "#/components/schemas/UUID"}
         displayName: {type: string}
+        gender: {$ref: "#/components/schemas/Gender"}
         notifyDone: {type: boolean, description: This account hears when the friend practises}
         identityPublicKey: {type: string, format: byte}
         since: {type: string, format: date-time}

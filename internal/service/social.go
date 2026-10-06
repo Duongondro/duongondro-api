@@ -183,11 +183,66 @@ func (s *Social) CheckInvite(ctx context.Context, id string, auth []byte) (db.In
 }
 
 func (s *Social) SetDisplayName(ctx context.Context, userID uuid.UUID, name string) error {
-	name = strings.TrimSpace(name)
-	if !validText(name) || len([]rune(name)) > 64 {
-		return invalid("displayName must be valid text of at most 64 characters")
+	name, err := cleanDisplayName(name)
+	if err != nil {
+		return err
 	}
 	return s.q.SetDisplayName(ctx, db.SetDisplayNameParams{ID: userID, DisplayName: name})
+}
+
+func cleanDisplayName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if !validText(name) || len([]rune(name)) > 64 {
+		return "", invalid("displayName must be valid text of at most 64 characters")
+	}
+	return name, nil
+}
+
+var usernamePattern = regexp.MustCompile(`^[a-z0-9._]{3,32}$`)
+
+// Genders are those a friend's phone has grammatical forms for.
+var genders = map[string]bool{"male": true, "female": true, "nonbinary": true}
+
+// ProfileUpdate changes the fields whose Set flag is true. A nil Username or Gender
+// with its flag set clears it.
+type ProfileUpdate struct {
+	DisplayName *string
+	SetUsername bool
+	Username    *string
+	SetGender   bool
+	Gender      *string
+}
+
+// UpdateProfile sets the display name, the username (3 to 32 of a-z, 0-9, dot and
+// underscore, lowercased; a conflict when another account has it) and the gender.
+func (s *Social) UpdateProfile(ctx context.Context, userID uuid.UUID, u ProfileUpdate) error {
+	p := db.UpdateProfileParams{ID: userID, SetDisplayName: u.DisplayName != nil, SetUsername: u.SetUsername,
+		SetGender: u.SetGender}
+	if u.DisplayName != nil {
+		name, err := cleanDisplayName(*u.DisplayName)
+		if err != nil {
+			return err
+		}
+		p.DisplayName = name
+	}
+	if u.SetUsername && u.Username != nil {
+		name := strings.ToLower(*u.Username)
+		if !usernamePattern.MatchString(name) {
+			return invalid("username must be 3 to 32 of a-z, 0-9, dot and underscore")
+		}
+		p.Username = &name
+	}
+	if u.SetGender && u.Gender != nil {
+		if !genders[*u.Gender] {
+			return invalid("gender must be male, female or nonbinary")
+		}
+		p.Gender = u.Gender
+	}
+	err := s.q.UpdateProfile(ctx, p)
+	if repository.IsUniqueViolation(err, "users_username_key") {
+		return conflict("that username is taken")
+	}
+	return err
 }
 
 func (s *Social) Friends(ctx context.Context, userID uuid.UUID) ([]db.ListFriendsRow, error) {

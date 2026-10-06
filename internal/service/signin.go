@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -142,15 +143,22 @@ func (s *SignIn) session(ctx context.Context, userID uuid.UUID, created bool) (S
 // --- Passkeys ------------------------------------------------------------------
 
 // passkeyUser adapts an account (or one about to be created) to webauthn.User. The
-// user handle is the account id, so a discoverable sign-in finds the account.
+// user handle is the account id, so a discoverable sign-in finds the account. The
+// names label the passkey in the phone's password manager: the username, else the
+// display name, else "Duongöndro" (an account being created has neither yet).
 type passkeyUser struct {
-	id          uuid.UUID
-	credentials []webauthn.Credential
+	id                uuid.UUID
+	name, displayName string
+	credentials       []webauthn.Credential
 }
 
-func (u *passkeyUser) WebAuthnID() []byte                         { return u.id[:] }
-func (u *passkeyUser) WebAuthnName() string                       { return "Duongöndro" }
-func (u *passkeyUser) WebAuthnDisplayName() string                { return "Duongöndro" }
+func (u *passkeyUser) WebAuthnID() []byte { return u.id[:] }
+func (u *passkeyUser) WebAuthnName() string {
+	return cmp.Or(u.name, u.displayName, "Duongöndro")
+}
+func (u *passkeyUser) WebAuthnDisplayName() string {
+	return cmp.Or(u.displayName, u.name, "Duongöndro")
+}
 func (u *passkeyUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
 
 func (s *SignIn) loadPasskeyUser(ctx context.Context, q *db.Queries, id uuid.UUID) (*passkeyUser, error) {
@@ -213,12 +221,21 @@ func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof) (Cer
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 
-// BeginPasskeyAdd starts adding a passkey to a signed-in account.
+// BeginPasskeyAdd starts adding a passkey to a signed-in account, named after its
+// username or display name.
 func (s *SignIn) BeginPasskeyAdd(ctx context.Context, userID uuid.UUID) (Ceremony, error) {
 	u, err := s.loadPasskeyUser(ctx, s.q, userID)
 	if err != nil {
 		return Ceremony{}, err
 	}
+	account, err := s.q.GetUser(ctx, userID)
+	if err != nil {
+		return Ceremony{}, err
+	}
+	if account.Username != nil {
+		u.name = *account.Username
+	}
+	u.displayName = account.DisplayName
 	exclude := make([]protocol.CredentialDescriptor, len(u.credentials))
 	for i, c := range u.credentials {
 		exclude[i] = c.Descriptor()

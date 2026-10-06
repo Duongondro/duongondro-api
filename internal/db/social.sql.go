@@ -261,7 +261,7 @@ func (q *Queries) ListBlocks(ctx context.Context, blockerID uuid.UUID) ([]Block,
 }
 
 const listFriends = `-- name: ListFriends :many
-SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at, friendships.notify_done
+SELECT users.id, users.display_name, users.gender, users.identity_public_key, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id
@@ -270,6 +270,7 @@ ORDER BY friendships.created_at, users.id
 type ListFriendsRow struct {
 	ID                uuid.UUID `json:"id"`
 	DisplayName       string    `json:"displayName"`
+	Gender            *string   `json:"gender"`
 	IdentityPublicKey []byte    `json:"identityPublicKey"`
 	CreatedAt         time.Time `json:"createdAt"`
 	NotifyDone        bool      `json:"notifyDone"`
@@ -287,6 +288,7 @@ func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFrie
 		if err := rows.Scan(
 			&i.ID,
 			&i.DisplayName,
+			&i.Gender,
 			&i.IdentityPublicKey,
 			&i.CreatedAt,
 			&i.NotifyDone,
@@ -487,4 +489,37 @@ func (q *Queries) Unfriend(ctx context.Context, arg UnfriendParams) (int64, erro
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateProfile = `-- name: UpdateProfile :exec
+UPDATE users SET
+    display_name = CASE WHEN $1::boolean THEN $2::text ELSE display_name END,
+    username = CASE WHEN $3::boolean THEN $4::text ELSE username END,
+    gender = CASE WHEN $5::boolean THEN $6::text ELSE gender END
+WHERE id = $7
+`
+
+type UpdateProfileParams struct {
+	SetDisplayName bool      `json:"setDisplayName"`
+	DisplayName    string    `json:"displayName"`
+	SetUsername    bool      `json:"setUsername"`
+	Username       *string   `json:"username"`
+	SetGender      bool      `json:"setGender"`
+	Gender         *string   `json:"gender"`
+	ID             uuid.UUID `json:"id"`
+}
+
+// Each field changes only when its set_ flag is true; username and gender may be set
+// to NULL.
+func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) error {
+	_, err := q.db.Exec(ctx, updateProfile,
+		arg.SetDisplayName,
+		arg.DisplayName,
+		arg.SetUsername,
+		arg.Username,
+		arg.SetGender,
+		arg.Gender,
+		arg.ID,
+	)
+	return err
 }

@@ -247,7 +247,8 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := s.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
+	if err := s.UpdateProfile(ctx, ana.ID, ProfileUpdate{DisplayName: ptr("Ana"), SetUsername: true, Username: ptr("ana"),
+		SetGender: true, Gender: ptr("female")}); err != nil {
 		f.t.Fatal(err)
 	}
 	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.
@@ -310,6 +311,11 @@ func TestExportCoversEveryTable(t *testing.T) {
 	raw, _ := json.Marshal(export)
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
+	var users struct{ Username, Gender *string }
+	_ = json.Unmarshal(fields["users"], &users)
+	if users.Username == nil || *users.Username != "ana" || users.Gender == nil || *users.Gender != "female" {
+		t.Errorf("the export lacks the username or gender: %s", fields["users"])
+	}
 	for _, table := range tables {
 		if table == "webauthn_sessions" || table == "auth_nonces" || table == "purge_log" {
 			continue // exported as always empty (see ExportedTables)
@@ -356,6 +362,11 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email = 'ana@example.com'`).Scan(&links)
 	if links != 0 {
 		t.Errorf("%d unused magic links to the purged address remain", links)
+	}
+	var named int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username = 'ana'`).Scan(&named)
+	if named != 0 {
+		t.Error("the purged user's username remains")
 	}
 	var anonymous int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM invite_tree WHERE user_id IS NULL`).Scan(&anonymous)

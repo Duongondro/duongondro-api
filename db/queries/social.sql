@@ -1,6 +1,15 @@
 -- name: SetDisplayName :exec
 UPDATE users SET display_name = $2 WHERE id = $1;
 
+-- name: UpdateProfile :exec
+-- Each field changes only when its set_ flag is true; username and gender may be set
+-- to NULL.
+UPDATE users SET
+    display_name = CASE WHEN sqlc.arg(set_display_name)::boolean THEN sqlc.arg(display_name)::text ELSE display_name END,
+    username = CASE WHEN sqlc.arg(set_username)::boolean THEN sqlc.narg(username)::text ELSE username END,
+    gender = CASE WHEN sqlc.arg(set_gender)::boolean THEN sqlc.narg(gender)::text ELSE gender END
+WHERE id = sqlc.arg(id);
+
 -- name: CreateInviteNode :exec
 -- Every account gets a node; parent_id is the inviter's node (NULL for the first
 -- members and DEV accounts).
@@ -32,7 +41,7 @@ ON CONFLICT DO NOTHING;
 DELETE FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1);
 
 -- name: ListFriends :many
-SELECT users.id, users.display_name, users.identity_public_key, friendships.created_at, friendships.notify_done
+SELECT users.id, users.display_name, users.gender, users.identity_public_key, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id;

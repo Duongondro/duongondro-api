@@ -147,7 +147,7 @@ func (q *Queries) CreateNonce(ctx context.Context, nonceHash []byte) error {
 }
 
 const createUserWithID = `-- name: CreateUserWithID :one
-INSERT INTO users (id) VALUES ($1) RETURNING id, identity_public_key, key_version, created_at, display_name
+INSERT INTO users (id) VALUES ($1) RETURNING id, identity_public_key, key_version, created_at, display_name, username, gender
 `
 
 func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -159,6 +159,8 @@ func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, err
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.DisplayName,
+		&i.Username,
+		&i.Gender,
 	)
 	return i, err
 }
