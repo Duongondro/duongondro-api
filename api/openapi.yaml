@@ -86,7 +86,9 @@ paths:
       description: |
         Everything the server stores about this account, one key per table, sealed
         blobs as base64 (GDPR Articles 15 and 20). The phone decrypts the sealed logs
-        itself and builds the export ZIP; this is its server-raw.json.
+        itself and builds the export ZIP; this is its server-raw.json. friendships
+        lists each friend as the friends list shows them, so it carries the friends'
+        display names and genders, data about other people the account can see anyway.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       responses:
         "200":

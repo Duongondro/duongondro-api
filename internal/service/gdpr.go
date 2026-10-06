@@ -63,6 +63,8 @@ type Export struct {
 // both are listed as always empty.
 // admission_codes lists the code the account was admitted with, if any, without
 // the code's hash.
+// friendships lists friends as GET /api/friends does, with their display names and
+// genders: third-party data, but no more than the account already sees.
 // Passkeys, identities and push tokens appear without their secrets (the public key,
 // Apple's refresh token and the device token stay out).
 var ExportedTables = []string{
