@@ -180,6 +180,13 @@ func TestSignUpProofOverHTTP(t *testing.T) {
 	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"invite": map[string]any{"id": "7K2MQ9XA", "auth": make([]byte, 32)}}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown invitation: %d %s", rec.Code, rec.Body)
 	}
+	// An empty admissionCode is absent: beside an invitation it is no second proof.
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": "", "invite": map[string]any{"id": "7K2MQ9XA", "auth": make([]byte, 32)}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown invitation with an empty code: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": ""}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("an empty code alone: %d %s", rec.Code, rec.Body)
+	}
 }
 
 // A magic link is redeemed with its token alone, or with the address and the code.

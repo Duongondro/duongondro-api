@@ -11,8 +11,11 @@ import (
 )
 
 // signUpProof is the invitation or admission code a request carries; nil when it
-// carries neither (a plain sign-in).
+// carries neither (a plain sign-in). An empty admissionCode counts as absent.
 func signUpProof(invite *api.InviteProof, code *api.AdmissionCode) *service.SignUpProof {
+	if code != nil && *code == "" {
+		code = nil
+	}
 	if invite == nil && code == nil {
 		return nil
 	}
