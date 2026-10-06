@@ -194,7 +194,17 @@ func (s *Server) RequestMagicLink(ctx context.Context, req api.RequestMagicLinkR
 }
 
 func (s *Server) RedeemMagicLink(ctx context.Context, req api.RedeemMagicLinkRequestObject) (api.RedeemMagicLinkResponseObject, error) {
-	session, err := s.signIn.RedeemMagicLink(ctx, req.Body.Token)
+	var session service.Session
+	var err error
+	switch b := req.Body; {
+	case b.Token != nil && b.Email == nil && b.Code == nil:
+		session, err = s.signIn.RedeemMagicLink(ctx, *b.Token)
+	case b.Token == nil && b.Email != nil && b.Code != nil:
+		session, err = s.signIn.RedeemMagicLinkCode(ctx, *b.Email, *b.Code)
+	default:
+		return api.RedeemMagicLink400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(errorBody(
+			errors.New("send the link's token, or the e-mail address and the code")))}, nil
+	}
 	if errors.Is(err, service.ErrNoAccount) {
 		return api.RedeemMagicLink403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
 	}

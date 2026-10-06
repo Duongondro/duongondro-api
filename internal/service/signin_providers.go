@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"log/slog"
@@ -24,9 +25,10 @@ type TokenVerifier interface {
 	Verify(ctx context.Context, raw string) (oidc.Claims, error)
 }
 
-// Mailer sends the magic-link mail (SMTP through Brevo in production).
+// Mailer sends the magic-link mail (SMTP through Brevo in production): the link, and
+// the code to type instead, grouped as XXXX XXXX.
 type Mailer interface {
-	SendMagicLink(ctx context.Context, to, link string) error
+	SendMagicLink(ctx context.Context, to, link, code string) error
 }
 
 // AppleRevoker turns Sign in with Apple's authorization code into a refresh token,
@@ -40,6 +42,25 @@ type AppleRevoker interface {
 var ErrMailRateLimited = errors.New("too many sign-in links to this address; try again in a few minutes")
 
 const magicLinksPerWindow = 3
+
+// MagicLinkCodeLength is 8 Crockford base32 characters, 40 bits: with five guesses
+// per link and three links per address per 15 minutes, out of reach.
+const MagicLinkCodeLength = 8
+
+// maxWrongCodes kills a link row on its fifth wrong code.
+const maxWrongCodes = 5
+
+// errWrongCode answers a typed code that is wrong, or whose link expired, was used,
+// was replaced by a newer one or took too many wrong codes: all alike, so the answer
+// never says whether the address has a link at all.
+var errWrongCode = invalid("this code is wrong or has expired; ask for a new sign-in mail")
+
+// linkCodeHash binds a typed code to its row: SHA-256 over the token hash and the
+// normalized code.
+func linkCodeHash(tokenHash []byte, code string) []byte {
+	sum := sha256.Sum256(append(append([]byte{}, tokenHash...), code...))
+	return sum[:]
+}
 
 // NewNonce issues a single-use nonce for an Apple or Google sign-in, valid for ten
 // minutes. The app passes it to the provider (Apple takes its SHA-256 in hex), and
@@ -234,7 +255,9 @@ func normalizeEmail(email string) (string, error) {
 	return strings.ToLower(email), nil
 }
 
-// RequestMagicLink mails a single-use sign-in link valid for 15 minutes. Every
+// RequestMagicLink mails a single-use sign-in link valid for 15 minutes, with a code
+// that does the same when typed into the app; a newer link to the address makes the
+// older ones unusable. Every
 // address is treated alike, so the answer and its timing never reveal who has an
 // account: the per-address limit applies to all of them, a link is recorded either
 // way, and the mail goes out in the background, but only to an address with an
@@ -260,6 +283,10 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 	if err != nil {
 		return err
 	}
+	code, err := randomCode(MagicLinkCodeLength)
+	if err != nil {
+		return err
+	}
 	send := false
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
@@ -279,9 +306,12 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 			return err
 		}
 		send = err == nil || g != (gate{})
+		if err := q.KillMagicLinks(ctx, email); err != nil {
+			return err
+		}
 		sum := sha256.Sum256([]byte(token))
 		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: g.inviteID,
-			AdmissionID: g.admissionID})
+			AdmissionID: g.admissionID, CodeHash: linkCodeHash(sum[:], code)})
 	})
 	if err != nil || !send {
 		return err
@@ -289,7 +319,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 	go func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if err := s.mailer.SendMagicLink(ctx, email, linkBase+token); err != nil {
+		if err := s.mailer.SendMagicLink(ctx, email, linkBase+token, FormatCode(code)); err != nil {
 			slog.WarnContext(ctx, "Sending a magic link failed", "error", err.Error())
 		}
 	}()
@@ -306,6 +336,52 @@ func (s *SignIn) RedeemMagicLink(ctx context.Context, token string) (Session, er
 	} else if err != nil {
 		return Session{}, err
 	}
+	return s.signInWithLink(ctx, link)
+}
+
+// RedeemMagicLinkCode signs in with the code from a link's mail, typed with the
+// address it went to, as RedeemMagicLink does with the link. Only the newest live link
+// to the address counts; a wrong code counts against it, and the fifth kills it. The
+// code is read like an admission code (any case, spaces and hyphens ignored, O as 0,
+// I and L as 1).
+func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (Session, error) {
+	email, err := normalizeEmail(email)
+	if err != nil {
+		return Session{}, err
+	}
+	code = NormalizeCode(code)
+	if len(code) != MagicLinkCodeLength || strings.Trim(code, crockford) != "" {
+		return Session{}, invalid("a sign-in code is %d characters of Crockford base32", MagicLinkCodeLength)
+	}
+	var link db.MagicLink
+	matched := false
+	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		row, err := q.LockLiveMagicLinkForEmail(ctx, email)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if subtle.ConstantTimeCompare(row.CodeHash, linkCodeHash(row.TokenHash, code)) != 1 {
+			// Committed, so the count holds however the caller retries.
+			return q.RecordWrongMagicLinkCode(ctx, db.RecordWrongMagicLinkCodeParams{TokenHash: row.TokenHash, MaxWrong: maxWrongCodes})
+		}
+		matched, link = true, row
+		return q.DeleteMagicLink(ctx, row.TokenHash)
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	if !matched {
+		return Session{}, errWrongCode
+	}
+	return s.signInWithLink(ctx, link)
+}
+
+// signInWithLink signs in the account of a consumed link's address, or creates it
+// when the link was requested with an invite or admission code.
+func (s *SignIn) signInWithLink(ctx context.Context, link db.MagicLink) (Session, error) {
 	identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: link.Email})
 	if err == nil {
 		return s.session(ctx, identity.UserID, false)

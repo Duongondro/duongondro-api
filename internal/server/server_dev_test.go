@@ -181,3 +181,20 @@ func TestSignUpProofOverHTTP(t *testing.T) {
 		t.Fatalf("unknown invitation: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A magic link is redeemed with its token alone, or with the address and the code.
+func TestMagicLinkRedemptionShapes(t *testing.T) {
+	e := newTestServer(t, "server_magic_tests")
+	for name, body := range map[string]map[string]any{
+		"nothing":        {},
+		"code alone":     {"code": "7K2M Q9XA"},
+		"token and code": {"token": "x", "email": "bo@example.com", "code": "7K2M Q9XA"},
+		"unknown token":  {"token": "x"},
+		"no such link":   {"email": "bo@example.com", "code": "7k2m-q9xa"},
+		"malformed code": {"email": "bo@example.com", "code": "7K2M"},
+	} {
+		if rec := serve(t, e, http.MethodPost, "/api/auth/magic-links/redeem", "", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}

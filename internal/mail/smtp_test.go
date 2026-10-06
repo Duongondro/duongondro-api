@@ -18,7 +18,7 @@ func TestSendMagicLink(t *testing.T) {
 		return nil
 	}}
 	link := "https://duongondro.app/m#TOKEN"
-	if err := s.SendMagicLink(t.Context(), "bo@example.com", link); err != nil {
+	if err := s.SendMagicLink(t.Context(), "bo@example.com", link, "7K2M Q9XA"); err != nil {
 		t.Fatal(err)
 	}
 	rcpts, err := sent.GetRecipients()
@@ -34,8 +34,8 @@ func TestSendMagicLink(t *testing.T) {
 		t.Fatalf("headers:\n%s", head)
 	}
 	text, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encoded)))
-	if err != nil || !strings.Contains(string(text), link) {
-		t.Fatalf("body lacks the link (%v):\n%s", err, text)
+	if err != nil || !strings.Contains(string(text), link) || !strings.Contains(string(text), "7K2M Q9XA") {
+		t.Fatalf("body lacks the link or code (%v):\n%s", err, text)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestBadAddressIsRefused(t *testing.T) {
 		t.Fatal("sent")
 		return nil
 	}}
-	if err := s.SendMagicLink(t.Context(), "not an address", "x"); err == nil {
+	if err := s.SendMagicLink(t.Context(), "not an address", "x", "y"); err == nil {
 		t.Fatal("no error")
 	}
 }

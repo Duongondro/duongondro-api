@@ -113,8 +113,8 @@ func (v fakeVerifier) Verify(_ context.Context, raw string) (oidc.Claims, error)
 // fakeMailer collects mail, which RequestMagicLink sends in the background.
 type fakeMailer struct{ sent chan string }
 
-func (m *fakeMailer) SendMagicLink(_ context.Context, to, link string) error {
-	m.sent <- to + " " + link
+func (m *fakeMailer) SendMagicLink(_ context.Context, to, link, code string) error {
+	m.sent <- to + " " + code + " " + link
 	return nil
 }
 
@@ -340,5 +340,128 @@ func TestMagicLinks(t *testing.T) {
 	session, err := s.RedeemMagicLink(ctx, token())
 	if err != nil || session.UserID != created.UserID || session.Created {
 		t.Fatalf("sign-in by link: %v", err)
+	}
+}
+
+// mailOf waits for the next mail and returns its code (XXXX XXXX) and token.
+func mailOf(t *testing.T, m *fakeMailer) (code, token string) {
+	t.Helper()
+	select {
+	case last := <-m.sent:
+		parts := strings.SplitN(last, " ", 4) // to, code (two groups), link
+		return parts[1] + " " + parts[2], last[strings.LastIndexAny(last, "/#")+1:]
+	case <-time.After(5 * time.Second):
+		t.Fatal("no mail was sent")
+		return "", ""
+	}
+}
+
+// wrongCode is a well-formed code that differs from code.
+func wrongCode(code string) string {
+	c := []byte(NormalizeCode(code))
+	if c[0] == 'Z' {
+		c[0] = 'Y'
+	} else {
+		c[0] = 'Z'
+	}
+	return string(c)
+}
+
+func TestMagicLinkCodes(t *testing.T) {
+	f := setup(t)
+	mailer := &fakeMailer{sent: make(chan string, 16)}
+	s, social := f.signIn(nil, mailer, nil)
+	ctx := t.Context()
+	inviter := f.member()
+	auth := f.invite(social, inviter, "C0DEC0DE")
+	proof := &SignUpProof{Invite: &InviteProof{ID: "C0DEC0DE", Auth: auth}}
+	const base = "https://duongondro.app/m#"
+	request := func(email string) (code, token string) {
+		t.Helper()
+		if err := s.RequestMagicLink(ctx, email, proof, base); err != nil {
+			t.Fatal(err)
+		}
+		return mailOf(t, mailer)
+	}
+
+	// The code is typed leniently: lower case, a hyphen, O for 0, L for 1.
+	code, token := request("ana@example.com")
+	if len(code) != 9 || code[4] != ' ' || strings.Trim(strings.ReplaceAll(code, " ", ""), crockford) != "" {
+		t.Fatalf("the mail's code %q is not XXXX XXXX", code)
+	}
+	typed := strings.ToLower(strings.Replace(code, " ", "-", 1))
+	typed = strings.ReplaceAll(strings.ReplaceAll(typed, "0", "o"), "1", "l")
+	created, err := s.RedeemMagicLinkCode(ctx, " Ana@Example.com", typed)
+	if err != nil || !created.Created {
+		t.Fatalf("sign-up by code: %v %+v", err, created)
+	}
+	// Single use: neither the code nor the link works again.
+	if _, err := s.RedeemMagicLinkCode(ctx, "ana@example.com", code); !isValidation(err) {
+		t.Fatalf("a code used twice: %v", err)
+	}
+	if _, err := s.RedeemMagicLink(ctx, token); !isValidation(err) {
+		t.Fatalf("the link after its code: %v", err)
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "ana@example.com", "ABC"); !isValidation(err) {
+		t.Fatalf("a malformed code: %v", err)
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "not an address", code); !isValidation(err) {
+		t.Fatalf("a malformed address: %v", err)
+	}
+
+	// Five wrong codes kill the link, code and token alike.
+	code, token = request("bo@example.com")
+	for i := 0; i < maxWrongCodes; i++ {
+		if _, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", wrongCode(code)); !isValidation(err) {
+			t.Fatalf("wrong code %d: %v", i+1, err)
+		}
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", code); !isValidation(err) {
+		t.Fatalf("the right code after five wrong ones: %v", err)
+	}
+	if _, err := s.RedeemMagicLink(ctx, token); !isValidation(err) {
+		t.Fatalf("the link after five wrong codes: %v", err)
+	}
+	// Four wrong codes leave the right one working.
+	code, _ = request("bo@example.com")
+	for i := 0; i < maxWrongCodes-1; i++ {
+		_, _ = s.RedeemMagicLinkCode(ctx, "bo@example.com", wrongCode(code))
+	}
+	if session, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", code); err != nil || !session.Created {
+		t.Fatalf("the right code after four wrong ones: %v", err)
+	}
+
+	// A newer mail makes the older link and code unusable.
+	oldCode, oldToken := request("cy@example.com")
+	newCode, newToken := request("cy@example.com")
+	if _, err := s.RedeemMagicLink(ctx, oldToken); !isValidation(err) {
+		t.Fatalf("an older link after a newer one: %v", err)
+	}
+	if oldCode != newCode {
+		if _, err := s.RedeemMagicLinkCode(ctx, "cy@example.com", oldCode); !isValidation(err) {
+			t.Fatalf("an older code after a newer one: %v", err)
+		}
+	}
+	if session, err := s.RedeemMagicLink(ctx, newToken); err != nil || !session.Created {
+		t.Fatalf("the newest link: %v", err)
+	}
+
+	// An expired code is refused like a wrong one.
+	code, _ = request("di@example.com")
+	if _, err := f.pool.Exec(ctx, `UPDATE magic_links SET created_at = now() - interval '16 minutes' WHERE email = 'di@example.com'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "di@example.com", code); !isValidation(err) {
+		t.Fatalf("an expired code: %v", err)
+	}
+	// The per-address limit still holds with codes: dead links count.
+	if _, err := f.pool.Exec(ctx, `DELETE FROM magic_links`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < magicLinksPerWindow; i++ {
+		request("ed@example.com")
+	}
+	if err := s.RequestMagicLink(ctx, "ed@example.com", proof, base); !errors.Is(err, ErrMailRateLimited) {
+		t.Fatalf("a fourth mail in the window: %v", err)
 	}
 }

@@ -13,8 +13,9 @@ import (
 )
 
 const consumeMagicLink = `-- name: ConsumeMagicLink :one
-DELETE FROM magic_links WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, email, invite_id, created_at, admission_id
+DELETE FROM magic_links
+WHERE token_hash = $1 AND dead_at IS NULL AND created_at > now() - interval '15 minutes'
+RETURNING token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, dead_at
 `
 
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
@@ -26,6 +27,9 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 		&i.InviteID,
 		&i.CreatedAt,
 		&i.AdmissionID,
+		&i.CodeHash,
+		&i.WrongCodes,
+		&i.DeadAt,
 	)
 	return i, err
 }
@@ -111,7 +115,7 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 }
 
 const createMagicLink = `-- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email, invite_id, admission_id) VALUES ($1, $2, $3, $4)
+INSERT INTO magic_links (token_hash, email, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateMagicLinkParams struct {
@@ -119,6 +123,7 @@ type CreateMagicLinkParams struct {
 	Email       string     `json:"email"`
 	InviteID    *string    `json:"inviteId"`
 	AdmissionID *uuid.UUID `json:"admissionId"`
+	CodeHash    []byte     `json:"codeHash"`
 }
 
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
@@ -127,6 +132,7 @@ func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams
 		arg.Email,
 		arg.InviteID,
 		arg.AdmissionID,
+		arg.CodeHash,
 	)
 	return err
 }
@@ -178,6 +184,15 @@ func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnS
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteMagicLink = `-- name: DeleteMagicLink :exec
+DELETE FROM magic_links WHERE token_hash = $1
+`
+
+func (q *Queries) DeleteMagicLink(ctx context.Context, tokenHash []byte) error {
+	_, err := q.db.Exec(ctx, deleteMagicLink, tokenHash)
+	return err
 }
 
 const deleteMagicLinksForUser = `-- name: DeleteMagicLinksForUser :exec
@@ -333,6 +348,16 @@ func (q *Queries) InviterOf(ctx context.Context, id string) (uuid.UUID, error) {
 	return inviter_id, err
 }
 
+const killMagicLinks = `-- name: KillMagicLinks :exec
+UPDATE magic_links SET dead_at = now() WHERE lower(email) = lower($1) AND dead_at IS NULL
+`
+
+// A newer link to the address makes the older ones unusable, link and code.
+func (q *Queries) KillMagicLinks(ctx context.Context, lower string) error {
+	_, err := q.db.Exec(ctx, killMagicLinks, lower)
+	return err
+}
+
 const listCredentials = `-- name: ListCredentials :many
 SELECT id, user_id, data, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at
 `
@@ -404,6 +429,31 @@ func (q *Queries) LockEmail(ctx context.Context, email string) error {
 	return err
 }
 
+const lockLiveMagicLinkForEmail = `-- name: LockLiveMagicLinkForEmail :one
+SELECT token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, dead_at FROM magic_links
+WHERE lower(email) = lower($1) AND dead_at IS NULL AND code_hash IS NOT NULL
+    AND created_at > now() - interval '15 minutes'
+ORDER BY created_at DESC LIMIT 1
+FOR UPDATE
+`
+
+// The one live link to an address (a newer one kills the older), for a typed code.
+func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, lower string) (MagicLink, error) {
+	row := q.db.QueryRow(ctx, lockLiveMagicLinkForEmail, lower)
+	var i MagicLink
+	err := row.Scan(
+		&i.TokenHash,
+		&i.Email,
+		&i.InviteID,
+		&i.CreatedAt,
+		&i.AdmissionID,
+		&i.CodeHash,
+		&i.WrongCodes,
+		&i.DeadAt,
+	)
+	return i, err
+}
+
 const purgeExpiredMagicLinks = `-- name: PurgeExpiredMagicLinks :execrows
 DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes'
 `
@@ -435,6 +485,23 @@ func (q *Queries) PurgeExpiredWebauthnSessions(ctx context.Context) (int64, erro
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const recordWrongMagicLinkCode = `-- name: RecordWrongMagicLinkCode :exec
+UPDATE magic_links SET wrong_codes = wrong_codes + 1,
+    dead_at = CASE WHEN wrong_codes + 1 >= $1::smallint THEN now() ELSE dead_at END
+WHERE token_hash = $2
+`
+
+type RecordWrongMagicLinkCodeParams struct {
+	MaxWrong  int16  `json:"maxWrong"`
+	TokenHash []byte `json:"tokenHash"`
+}
+
+// The fifth wrong code kills the row.
+func (q *Queries) RecordWrongMagicLinkCode(ctx context.Context, arg RecordWrongMagicLinkCodeParams) error {
+	_, err := q.db.Exec(ctx, recordWrongMagicLinkCode, arg.MaxWrong, arg.TokenHash)
+	return err
 }
 
 const updateCredential = `-- name: UpdateCredential :exec

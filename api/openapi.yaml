@@ -624,8 +624,11 @@ paths:
     post:
       operationId: requestMagicLink
       description: |
-        Mails a single-use sign-in link (15 minutes). The answer is the same whether
-        or not an account uses the address, which therefore is never revealed.
+        Mails a single-use sign-in link (15 minutes) and an 8-character code that
+        does the same when typed into the app, shown as XXXX XXXX. A newer request
+        for the address makes the older links and codes unusable. The answer is the
+        same whether or not an account uses the address, which therefore is never
+        revealed.
       requestBody:
         required: true
         content:
@@ -639,11 +642,16 @@ paths:
   /api/auth/magic-links/redeem:
     post:
       operationId: redeemMagicLink
+      description: |
+        Signs in with the link's token, or with the address and the code from the
+        mail. A wrong code counts against the newest link to the address; the fifth
+        kills it, link and all. A wrong, expired, used or replaced code is the same
+        400, whether or not the address has a link.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/MagicLinkToken"}
+            schema: {$ref: "#/components/schemas/MagicLinkRedemption"}
       responses:
         "200":
           description: Signed in.
@@ -1191,11 +1199,18 @@ components:
         email: {type: string, maxLength: 320}
         invite: {$ref: "#/components/schemas/InviteProof"}
         admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
-    MagicLinkToken:
+    MagicLinkRedemption:
       type: object
-      required: [token]
+      description: Either token alone (from the link), or email and code (typed).
       properties:
         token: {type: string, maxLength: 128}
+        email: {type: string, maxLength: 320}
+        code:
+          type: string
+          maxLength: 32
+          description: |
+            The 8 Crockford base32 characters from the mail. Read leniently: case,
+            spaces and hyphens are ignored, O is read as 0 and I and L as 1.
     PushTokenInput:
       type: object
       required: [platform, token]
