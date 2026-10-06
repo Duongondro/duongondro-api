@@ -465,3 +465,31 @@ func TestMagicLinkCodes(t *testing.T) {
 		t.Fatalf("a fourth mail in the window: %v", err)
 	}
 }
+
+// A code's hash is keyed per process: a restarted server (a new SignIn) no longer
+// accepts codes mailed before it, though their links still work.
+func TestMagicLinkCodeKeyIsPerProcess(t *testing.T) {
+	f := setup(t)
+	mailer := &fakeMailer{sent: make(chan string, 4)}
+	s, social := f.signIn(nil, mailer, nil)
+	ctx := t.Context()
+	auth := f.invite(social, f.member(), "KEYKEY00")
+	if err := s.RequestMagicLink(ctx, "fa@example.com", &SignUpProof{Invite: &InviteProof{ID: "KEYKEY00", Auth: auth}}, "https://duongondro.app/m#"); err != nil {
+		t.Fatal(err)
+	}
+	code, token := mailOf(t, mailer)
+	var stored []byte
+	_ = f.pool.QueryRow(ctx, `SELECT code_hash FROM magic_links WHERE email = 'fa@example.com'`).Scan(&stored)
+	var tokenHash []byte
+	_ = f.pool.QueryRow(ctx, `SELECT token_hash FROM magic_links WHERE email = 'fa@example.com'`).Scan(&tokenHash)
+	if plain := sha(string(tokenHash) + NormalizeCode(code)); string(plain) == string(stored) {
+		t.Fatal("the code is stored as a plain hash")
+	}
+	restarted, _ := f.signIn(nil, mailer, nil)
+	if _, err := restarted.RedeemMagicLinkCode(ctx, "fa@example.com", code); !isValidation(err) {
+		t.Fatalf("a code from before the restart: %v", err)
+	}
+	if session, err := restarted.RedeemMagicLink(ctx, token); err != nil || !session.Created {
+		t.Fatalf("the link from before the restart: %v", err)
+	}
+}

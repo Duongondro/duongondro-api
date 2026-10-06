@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -56,11 +57,16 @@ const maxWrongCodes = 5
 // with the same status and body.
 var errWrongCode = invalid("this code is wrong or has expired; ask for a new sign-in mail")
 
-// linkCodeHash binds a typed code to its row: SHA-256 over the token hash and the
-// normalized code.
-func linkCodeHash(tokenHash []byte, code string) []byte {
-	sum := sha256.Sum256(append(append([]byte{}, tokenHash...), code...))
-	return sum[:]
+// linkCodeHash binds a typed code to its row: HMAC-SHA256, under a key drawn when
+// the process starts and kept only in memory, of the token hash and the normalized
+// code. A plain hash of 40 bits would give itself up to anyone who can read the
+// database in minutes of GPU time; without the key it gives up nothing. A restart
+// draws a new key, so codes mailed before it stop working (their links still do).
+func (s *SignIn) linkCodeHash(tokenHash []byte, code string) []byte {
+	mac := hmac.New(sha256.New, s.codeKey)
+	mac.Write(tokenHash)
+	mac.Write([]byte(code))
+	return mac.Sum(nil)
 }
 
 // NewNonce issues a single-use nonce for an Apple or Google sign-in, valid for ten
@@ -312,7 +318,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		}
 		sum := sha256.Sum256([]byte(token))
 		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: g.inviteID,
-			AdmissionID: g.admissionID, CodeHash: linkCodeHash(sum[:], code)})
+			AdmissionID: g.admissionID, CodeHash: s.linkCodeHash(sum[:], code)})
 	})
 	if err != nil || !send {
 		return err
@@ -365,7 +371,7 @@ func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (S
 		} else if err != nil {
 			return err
 		}
-		if subtle.ConstantTimeCompare(row.CodeHash, linkCodeHash(row.TokenHash, code)) != 1 {
+		if subtle.ConstantTimeCompare(row.CodeHash, s.linkCodeHash(row.TokenHash, code)) != 1 {
 			// Committed, so the count holds however the caller retries.
 			return q.RecordWrongMagicLinkCode(ctx, db.RecordWrongMagicLinkCodeParams{TokenHash: row.TokenHash, MaxWrong: maxWrongCodes})
 		}

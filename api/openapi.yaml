@@ -651,7 +651,8 @@ paths:
       description: |
         Signs in with the link's token, or with the address and the code from the
         mail. A wrong code counts against the newest mail's code; the fifth kills that
-        code, though not its link. A wrong, expired, used or replaced code is the same
+        code, though not its link. A server restart invalidates codes mailed before
+        it (their links keep working): ask for a new mail. A wrong, expired, used or replaced code is the same
         400, whether or not the address has a link.
       requestBody:
         required: true

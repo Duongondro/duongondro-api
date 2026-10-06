@@ -3,6 +3,7 @@ package service
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,8 @@ type SignIn struct {
 	mailer Mailer
 	apple  AppleRevoker
 	now    func() time.Time
+	// codeKey keys the hashes of magic-link codes; random per process, never stored.
+	codeKey []byte
 }
 
 // SignInConfig configures the sign-in methods. RPID is the passkey relying party
@@ -62,8 +65,12 @@ func NewSignIn(pool *pgxpool.Pool, a *auth.Service, social *Social, cfg SignInCo
 	if err != nil {
 		return nil, fmt.Errorf("webauthn config: %w", err)
 	}
+	codeKey := make([]byte, 32)
+	if _, err := rand.Read(codeKey); err != nil {
+		return nil, err
+	}
 	s := &SignIn{pool: pool, q: db.New(pool), auth: a, social: social, web: web, oidc: cfg.Verifiers,
-		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now}
+		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey}
 	if s.oidc == nil {
 		s.oidc = map[string]TokenVerifier{}
 	}
