@@ -10,5 +10,5 @@ import "embed"
 // FS holds the site. The association files under /.well-known/ are not here: the
 // API generates them from its configuration (internal/server/wellknown.go).
 //
-//go:embed index.html favicon-32.png apple-touch-icon.png og.png robots.txt _assets fonts i f m privacy
+//go:embed index.html favicon.ico favicon-32.png apple-touch-icon.png og.png robots.txt _assets fonts i f m privacy
 var FS embed.FS

@@ -45,6 +45,7 @@ func TestRoutes(t *testing.T) {
 		{"/f/7K2MQ9XA", "Add a friend", "no-store"},
 		{"/m", "Open this link on your phone", "no-store"},
 		{"/m/", "Open this link on your phone", "no-store"},
+		{"/favicon.ico", "\x00\x00\x01\x00", "public, max-age=604800"},
 		{"/favicon-32.png", "\x89PNG", "public, max-age=604800"},
 		{"/apple-touch-icon.png", "\x89PNG", "public, max-age=604800"},
 		{"/og.png", "\x89PNG", "public, max-age=604800"},
