@@ -60,7 +60,7 @@ func TestFriendsOverHTTP(t *testing.T) {
 		t.Fatalf("redeem: %d %s", rec.Code, rec.Body)
 	}
 
-	st := e2ee.Streak{Current: 3, Day: "2026-10-04", Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 3, Practice: "dorje-sempa", Seq: 1, User: ana.id}
+	st := e2ee.Streak{Current: 3, Day: today(0), Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 3, Practice: "dorje-sempa", Seq: 1, User: ana.id}
 	if rec := serve(t, e, http.MethodPut, "/api/streaks/dorje-sempa", ana.token, statement(ana, e2ee.TypeStreak, st)); rec.Code != http.StatusNoContent {
 		t.Fatalf("put streak: %d %s", rec.Code, rec.Body)
 	}
@@ -93,5 +93,74 @@ func TestFriendsOverHTTP(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &friends)
 	if len(friends.Friends) != 0 {
 		t.Fatalf("the purged friend is still listed: %s", rec.Body)
+	}
+}
+
+// today is the UTC civil day offset days from now, for streak statements whose
+// deadline the tests take from the clock.
+func today(offset int) string {
+	return time.Now().UTC().AddDate(0, 0, offset).Format("2006-01-02")
+}
+
+// PATCH /api/me: absent fields stay, null clears, a taken username is a 409; the
+// display name alone, as the iOS app sends it, still works.
+func TestProfileOverHTTP(t *testing.T) {
+	e := newTestServer(t, "server_profile_tests")
+	ana, bo := newDevUser(t, e), newDevUser(t, e)
+	me := func(u devUser) map[string]any {
+		t.Helper()
+		rec := serve(t, e, http.MethodGet, "/api/me", u.token, nil)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	patch := func(u devUser, body string, want int) {
+		t.Helper()
+		var v any
+		_ = json.Unmarshal([]byte(body), &v)
+		if rec := serve(t, e, http.MethodPatch, "/api/me", u.token, v); rec.Code != want {
+			t.Fatalf("PATCH %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	patch(ana, `{"displayName": "Ana", "username": "Ana_K", "gender": "female"}`, http.StatusNoContent)
+	if m := me(ana); m["displayName"] != "Ana" || m["username"] != "ana_k" || m["gender"] != "female" {
+		t.Fatalf("me: %v", m)
+	}
+	patch(ana, `{"displayName": "Ania"}`, http.StatusNoContent)
+	if m := me(ana); m["displayName"] != "Ania" || m["username"] != "ana_k" || m["gender"] != "female" {
+		t.Fatalf("a display-name PATCH changed the rest: %v", m)
+	}
+	patch(bo, `{"username": "ANA_K"}`, http.StatusConflict)
+	patch(bo, `{"username": "a"}`, http.StatusBadRequest)
+	patch(bo, `{"gender": "robot"}`, http.StatusBadRequest)
+	patch(ana, `{"gender": null}`, http.StatusNoContent)
+	if m := me(ana); m["username"] != "ana_k" {
+		t.Fatalf("clearing the gender touched the username: %v", m)
+	} else if _, ok := m["gender"]; ok {
+		t.Fatalf("gender not cleared: %v", m)
+	}
+	patch(ana, `{"username": null}`, http.StatusNoContent)
+	if _, ok := me(ana)["username"]; ok {
+		t.Fatal("username not cleared")
+	}
+	if m := me(bo); m["displayName"] != "" {
+		t.Fatalf("bo: %v", m)
+	}
+}
+
+// PATCH /api/me is rate-limited, so its 409 cannot be used to list usernames.
+func TestProfilePatchIsRateLimited(t *testing.T) {
+	e := newTestServer(t, "server_profile_limit_tests")
+	ana := newDevUser(t, e)
+	limited := false
+	for i := 0; i <= profileRateLimit.Requests && !limited; i++ {
+		rec := serve(t, e, http.MethodPatch, "/api/me", ana.token, map[string]any{"username": "probe"})
+		limited = rec.Code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("PATCH /api/me is not rate-limited")
+	}
+	if rec := serve(t, e, http.MethodGet, "/api/me", ana.token, nil); rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/me is limited too: %d", rec.Code)
 	}
 }

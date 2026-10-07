@@ -19,7 +19,7 @@ The server stores sealed blobs and signed public streaks. It never receives a pr
 | `internal/server` | Echo strict server: authentication and DTO mapping |
 | `internal/service` | The rules: what is checked before a key, wrap, signed statement or sealed log is stored |
 | `internal/repository` | Transactions: practice-key rotation, the sync read |
-| `cmd/duongondro-api` | The server binary (`serve`, `migrate`) |
+| `cmd/duongondro-api` | The server binary (`serve`, `migrate`, `reapply-purges`, `admit`) |
 
 ## Commands
 
@@ -33,11 +33,29 @@ make release   # build; refuses a dirty tree and any trace of the DEV sign-in
 make deploy    # build for FreeBSD and deploy to the shared server (deploy/deploy.yml)
 ```
 
+## Admission codes
+
+Sign-up is invitation-only, and invitations come from members, so the first members need another way in: single-use admission codes. `duongondro-api admit` prints fresh ones, 16 Crockford base32 characters in groups of four, and stores only their SHA-256, so the printout is the only copy:
+
+```sh
+DATABASE_URL=postgres://$USER@localhost/duongondro go run ./cmd/duongondro-api admit -n 5 -days 30
+```
+
+`-n` is how many (default 5), `-days` how long they last (default 30). A code works wherever an invitation does (passkey, Apple, Google and magic-link sign-up), typed in any case, with or without spaces or hyphens, O for 0 and I or L for 1. The account it makes is a root of the invite tree: no inviter, no friendship.
+
+In production, run the deployed binary on the shared server as the `duongondro` service user, with the service's environment: the env file shared-infrastructure installs for the project (its path is set there, not here), which sets `DATABASE_URL`. Sourcing it keeps the database password off the command line:
+
+```sh
+sudo -u duongondro sh -c 'set -a; . /path/to/duongondro.env; exec /usr/local/lib/duongondro/current/server admit -n 5'
+```
+
+Hand each code to one person over a private channel; a spent or expired code is refused with the same 404 as an unknown invitation.
+
 The public website for `duongondro.app` lives in `web/` (see its README) and is served by the same binary on the hosts in `WEB_HOSTS`.
 
 Production is `duongondro` on the shared FreeBSD server set up by [shared-infrastructure](https://github.com/moroz/shared-infrastructure): service, database, env file and Caddy for `api.duongondro.app` and the apex's `/.well-known/` files. The service runs `./server migrate` before it starts; the server reads the env vars listed at the top of `cmd/duongondro-api/main.go`.
 
-What exists so far: sessions, the Ed25519 identity key, devices with their key tier, the signed device list, wraps of the practice key and identity seed (signatures verified against an AAD the server rebuilds), practice-key rotation, sealed practice logs with last-write-wins and the `<generation>:<xid8>` sync cursor, recovery boxes; invitations (signed, reusable, rate-limited, auth stored hashed), friendships, blocks, reports, signed public streaks visible to friends only; the GDPR export and purge; and sign-in with passkeys, Sign in with Apple, Google and magic links, all creating accounts only with an invitation (Apple authorisations are revoked on deletion); and push through APNs and FCM: "done today" to friends who opted in, one poke per friend per day, and streak-at-risk two hours before a public streak's signed deadline, all as loc-keys the phones render in their own language. Magic links are mailed over SMTP through Brevo's relay, with the token in the URL fragment.
+What exists so far: sessions, the Ed25519 identity key, devices with their key tier, the signed device list, wraps of the practice key and identity seed (signatures verified against an AAD the server rebuilds), practice-key rotation, sealed practice logs with last-write-wins and the `<generation>:<xid8>` sync cursor, recovery boxes; invitations (signed, reusable, rate-limited, auth stored hashed), friendships, blocks, reports, signed public streaks visible to friends only; a profile of display name, optional username (lowercase, unique, naming the passkeys, never shown to friends) and optional gender (shown to friends for grammatical forms), set by PATCH /api/me or already with a passkey sign-up; the GDPR export (which, in its friend list, includes friends' display names and genders, as the app shows them) and purge; and sign-in with passkeys, Sign in with Apple, Google and magic links, all creating accounts only with an invitation or a single-use admission code (Apple authorisations are revoked on deletion); and push through APNs and FCM: "done today" to friends who opted in, one poke per friend per day, and streak-at-risk two hours before a public streak's signed deadline, all as loc-keys the phones render in their own language. Magic links are mailed over SMTP through Brevo's relay, with the token in the URL fragment and an 8-character code to type instead (five wrong guesses or a newer mail kill the code, never the link, so guessing locks nobody out). Codes are stored as an HMAC under a key each server process draws at start and keeps only in memory, so a database reader cannot brute-force their 40 bits; a restart or deploy therefore invalidates codes already mailed, while their links keep working.
 
 ## Design
 

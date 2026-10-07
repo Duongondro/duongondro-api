@@ -12,7 +12,8 @@ info:
     from it too.
 
     Every sign-in ends in a bearer token. An account is created only with a valid
-    invitation; signing in never grants keys. The DEV build's POST /api/dev/session is
+    invitation or an unused admission code (`duongondro-api admit`, for the first
+    members, whom nobody can invite); signing in never grants keys. The DEV build's POST /api/dev/session is
     registered outside this file, so a release build has no trace of it.
 servers:
   - url: https://api.duongondro.app
@@ -50,7 +51,12 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
     patch:
       operationId: updateMe
-      description: Sets the display name friends see.
+      description: |
+        Changes the profile: the display name friends see, the username that names
+        the account's passkeys (never shown to friends) and the gender friends'
+        phones use for grammatical forms. An absent field stays as it is; null clears
+        username or gender. 409: the username is taken (case-insensitively). Limited
+        to 10 a minute per address, so the 409 cannot be used to list usernames.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true
@@ -61,6 +67,8 @@ paths:
         "204": {description: Updated.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
     delete:
       operationId: deleteMe
       description: |
@@ -72,29 +80,15 @@ paths:
       responses:
         "204": {description: Deleted.}
         "401": {$ref: "#/components/responses/Unauthorized"}
-  /api/me/gender:
-    put:
-      operationId: setGender
-      description: |
-        Sets or clears the optional grammatical gender friends' phones use for
-        conjugations; without one, they use the neutral forms.
-      parameters: [{$ref: "#/components/parameters/Authorization"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/GenderUpdate"}
-      responses:
-        "204": {description: Updated.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
   /api/me/export:
     get:
       operationId: exportMe
       description: |
         Everything the server stores about this account, one key per table, sealed
         blobs as base64 (GDPR Articles 15 and 20). The phone decrypts the sealed logs
-        itself and builds the export ZIP; this is its server-raw.json.
+        itself and builds the export ZIP; this is its server-raw.json. friendships
+        lists each friend as the friends list shows them, so it carries the friends'
+        display names and genders, data about other people the account can see anyway.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       responses:
         "200":
@@ -551,12 +545,17 @@ paths:
   /api/auth/passkeys/sign-up:
     post:
       operationId: beginPasskeySignUp
-      description: Starts creating an account with a passkey; the invitation is checked now and when it finishes.
+      description: |
+        Starts creating an account with a passkey; the invitation or admission code is
+        checked now and when it finishes. 404: no such live invitation, or the code is
+        wrong, spent or expired. The optional profile (as PATCH /api/me takes it) is
+        set on the account when it is made and names the passkey; 409: the username is
+        taken, now or by the time the ceremony finishes.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/InviteProofBody"}
+            schema: {$ref: "#/components/schemas/PasskeySignUp"}
       responses:
         "200":
           description: Options for the platform authenticator.
@@ -565,6 +564,7 @@ paths:
               schema: {$ref: "#/components/schemas/Ceremony"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/passkeys/sign-in:
     post:
@@ -595,6 +595,7 @@ paths:
               schema: {$ref: "#/components/schemas/SignInResult"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/nonces:
     post:
@@ -613,9 +614,9 @@ paths:
     post:
       operationId: providerSignIn
       description: |
-        Signs in with a Sign in with Apple or Google ID token; with an invitation and
-        no account for that provider account, creates one. 403 means no account uses
-        it and an invitation is needed.
+        Signs in with a Sign in with Apple or Google ID token; with an invitation or
+        admission code and no account for that provider account, creates one. 403
+        means no account uses it and an invitation is needed.
       parameters: [{$ref: "#/components/parameters/Provider"}]
       requestBody:
         required: true
@@ -636,8 +637,12 @@ paths:
     post:
       operationId: requestMagicLink
       description: |
-        Mails a single-use sign-in link (15 minutes). The answer is the same whether
-        or not an account uses the address, which therefore is never revealed.
+        Mails a single-use sign-in link (15 minutes) and an 8-character code that
+        does the same when typed into the app, shown as XXXX XXXX. A newer request
+        for the address makes the older codes unusable; older links still work until
+        used or expired. The answer is the
+        same whether or not an account uses the address, which therefore is never
+        revealed.
       requestBody:
         required: true
         content:
@@ -651,11 +656,18 @@ paths:
   /api/auth/magic-links/redeem:
     post:
       operationId: redeemMagicLink
+      description: |
+        Signs in with the link's token, or with the address and the code from the
+        mail. A wrong code counts against the newest mail's code; the fifth kills that
+        code, though not its link. A server restart invalidates codes mailed before
+        it (their links keep working): ask for a new mail. A wrong, expired, used or
+        replaced code gets the same status and body (400) whether or not the address
+        has a pending code; response times may still differ.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/MagicLinkToken"}
+            schema: {$ref: "#/components/schemas/MagicLinkRedemption"}
       responses:
         "200":
           description: Signed in.
@@ -845,7 +857,7 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: No account uses this sign-in; an invitation is needed to create one.
+      description: No account uses this sign-in; an invitation (or admission code) is needed to create one.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -888,6 +900,7 @@ components:
         identityPublicKey: {type: string, format: byte, description: Ed25519, 32 bytes}
         keyVersion: {type: integer, description: Current version of the practice key}
         displayName: {type: string}
+        username: {type: string, description: "Absent until set; lowercase"}
         gender: {$ref: "#/components/schemas/Gender"}
         devices:
           type: array
@@ -1032,21 +1045,25 @@ components:
         logs:
           type: array
           items: {$ref: "#/components/schemas/PracticeLog"}
-    MeUpdate:
-      type: object
-      required: [displayName]
-      properties:
-        displayName: {type: string, maxLength: 64}
     Gender:
       type: string
       enum: [male, female, nonbinary]
-      description: |
-        Grammatical gender for conjugations in the Slavic languages, optional.
-        Absent when not given; nonbinary, like absent, gets the neutral forms.
-    GenderUpdate:
+      description: Absent when not given.
+    MeUpdate:
       type: object
+      description: Absent fields stay as they are; null clears username or gender.
       properties:
-        gender: {$ref: "#/components/schemas/Gender"}
+        displayName: {type: string, maxLength: 64}
+        username:
+          type: string
+          nullable: true
+          minLength: 3
+          maxLength: 32
+          description: "3 to 32 of a-z, 0-9, dot and underscore; stored lowercased, unique regardless of case"
+        gender:
+          type: string
+          nullable: true
+          enum: [male, female, nonbinary]
     InviteInput:
       type: object
       required: [id, auth, expiresAt, payload, signature, mac]
@@ -1155,11 +1172,26 @@ components:
       properties:
         id: {type: string, minLength: 8, maxLength: 8}
         auth: {type: string, format: byte}
-    InviteProofBody:
+    AdmissionCode:
+      type: string
+      maxLength: 64
+      description: |
+        A bootstrap admission code, 16 Crockford base32 characters, single use. Read
+        leniently: case, spaces and hyphens are ignored, O is read as 0 and I and L as 1.
+        The account it makes has no inviter.
+    PasskeySignUp:
       type: object
-      required: [invite]
+      description: Exactly one of invite and admissionCode, and optionally the profile.
       properties:
         invite: {$ref: "#/components/schemas/InviteProof"}
+        admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          description: "3 to 32 of a-z, 0-9, dot and underscore; stored lowercased, unique regardless of case"
+        displayName: {type: string, maxLength: 64}
+        gender: {$ref: "#/components/schemas/Gender"}
     Ceremony:
       type: object
       required: [sessionId, options]
@@ -1183,7 +1215,7 @@ components:
       properties:
         token: {type: string, description: "Bearer token; send as Authorization: Bearer <token>"}
         userId: {$ref: "#/components/schemas/UUID"}
-        created: {type: boolean, description: A new account was made with the invitation}
+        created: {type: boolean, description: A new account was made with the invitation or admission code}
     ProviderSignIn:
       type: object
       required: [idToken, nonce]
@@ -1192,6 +1224,7 @@ components:
         nonce: {type: string, maxLength: 256, description: The raw nonce the app gave the provider}
         authorizationCode: {type: string, maxLength: 1024, description: "Apple only: kept to revoke the authorisation when the account is deleted"}
         invite: {$ref: "#/components/schemas/InviteProof"}
+        admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
     ProviderLink:
       type: object
       required: [idToken, nonce]
@@ -1205,11 +1238,19 @@ components:
       properties:
         email: {type: string, maxLength: 320}
         invite: {$ref: "#/components/schemas/InviteProof"}
-    MagicLinkToken:
+        admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
+    MagicLinkRedemption:
       type: object
-      required: [token]
+      description: Either token alone (from the link), or email and code (typed).
       properties:
         token: {type: string, maxLength: 128}
+        email: {type: string, maxLength: 320}
+        code:
+          type: string
+          maxLength: 32
+          description: |
+            The 8 Crockford base32 characters from the mail. Read leniently: case,
+            spaces and hyphens are ignored, O is read as 0 and I and L as 1.
     PushTokenInput:
       type: object
       required: [platform, token]

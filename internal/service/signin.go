@@ -1,7 +1,9 @@
 package service
 
 import (
+	"cmp"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +23,8 @@ import (
 // SignIn holds the sign-in methods (design: From CodeShare › Sign-in). Three rules
 // hold across them:
 //
-//   - An account is created only with a valid invitation: every method can sign
-//     in, none can sign up without one.
+//   - An account is created only with a valid invitation or an unused admission
+//     code: every method can sign in, none can sign up without one.
 //   - Signing in never grants keys: a new device still enrols from an existing one
 //     or the recovery code.
 //   - Linking is explicit: a method is added to an account only from a signed-in
@@ -37,6 +39,8 @@ type SignIn struct {
 	mailer Mailer
 	apple  AppleRevoker
 	now    func() time.Time
+	// codeKey keys the hashes of magic-link codes; random per process, never stored.
+	codeKey []byte
 }
 
 // SignInConfig configures the sign-in methods. RPID is the passkey relying party
@@ -61,8 +65,12 @@ func NewSignIn(pool *pgxpool.Pool, a *auth.Service, social *Social, cfg SignInCo
 	if err != nil {
 		return nil, fmt.Errorf("webauthn config: %w", err)
 	}
+	codeKey := make([]byte, 32)
+	if _, err := rand.Read(codeKey); err != nil {
+		return nil, err
+	}
 	s := &SignIn{pool: pool, q: db.New(pool), auth: a, social: social, web: web, oidc: cfg.Verifiers,
-		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now}
+		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey}
 	if s.oidc == nil {
 		s.oidc = map[string]TokenVerifier{}
 	}
@@ -73,7 +81,7 @@ func NewSignIn(pool *pgxpool.Pool, a *auth.Service, social *Social, cfg SignInCo
 type Session struct {
 	Token   string
 	UserID  uuid.UUID
-	Created bool // a new account, made with an invitation
+	Created bool // a new account, made with an invitation or admission code
 }
 
 // InviteProof is the invitation a sign-up presents: its id and auth.
@@ -82,26 +90,39 @@ type InviteProof struct {
 	Auth []byte
 }
 
-// ErrNoAccount answers a sign-in by a method no account uses, without an invite to
-// create one: the app then asks for an invitation.
+// ErrNoAccount answers a sign-in by a method no account uses, without an invite or
+// admission code to create one: the app then asks for an invitation.
 var ErrNoAccount = errors.New("no account uses this sign-in; an invitation is needed to create one")
 
-// createAccount makes a user (with id, when given) as a child of the inviter in the
-// invite tree, inside the caller's transaction. It locks the invite and checks it is
-// still live, so a revocation or the inviter's purge since the first check stops the
-// sign-up (ErrNotFound) rather than slipping through.
-func createAccount(ctx context.Context, q *db.Queries, inviteID string, id *uuid.UUID) (db.User, error) {
-	inv, err := q.LockInvite(ctx, inviteID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return db.User{}, ErrNotFound
-	} else if err != nil {
-		return db.User{}, err
+// createAccount makes a user (with id, when given) inside the caller's transaction:
+// a child of the inviter in the invite tree when g is an invite, a root (no inviter,
+// no friendship) when it is an admission code, which it spends. It locks the invite
+// or code and checks it is still live, so a revocation, the inviter's purge or
+// another sign-up with the same code since the first check stops the sign-up
+// (ErrNotFound) rather than slipping through.
+func createAccount(ctx context.Context, q *db.Queries, g gate, id *uuid.UUID) (db.User, error) {
+	var inviter *uuid.UUID
+	switch {
+	case g.inviteID != nil:
+		inv, err := q.LockInvite(ctx, *g.inviteID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.User{}, ErrNotFound
+		} else if err != nil {
+			return db.User{}, err
+		}
+		if inv.RevokedAt != nil || !inv.ExpiresAt.After(time.Now()) {
+			return db.User{}, ErrNotFound
+		}
+		inviter = &inv.InviterID
+	case g.admissionID != nil:
+		if err := spendAdmission(ctx, q, *g.admissionID); err != nil {
+			return db.User{}, err
+		}
+	default:
+		return db.User{}, ErrNoAccount
 	}
-	if inv.RevokedAt != nil || !inv.ExpiresAt.After(time.Now()) {
-		return db.User{}, ErrNotFound
-	}
-	inviter := inv.InviterID
 	var user db.User
+	var err error
 	if id != nil {
 		user, err = q.CreateUserWithID(ctx, *id)
 	} else {
@@ -110,7 +131,12 @@ func createAccount(ctx context.Context, q *db.Queries, inviteID string, id *uuid
 	if err != nil {
 		return db.User{}, err
 	}
-	if err := q.CreateInviteNode(ctx, db.CreateInviteNodeParams{UserID: &user.ID, InviterID: &inviter}); err != nil {
+	if g.admissionID != nil {
+		if err := q.UseAdmissionCode(ctx, db.UseAdmissionCodeParams{ID: *g.admissionID, UsedBy: &user.ID}); err != nil {
+			return db.User{}, err
+		}
+	}
+	if err := q.CreateInviteNode(ctx, db.CreateInviteNodeParams{UserID: &user.ID, InviterID: inviter}); err != nil {
 		return db.User{}, err
 	}
 	return user, nil
@@ -124,15 +150,22 @@ func (s *SignIn) session(ctx context.Context, userID uuid.UUID, created bool) (S
 // --- Passkeys ------------------------------------------------------------------
 
 // passkeyUser adapts an account (or one about to be created) to webauthn.User. The
-// user handle is the account id, so a discoverable sign-in finds the account.
+// user handle is the account id, so a discoverable sign-in finds the account. The
+// names label the passkey in the phone's password manager: the username, else the
+// display name, else "Duongöndro" (an account being created has neither yet).
 type passkeyUser struct {
-	id          uuid.UUID
-	credentials []webauthn.Credential
+	id                uuid.UUID
+	name, displayName string
+	credentials       []webauthn.Credential
 }
 
-func (u *passkeyUser) WebAuthnID() []byte                         { return u.id[:] }
-func (u *passkeyUser) WebAuthnName() string                       { return "Duongöndro" }
-func (u *passkeyUser) WebAuthnDisplayName() string                { return "Duongöndro" }
+func (u *passkeyUser) WebAuthnID() []byte { return u.id[:] }
+func (u *passkeyUser) WebAuthnName() string {
+	return cmp.Or(u.name, u.displayName, "Duongöndro")
+}
+func (u *passkeyUser) WebAuthnDisplayName() string {
+	return cmp.Or(u.displayName, u.name, "Duongöndro")
+}
 func (u *passkeyUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
 
 func (s *SignIn) loadPasskeyUser(ctx context.Context, q *db.Queries, id uuid.UUID) (*passkeyUser, error) {
@@ -155,7 +188,7 @@ type Ceremony struct {
 	Options   any
 }
 
-func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, userID *uuid.UUID, inviteID *string) (uuid.UUID, error) {
+func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, userID *uuid.UUID, g gate, profile SignUpProfile) (uuid.UUID, error) {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return uuid.UUID{}, err
@@ -163,7 +196,8 @@ func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, u
 	if _, err := s.q.PurgeExpiredWebauthnSessions(ctx); err != nil {
 		return uuid.UUID{}, err
 	}
-	return s.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: raw, UserID: userID, InviteID: inviteID})
+	return s.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: raw, UserID: userID, InviteID: g.inviteID,
+		AdmissionID: g.admissionID, Username: profile.Username, DisplayName: profile.DisplayName, Gender: profile.Gender})
 }
 
 func (s *SignIn) consumeCeremony(ctx context.Context, id uuid.UUID) (db.WebauthnSession, webauthn.SessionData, error) {
@@ -177,29 +211,89 @@ func (s *SignIn) consumeCeremony(ctx context.Context, id uuid.UUID) (db.Webauthn
 	return row, data, json.Unmarshal(row.Data, &data)
 }
 
-// BeginPasskeySignUp starts creating an account with a passkey; the invitation is
-// checked now and again when the ceremony finishes.
-func (s *SignIn) BeginPasskeySignUp(ctx context.Context, invite InviteProof) (Ceremony, error) {
-	inv, err := s.social.CheckInvite(ctx, invite.ID, invite.Auth)
+// SignUpProfile is the profile a passkey sign-up may carry, each field optional, under
+// PATCH /api/me's rules; it names the passkey and is set on the new account.
+type SignUpProfile struct {
+	Username, DisplayName, Gender *string
+}
+
+// clean validates the profile and returns it normalized.
+func (p SignUpProfile) clean() (SignUpProfile, error) {
+	var out SignUpProfile
+	if p.Username != nil {
+		name, err := cleanUsername(*p.Username)
+		if err != nil {
+			return out, err
+		}
+		out.Username = &name
+	}
+	if p.DisplayName != nil {
+		name, err := cleanDisplayName(*p.DisplayName)
+		if err != nil {
+			return out, err
+		}
+		out.DisplayName = &name
+	}
+	if p.Gender != nil {
+		if err := checkGender(*p.Gender); err != nil {
+			return out, err
+		}
+		out.Gender = p.Gender
+	}
+	return out, nil
+}
+
+// BeginPasskeySignUp starts creating an account with a passkey; the invitation or
+// admission code is checked now and again when the ceremony finishes, and so is the
+// username, if the profile has one.
+func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof, profile SignUpProfile) (Ceremony, error) {
+	profile, err := profile.clean()
 	if err != nil {
 		return Ceremony{}, err
 	}
+	g, err := s.checkProof(ctx, proof)
+	if err != nil {
+		return Ceremony{}, err
+	}
+	if profile.Username != nil {
+		if taken, err := s.q.UsernameTaken(ctx, profile.Username); err != nil {
+			return Ceremony{}, err
+		} else if taken {
+			return Ceremony{}, conflict("that username is taken")
+		}
+	}
 	id := uuid.NewV7()
-	options, data, err := s.web.BeginRegistration(&passkeyUser{id: id},
+	u := &passkeyUser{id: id}
+	if profile.Username != nil {
+		u.name = *profile.Username
+	}
+	if profile.DisplayName != nil {
+		u.displayName = *profile.DisplayName
+	}
+	options, data, err := s.web.BeginRegistration(u,
 		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired))
 	if err != nil {
 		return Ceremony{}, err
 	}
-	sid, err := s.saveCeremony(ctx, data, &id, &inv.ID)
+	sid, err := s.saveCeremony(ctx, data, &id, g, profile)
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 
-// BeginPasskeyAdd starts adding a passkey to a signed-in account.
+// BeginPasskeyAdd starts adding a passkey to a signed-in account, named after its
+// username or display name.
 func (s *SignIn) BeginPasskeyAdd(ctx context.Context, userID uuid.UUID) (Ceremony, error) {
 	u, err := s.loadPasskeyUser(ctx, s.q, userID)
 	if err != nil {
 		return Ceremony{}, err
 	}
+	account, err := s.q.GetUser(ctx, userID)
+	if err != nil {
+		return Ceremony{}, err
+	}
+	if account.Username != nil {
+		u.name = *account.Username
+	}
+	u.displayName = account.DisplayName
 	exclude := make([]protocol.CredentialDescriptor, len(u.credentials))
 	for i, c := range u.credentials {
 		exclude[i] = c.Descriptor()
@@ -210,7 +304,7 @@ func (s *SignIn) BeginPasskeyAdd(ctx context.Context, userID uuid.UUID) (Ceremon
 	if err != nil {
 		return Ceremony{}, err
 	}
-	sid, err := s.saveCeremony(ctx, data, &userID, nil)
+	sid, err := s.saveCeremony(ctx, data, &userID, gate{}, SignUpProfile{})
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 
@@ -231,14 +325,15 @@ func (s *SignIn) FinishPasskey(ctx context.Context, sessionID uuid.UUID, credent
 	if err != nil {
 		return Session{}, err
 	}
-	if row.InviteID != nil {
+	if ceremonyGate(row) != (gate{}) {
 		return s.finishRegistration(ctx, row, data, credential, nil)
 	}
 	return s.finishSignIn(ctx, row, data, credential)
 }
 
 func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession, data webauthn.SessionData, credential json.RawMessage, signedIn *uuid.UUID) (Session, error) {
-	signUp := row.InviteID != nil
+	g := ceremonyGate(row)
+	signUp := g != (gate{})
 	if row.UserID == nil || signUp == (signedIn != nil) || (signedIn != nil && *signedIn != *row.UserID) {
 		return Session{}, invalid("this passkey ceremony belongs to another flow")
 	}
@@ -261,9 +356,21 @@ func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession,
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		if signUp {
-			// The invite may have been revoked or expired since the ceremony began.
-			if _, err := createAccount(ctx, q, *row.InviteID, row.UserID); err != nil {
+			// The invite may have been revoked or expired, or the admission code spent,
+			// since the ceremony began.
+			if _, err := createAccount(ctx, q, g, row.UserID); err != nil {
 				return err
+			}
+			if row.Username != nil || row.DisplayName != nil || row.Gender != nil {
+				p := db.UpdateProfileParams{ID: *row.UserID, SetDisplayName: row.DisplayName != nil,
+					SetUsername: row.Username != nil, Username: row.Username, SetGender: row.Gender != nil, Gender: row.Gender}
+				if row.DisplayName != nil {
+					p.DisplayName = *row.DisplayName
+				}
+				// The username may have been taken since the ceremony began.
+				if err := usernameConflict(q.UpdateProfile(ctx, p)); err != nil {
+					return err
+				}
 			}
 		}
 		return q.CreateCredential(ctx, db.CreateCredentialParams{ID: cred.ID, UserID: *row.UserID, Data: raw})
@@ -279,13 +386,19 @@ func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession,
 	return s.session(ctx, *row.UserID, true)
 }
 
+// ceremonyGate is the invite or admission code a sign-up ceremony began with; zero
+// for a sign-in or for adding a passkey.
+func ceremonyGate(row db.WebauthnSession) gate {
+	return gate{inviteID: row.InviteID, admissionID: row.AdmissionID}
+}
+
 // BeginPasskeySignIn starts a discoverable sign-in: the phone offers its passkeys.
 func (s *SignIn) BeginPasskeySignIn(ctx context.Context) (Ceremony, error) {
 	options, data, err := s.web.BeginDiscoverableLogin()
 	if err != nil {
 		return Ceremony{}, err
 	}
-	sid, err := s.saveCeremony(ctx, data, nil, nil)
+	sid, err := s.saveCeremony(ctx, data, nil, gate{}, SignUpProfile{})
 	return Ceremony{SessionID: sid, Options: options}, err
 }
 
@@ -298,7 +411,7 @@ func (s *SignIn) FinishPasskeySignIn(ctx context.Context, sessionID uuid.UUID, c
 }
 
 func (s *SignIn) finishSignIn(ctx context.Context, row db.WebauthnSession, data webauthn.SessionData, credential json.RawMessage) (Session, error) {
-	if row.UserID != nil || row.InviteID != nil {
+	if row.UserID != nil || ceremonyGate(row) != (gate{}) {
 		return Session{}, invalid("this passkey ceremony belongs to another flow")
 	}
 	parsed, err := protocol.ParseCredentialRequestResponseBytes(credential)

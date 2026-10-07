@@ -17,7 +17,8 @@ UPDATE credentials SET data = $2, last_used_at = now() WHERE id = $1;
 DELETE FROM webauthn_sessions WHERE created_at <= now() - interval '5 minutes';
 
 -- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id) VALUES ($1, $2, $3) RETURNING id;
+INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id, username, display_name, gender)
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;
 
 -- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
@@ -44,11 +45,33 @@ DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes';
 SELECT count(*) FROM magic_links WHERE lower(email) = lower($1) AND created_at > now() - interval '15 minutes';
 
 -- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email, invite_id) VALUES ($1, $2, $3);
+INSERT INTO magic_links (token_hash, email, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5);
+
+-- name: KillMagicLinkCodes :exec
+-- A newer mail to the address makes the older codes unusable; their links still work.
+UPDATE magic_links SET code_dead_at = now() WHERE lower(email) = lower($1) AND code_dead_at IS NULL;
 
 -- name: ConsumeMagicLink :one
-DELETE FROM magic_links WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
+DELETE FROM magic_links
+WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
 RETURNING *;
+
+-- name: LockLiveMagicLinkForEmail :one
+-- The one live code to an address (a newer mail kills the older), for a typed code.
+SELECT * FROM magic_links
+WHERE lower(email) = lower($1) AND code_dead_at IS NULL AND code_hash IS NOT NULL
+    AND created_at > now() - interval '15 minutes'
+ORDER BY created_at DESC LIMIT 1
+FOR UPDATE;
+
+-- name: RecordWrongMagicLinkCode :exec
+-- The fifth wrong code kills the code; the link still works.
+UPDATE magic_links SET wrong_codes = wrong_codes + 1,
+    code_dead_at = CASE WHEN wrong_codes + 1 >= sqlc.arg(max_wrong)::smallint THEN now() ELSE code_dead_at END
+WHERE token_hash = sqlc.arg(token_hash);
+
+-- name: DeleteMagicLink :exec
+DELETE FROM magic_links WHERE token_hash = $1;
 
 -- name: DeleteMagicLinksForUser :exec
 -- A purge also drops unused links to the user's addresses.

@@ -13,8 +13,9 @@ import (
 )
 
 const consumeMagicLink = `-- name: ConsumeMagicLink :one
-DELETE FROM magic_links WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, email, invite_id, created_at
+DELETE FROM magic_links
+WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
+RETURNING token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at
 `
 
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
@@ -25,6 +26,10 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 		&i.Email,
 		&i.InviteID,
 		&i.CreatedAt,
+		&i.AdmissionID,
+		&i.CodeHash,
+		&i.WrongCodes,
+		&i.CodeDeadAt,
 	)
 	return i, err
 }
@@ -43,7 +48,7 @@ func (q *Queries) ConsumeNonce(ctx context.Context, nonceHash []byte) (int64, er
 
 const consumeWebauthnSession = `-- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
-RETURNING id, data, user_id, invite_id, created_at
+RETURNING id, data, user_id, invite_id, created_at, admission_id, username, display_name, gender
 `
 
 func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (WebauthnSession, error) {
@@ -55,6 +60,10 @@ func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (Web
 		&i.UserID,
 		&i.InviteID,
 		&i.CreatedAt,
+		&i.AdmissionID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Gender,
 	)
 	return i, err
 }
@@ -109,17 +118,25 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 }
 
 const createMagicLink = `-- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email, invite_id) VALUES ($1, $2, $3)
+INSERT INTO magic_links (token_hash, email, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateMagicLinkParams struct {
-	TokenHash []byte  `json:"tokenHash"`
-	Email     string  `json:"email"`
-	InviteID  *string `json:"inviteId"`
+	TokenHash   []byte     `json:"tokenHash"`
+	Email       string     `json:"email"`
+	InviteID    *string    `json:"inviteId"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
+	CodeHash    []byte     `json:"codeHash"`
 }
 
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
-	_, err := q.db.Exec(ctx, createMagicLink, arg.TokenHash, arg.Email, arg.InviteID)
+	_, err := q.db.Exec(ctx, createMagicLink,
+		arg.TokenHash,
+		arg.Email,
+		arg.InviteID,
+		arg.AdmissionID,
+		arg.CodeHash,
+	)
 	return err
 }
 
@@ -133,7 +150,7 @@ func (q *Queries) CreateNonce(ctx context.Context, nonceHash []byte) error {
 }
 
 const createUserWithID = `-- name: CreateUserWithID :one
-INSERT INTO users (id) VALUES ($1) RETURNING id, identity_public_key, key_version, created_at, display_name, gender
+INSERT INTO users (id) VALUES ($1) RETURNING id, identity_public_key, key_version, created_at, display_name, username, gender
 `
 
 func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -145,26 +162,49 @@ func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, err
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.DisplayName,
+		&i.Username,
 		&i.Gender,
 	)
 	return i, err
 }
 
 const createWebauthnSession = `-- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id) VALUES ($1, $2, $3) RETURNING id
+INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id, username, display_name, gender)
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
 `
 
 type CreateWebauthnSessionParams struct {
-	Data     []byte     `json:"data"`
-	UserID   *uuid.UUID `json:"userId"`
-	InviteID *string    `json:"inviteId"`
+	Data        []byte     `json:"data"`
+	UserID      *uuid.UUID `json:"userId"`
+	InviteID    *string    `json:"inviteId"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
+	Username    *string    `json:"username"`
+	DisplayName *string    `json:"displayName"`
+	Gender      *string    `json:"gender"`
 }
 
 func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnSessionParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createWebauthnSession, arg.Data, arg.UserID, arg.InviteID)
+	row := q.db.QueryRow(ctx, createWebauthnSession,
+		arg.Data,
+		arg.UserID,
+		arg.InviteID,
+		arg.AdmissionID,
+		arg.Username,
+		arg.DisplayName,
+		arg.Gender,
+	)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteMagicLink = `-- name: DeleteMagicLink :exec
+DELETE FROM magic_links WHERE token_hash = $1
+`
+
+func (q *Queries) DeleteMagicLink(ctx context.Context, tokenHash []byte) error {
+	_, err := q.db.Exec(ctx, deleteMagicLink, tokenHash)
+	return err
 }
 
 const deleteMagicLinksForUser = `-- name: DeleteMagicLinksForUser :exec
@@ -320,6 +360,16 @@ func (q *Queries) InviterOf(ctx context.Context, id string) (uuid.UUID, error) {
 	return inviter_id, err
 }
 
+const killMagicLinkCodes = `-- name: KillMagicLinkCodes :exec
+UPDATE magic_links SET code_dead_at = now() WHERE lower(email) = lower($1) AND code_dead_at IS NULL
+`
+
+// A newer mail to the address makes the older codes unusable; their links still work.
+func (q *Queries) KillMagicLinkCodes(ctx context.Context, lower string) error {
+	_, err := q.db.Exec(ctx, killMagicLinkCodes, lower)
+	return err
+}
+
 const listCredentials = `-- name: ListCredentials :many
 SELECT id, user_id, data, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at
 `
@@ -391,6 +441,31 @@ func (q *Queries) LockEmail(ctx context.Context, email string) error {
 	return err
 }
 
+const lockLiveMagicLinkForEmail = `-- name: LockLiveMagicLinkForEmail :one
+SELECT token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at FROM magic_links
+WHERE lower(email) = lower($1) AND code_dead_at IS NULL AND code_hash IS NOT NULL
+    AND created_at > now() - interval '15 minutes'
+ORDER BY created_at DESC LIMIT 1
+FOR UPDATE
+`
+
+// The one live code to an address (a newer mail kills the older), for a typed code.
+func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, lower string) (MagicLink, error) {
+	row := q.db.QueryRow(ctx, lockLiveMagicLinkForEmail, lower)
+	var i MagicLink
+	err := row.Scan(
+		&i.TokenHash,
+		&i.Email,
+		&i.InviteID,
+		&i.CreatedAt,
+		&i.AdmissionID,
+		&i.CodeHash,
+		&i.WrongCodes,
+		&i.CodeDeadAt,
+	)
+	return i, err
+}
+
 const purgeExpiredMagicLinks = `-- name: PurgeExpiredMagicLinks :execrows
 DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes'
 `
@@ -422,6 +497,23 @@ func (q *Queries) PurgeExpiredWebauthnSessions(ctx context.Context) (int64, erro
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const recordWrongMagicLinkCode = `-- name: RecordWrongMagicLinkCode :exec
+UPDATE magic_links SET wrong_codes = wrong_codes + 1,
+    code_dead_at = CASE WHEN wrong_codes + 1 >= $1::smallint THEN now() ELSE code_dead_at END
+WHERE token_hash = $2
+`
+
+type RecordWrongMagicLinkCodeParams struct {
+	MaxWrong  int16  `json:"maxWrong"`
+	TokenHash []byte `json:"tokenHash"`
+}
+
+// The fifth wrong code kills the code; the link still works.
+func (q *Queries) RecordWrongMagicLinkCode(ctx context.Context, arg RecordWrongMagicLinkCodeParams) error {
+	_, err := q.db.Exec(ctx, recordWrongMagicLinkCode, arg.MaxWrong, arg.TokenHash)
+	return err
 }
 
 const updateCredential = `-- name: UpdateCredential :exec

@@ -457,20 +457,6 @@ func (q *Queries) SetDisplayName(ctx context.Context, arg SetDisplayNameParams) 
 	return err
 }
 
-const setGender = `-- name: SetGender :exec
-UPDATE users SET gender = $1 WHERE id = $2
-`
-
-type SetGenderParams struct {
-	Gender *string   `json:"gender"`
-	ID     uuid.UUID `json:"id"`
-}
-
-func (q *Queries) SetGender(ctx context.Context, arg SetGenderParams) error {
-	_, err := q.db.Exec(ctx, setGender, arg.Gender, arg.ID)
-	return err
-}
-
 const unblock = `-- name: Unblock :execrows
 DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2
 `
@@ -503,4 +489,48 @@ func (q *Queries) Unfriend(ctx context.Context, arg UnfriendParams) (int64, erro
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateProfile = `-- name: UpdateProfile :exec
+UPDATE users SET
+    display_name = CASE WHEN $1::boolean THEN $2::text ELSE display_name END,
+    username = CASE WHEN $3::boolean THEN $4::text ELSE username END,
+    gender = CASE WHEN $5::boolean THEN $6::text ELSE gender END
+WHERE id = $7
+`
+
+type UpdateProfileParams struct {
+	SetDisplayName bool      `json:"setDisplayName"`
+	DisplayName    string    `json:"displayName"`
+	SetUsername    bool      `json:"setUsername"`
+	Username       *string   `json:"username"`
+	SetGender      bool      `json:"setGender"`
+	Gender         *string   `json:"gender"`
+	ID             uuid.UUID `json:"id"`
+}
+
+// Each field changes only when its set_ flag is true; username and gender may be set
+// to NULL.
+func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) error {
+	_, err := q.db.Exec(ctx, updateProfile,
+		arg.SetDisplayName,
+		arg.DisplayName,
+		arg.SetUsername,
+		arg.Username,
+		arg.SetGender,
+		arg.Gender,
+		arg.ID,
+	)
+	return err
+}
+
+const usernameTaken = `-- name: UsernameTaken :one
+SELECT EXISTS (SELECT 1 FROM users WHERE username = $1)
+`
+
+func (q *Queries) UsernameTaken(ctx context.Context, username *string) (bool, error) {
+	row := q.db.QueryRow(ctx, usernameTaken, username)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

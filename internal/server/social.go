@@ -18,43 +18,27 @@ func (s *Server) UpdateMe(ctx context.Context, req api.UpdateMeRequestObject) (a
 	} else if !ok {
 		return api.UpdateMe401Response{}, nil
 	}
-	if err := s.social.SetDisplayName(ctx, user.ID, req.Body.DisplayName); err != nil {
-		if kind, body, ok := clientError(err); ok && kind == http.StatusBadRequest {
+	b := req.Body
+	update := service.ProfileUpdate{DisplayName: b.DisplayName,
+		SetUsername: b.Username.IsSpecified(), SetGender: b.Gender.IsSpecified()}
+	if update.SetUsername && !b.Username.IsNull() {
+		name := b.Username.MustGet()
+		update.Username = &name
+	}
+	if update.SetGender && !b.Gender.IsNull() {
+		gender := string(b.Gender.MustGet())
+		update.Gender = &gender
+	}
+	if err := s.social.UpdateProfile(ctx, user.ID, update); err != nil {
+		switch kind, body, ok := clientError(err); {
+		case ok && kind == http.StatusBadRequest:
 			return api.UpdateMe400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
+		case ok && kind == http.StatusConflict:
+			return api.UpdateMe409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(body)}, nil
 		}
 		return nil, err
 	}
 	return api.UpdateMe204Response{}, nil
-}
-
-func (s *Server) SetGender(ctx context.Context, req api.SetGenderRequestObject) (api.SetGenderResponseObject, error) {
-	user, ok, err := s.authenticate(ctx, req.Params.Authorization)
-	if err != nil {
-		return nil, err
-	} else if !ok {
-		return api.SetGender401Response{}, nil
-	}
-	var gender *string
-	if req.Body.Gender != nil {
-		g := string(*req.Body.Gender)
-		gender = &g
-	}
-	if err := s.social.SetGender(ctx, user.ID, gender); err != nil {
-		if kind, body, ok := clientError(err); ok && kind == http.StatusBadRequest {
-			return api.SetGender400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
-		}
-		return nil, err
-	}
-	return api.SetGender204Response{}, nil
-}
-
-// genderDTO maps the stored gender; nil stays absent.
-func genderDTO(g *string) *api.Gender {
-	if g == nil {
-		return nil
-	}
-	out := api.Gender(*g)
-	return &out
 }
 
 func (s *Server) DeleteMe(ctx context.Context, req api.DeleteMeRequestObject) (api.DeleteMeResponseObject, error) {
@@ -196,7 +180,8 @@ func (s *Server) ListFriends(ctx context.Context, req api.ListFriendsRequestObje
 	}
 	out := api.ListFriends200JSONResponse{Friends: make([]api.Friend, len(friends))}
 	for i, f := range friends {
-		out.Friends[i] = api.Friend{UserId: f.ID, DisplayName: f.DisplayName, Gender: genderDTO(f.Gender), Since: f.CreatedAt, NotifyDone: f.NotifyDone}
+		out.Friends[i] = api.Friend{UserId: f.ID, DisplayName: f.DisplayName, Since: f.CreatedAt, NotifyDone: f.NotifyDone,
+			Gender: (*api.Gender)(f.Gender)}
 		if f.IdentityPublicKey != nil {
 			key := f.IdentityPublicKey
 			out.Friends[i].IdentityPublicKey = &key

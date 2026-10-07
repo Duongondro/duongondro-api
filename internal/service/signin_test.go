@@ -113,8 +113,8 @@ func (v fakeVerifier) Verify(_ context.Context, raw string) (oidc.Claims, error)
 // fakeMailer collects mail, which RequestMagicLink sends in the background.
 type fakeMailer struct{ sent chan string }
 
-func (m *fakeMailer) SendMagicLink(_ context.Context, to, link string) error {
-	m.sent <- to + " " + link
+func (m *fakeMailer) SendMagicLink(_ context.Context, to, link, code string) error {
+	m.sent <- to + " " + code + " " + link
 	return nil
 }
 
@@ -145,11 +145,11 @@ func TestPasskeys(t *testing.T) {
 	inviter := f.member()
 	auth := f.invite(social, inviter, "P4SSK3YS")
 
-	if _, err := s.BeginPasskeySignUp(ctx, InviteProof{ID: "P4SSK3YS", Auth: random(32)}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: random(32)}}, SignUpProfile{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("sign-up without the invite's auth: %v", err)
 	}
 	phone := newAuthenticator()
-	ceremony, err := s.BeginPasskeySignUp(ctx, InviteProof{ID: "P4SSK3YS", Auth: auth})
+	ceremony, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "P4SSK3YS", Auth: auth}}, SignUpProfile{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,16 +236,16 @@ func TestProviders(t *testing.T) {
 		t.Fatal("a code was exchanged for a sign-in that made no account")
 	}
 	// The nonce was used up by that attempt; a replay of the token is refused.
-	if _, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
+	if _, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "", &SignUpProof{Invite: &InviteProof{ID: "APP1EGGG", Auth: auth}}); !isValidation(err) {
 		t.Fatalf("a replayed token: %v", err)
 	}
 	// A nonce the server never issued is refused, even when the token carries it.
 	verifier.claims["forged"] = oidc.Claims{Subject: "001.ana", Nonce: "made-up"}
-	if _, err := s.ProviderSignIn(ctx, "google", "forged", "made-up", "", &InviteProof{ID: "APP1EGGG", Auth: auth}); !isValidation(err) {
+	if _, err := s.ProviderSignIn(ctx, "google", "forged", "made-up", "", &SignUpProof{Invite: &InviteProof{ID: "APP1EGGG", Auth: auth}}); !isValidation(err) {
 		t.Fatalf("a nonce never issued: %v", err)
 	}
 	tok, nonce = token("apple", "001.ana")
-	created, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "code", &InviteProof{ID: "APP1EGGG", Auth: auth})
+	created, err := s.ProviderSignIn(ctx, "apple", tok, nonce, "code", &SignUpProof{Invite: &InviteProof{ID: "APP1EGGG", Auth: auth}})
 	if err != nil || !created.Created {
 		t.Fatalf("sign-up with Apple: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestMagicLinks(t *testing.T) {
 	if err := s.RequestMagicLink(ctx, "not an address", nil, base); !isValidation(err) {
 		t.Fatalf("bad address: %v", err)
 	}
-	if err := s.RequestMagicLink(ctx, "Bo@Example.com", &InviteProof{ID: "MAG1CK1N", Auth: auth}, base); err != nil {
+	if err := s.RequestMagicLink(ctx, "Bo@Example.com", &SignUpProof{Invite: &InviteProof{ID: "MAG1CK1N", Auth: auth}}, base); err != nil {
 		t.Fatal(err)
 	}
 	signUp := token()
@@ -340,5 +340,156 @@ func TestMagicLinks(t *testing.T) {
 	session, err := s.RedeemMagicLink(ctx, token())
 	if err != nil || session.UserID != created.UserID || session.Created {
 		t.Fatalf("sign-in by link: %v", err)
+	}
+}
+
+// mailOf waits for the next mail and returns its code (XXXX XXXX) and token.
+func mailOf(t *testing.T, m *fakeMailer) (code, token string) {
+	t.Helper()
+	select {
+	case last := <-m.sent:
+		parts := strings.SplitN(last, " ", 4) // to, code (two groups), link
+		return parts[1] + " " + parts[2], last[strings.LastIndexAny(last, "/#")+1:]
+	case <-time.After(5 * time.Second):
+		t.Fatal("no mail was sent")
+		return "", ""
+	}
+}
+
+// wrongCode is a well-formed code that differs from code.
+func wrongCode(code string) string {
+	c := []byte(NormalizeCode(code))
+	if c[0] == 'Z' {
+		c[0] = 'Y'
+	} else {
+		c[0] = 'Z'
+	}
+	return string(c)
+}
+
+func TestMagicLinkCodes(t *testing.T) {
+	f := setup(t)
+	mailer := &fakeMailer{sent: make(chan string, 16)}
+	s, social := f.signIn(nil, mailer, nil)
+	ctx := t.Context()
+	inviter := f.member()
+	auth := f.invite(social, inviter, "C0DEC0DE")
+	proof := &SignUpProof{Invite: &InviteProof{ID: "C0DEC0DE", Auth: auth}}
+	const base = "https://duongondro.app/m#"
+	request := func(email string) (code, token string) {
+		t.Helper()
+		if err := s.RequestMagicLink(ctx, email, proof, base); err != nil {
+			t.Fatal(err)
+		}
+		return mailOf(t, mailer)
+	}
+
+	// The code is typed leniently: lower case, a hyphen, O for 0, L for 1.
+	code, token := request("ana@example.com")
+	if len(code) != 9 || code[4] != ' ' || strings.Trim(strings.ReplaceAll(code, " ", ""), crockford) != "" {
+		t.Fatalf("the mail's code %q is not XXXX XXXX", code)
+	}
+	typed := strings.ToLower(strings.Replace(code, " ", "-", 1))
+	typed = strings.ReplaceAll(strings.ReplaceAll(typed, "0", "o"), "1", "l")
+	created, err := s.RedeemMagicLinkCode(ctx, " Ana@Example.com", typed)
+	if err != nil || !created.Created {
+		t.Fatalf("sign-up by code: %v %+v", err, created)
+	}
+	// Single use: neither the code nor the link works again.
+	if _, err := s.RedeemMagicLinkCode(ctx, "ana@example.com", code); !isValidation(err) {
+		t.Fatalf("a code used twice: %v", err)
+	}
+	if _, err := s.RedeemMagicLink(ctx, token); !isValidation(err) {
+		t.Fatalf("the link after its code: %v", err)
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "ana@example.com", "ABC"); !isValidation(err) {
+		t.Fatalf("a malformed code: %v", err)
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "not an address", code); !isValidation(err) {
+		t.Fatalf("a malformed address: %v", err)
+	}
+
+	// Five wrong codes kill the code, but not the link: guessing locks nobody out.
+	code, token = request("bo@example.com")
+	for i := 0; i < maxWrongCodes; i++ {
+		if _, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", wrongCode(code)); !isValidation(err) {
+			t.Fatalf("wrong code %d: %v", i+1, err)
+		}
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "bo@example.com", code); !isValidation(err) {
+		t.Fatalf("the right code after five wrong ones: %v", err)
+	}
+	if session, err := s.RedeemMagicLink(ctx, token); err != nil || !session.Created {
+		t.Fatalf("the link after five wrong codes: %v", err)
+	}
+	// Four wrong codes leave the right one working.
+	code, _ = request("bo2@example.com")
+	for i := 0; i < maxWrongCodes-1; i++ {
+		_, _ = s.RedeemMagicLinkCode(ctx, "bo2@example.com", wrongCode(code))
+	}
+	if session, err := s.RedeemMagicLinkCode(ctx, "bo2@example.com", code); err != nil || !session.Created {
+		t.Fatalf("the right code after four wrong ones: %v", err)
+	}
+
+	// A newer mail makes the older code unusable, but not the older link.
+	oldCode, oldToken := request("cy@example.com")
+	newCode, newToken := request("cy@example.com")
+	if oldCode != newCode {
+		if _, err := s.RedeemMagicLinkCode(ctx, "cy@example.com", oldCode); !isValidation(err) {
+			t.Fatalf("an older code after a newer one: %v", err)
+		}
+	}
+	if session, err := s.RedeemMagicLink(ctx, oldToken); err != nil || !session.Created {
+		t.Fatalf("an older link after a newer mail: %v", err)
+	}
+	if session, err := s.RedeemMagicLink(ctx, newToken); err != nil || session.Created {
+		t.Fatalf("the newest link signs in to the account the older one made: %v", err)
+	}
+
+	// An expired code is refused like a wrong one.
+	code, _ = request("di@example.com")
+	if _, err := f.pool.Exec(ctx, `UPDATE magic_links SET created_at = now() - interval '16 minutes' WHERE email = 'di@example.com'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemMagicLinkCode(ctx, "di@example.com", code); !isValidation(err) {
+		t.Fatalf("an expired code: %v", err)
+	}
+	// The per-address limit still holds with codes: rows with dead codes count.
+	if _, err := f.pool.Exec(ctx, `DELETE FROM magic_links`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < magicLinksPerWindow; i++ {
+		request("ed@example.com")
+	}
+	if err := s.RequestMagicLink(ctx, "ed@example.com", proof, base); !errors.Is(err, ErrMailRateLimited) {
+		t.Fatalf("a fourth mail in the window: %v", err)
+	}
+}
+
+// A code's hash is keyed per process: a restarted server (a new SignIn) no longer
+// accepts codes mailed before it, though their links still work.
+func TestMagicLinkCodeKeyIsPerProcess(t *testing.T) {
+	f := setup(t)
+	mailer := &fakeMailer{sent: make(chan string, 4)}
+	s, social := f.signIn(nil, mailer, nil)
+	ctx := t.Context()
+	auth := f.invite(social, f.member(), "KEYKEY00")
+	if err := s.RequestMagicLink(ctx, "fa@example.com", &SignUpProof{Invite: &InviteProof{ID: "KEYKEY00", Auth: auth}}, "https://duongondro.app/m#"); err != nil {
+		t.Fatal(err)
+	}
+	code, token := mailOf(t, mailer)
+	var stored []byte
+	_ = f.pool.QueryRow(ctx, `SELECT code_hash FROM magic_links WHERE email = 'fa@example.com'`).Scan(&stored)
+	var tokenHash []byte
+	_ = f.pool.QueryRow(ctx, `SELECT token_hash FROM magic_links WHERE email = 'fa@example.com'`).Scan(&tokenHash)
+	if plain := sha(string(tokenHash) + NormalizeCode(code)); string(plain) == string(stored) {
+		t.Fatal("the code is stored as a plain hash")
+	}
+	restarted, _ := f.signIn(nil, mailer, nil)
+	if _, err := restarted.RedeemMagicLinkCode(ctx, "fa@example.com", code); !isValidation(err) {
+		t.Fatalf("a code from before the restart: %v", err)
+	}
+	if session, err := restarted.RedeemMagicLink(ctx, token); err != nil || !session.Created {
+		t.Fatalf("the link from before the restart: %v", err)
 	}
 }

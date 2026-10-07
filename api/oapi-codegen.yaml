@@ -5,3 +5,5 @@ generate:
   strict-server: true
   models: true
   embedded-spec: true
+output-options:
+  nullable-type: true  # PATCH /api/me tells an explicit null (clear) from an absent field

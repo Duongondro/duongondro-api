@@ -10,6 +10,15 @@ import (
 	"uuid"
 )
 
+type AdmissionCode struct {
+	ID        uuid.UUID  `json:"id"`
+	CodeHash  []byte     `json:"codeHash"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt time.Time  `json:"expiresAt"`
+	UsedBy    *uuid.UUID `json:"usedBy"`
+	UsedAt    *time.Time `json:"usedAt"`
+}
+
 type AuthIdentity struct {
 	Provider     string    `json:"provider"`
 	Subject      string    `json:"subject"`
@@ -59,6 +68,12 @@ type DeviceList struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+type Download struct {
+	Platform string    `json:"platform"`
+	Day      time.Time `json:"day"`
+	Count    int64     `json:"count"`
+}
+
 type Friendship struct {
 	UserID     uuid.UUID `json:"userId"`
 	FriendID   uuid.UUID `json:"friendId"`
@@ -105,10 +120,14 @@ type KeyWrap struct {
 }
 
 type MagicLink struct {
-	TokenHash []byte    `json:"tokenHash"`
-	Email     string    `json:"email"`
-	InviteID  *string   `json:"inviteId"`
-	CreatedAt time.Time `json:"createdAt"`
+	TokenHash   []byte     `json:"tokenHash"`
+	Email       string     `json:"email"`
+	InviteID    *string    `json:"inviteId"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
+	CodeHash    []byte     `json:"codeHash"`
+	WrongCodes  int16      `json:"wrongCodes"`
+	CodeDeadAt  *time.Time `json:"codeDeadAt"`
 }
 
 type Nudge struct {
@@ -182,13 +201,18 @@ type User struct {
 	KeyVersion        int32     `json:"keyVersion"`
 	CreatedAt         time.Time `json:"createdAt"`
 	DisplayName       string    `json:"displayName"`
+	Username          *string   `json:"username"`
 	Gender            *string   `json:"gender"`
 }
 
 type WebauthnSession struct {
-	ID        uuid.UUID  `json:"id"`
-	Data      []byte     `json:"data"`
-	UserID    *uuid.UUID `json:"userId"`
-	InviteID  *string    `json:"inviteId"`
-	CreatedAt time.Time  `json:"createdAt"`
+	ID          uuid.UUID  `json:"id"`
+	Data        []byte     `json:"data"`
+	UserID      *uuid.UUID `json:"userId"`
+	InviteID    *string    `json:"inviteId"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	AdmissionID *uuid.UUID `json:"admissionId"`
+	Username    *string    `json:"username"`
+	DisplayName *string    `json:"displayName"`
+	Gender      *string    `json:"gender"`
 }

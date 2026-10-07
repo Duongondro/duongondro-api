@@ -16,7 +16,7 @@ func mailer() (service.Mailer, error) { return stderrMailer{}, nil }
 
 type stderrMailer struct{}
 
-func (stderrMailer) SendMagicLink(_ context.Context, to, link string) error {
-	_, err := fmt.Fprintf(os.Stderr, "DEV magic link for %s: %s\n", to, link)
+func (stderrMailer) SendMagicLink(_ context.Context, to, link, code string) error {
+	_, err := fmt.Fprintf(os.Stderr, "DEV magic link for %s: %s (code %s)\n", to, link, code)
 	return err
 }

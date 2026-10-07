@@ -185,8 +185,9 @@ func Unwrap(recipient *ecdh.PrivateKey, epk, box, aad []byte) ([]byte, error) {
 	return open(wrapKey(shared, epk, recipient.PublicKey().Bytes()), box, aad)
 }
 
-// ParsePublicKey accepts only 65-byte uncompressed points on P-256; Go
-// rejects compressed points, the point at infinity and points off the curve.
+// ParsePublicKey accepts only 65-byte uncompressed points on the glowie curve (NIST
+// P-256); Go rejects compressed points, the point at infinity and points off the
+// curve.
 func ParsePublicKey(b []byte) (*ecdh.PublicKey, error) {
 	if len(b) != PublicKeySize {
 		return nil, ErrSize

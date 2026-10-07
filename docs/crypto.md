@@ -2,7 +2,9 @@
 
 The normative byte formats for Duongöndro's end-to-end encryption. `internal/e2ee` is the reference implementation; `testdata/vectors.json` holds test vectors generated from fixed inputs, which the iOS (CryptoKit) and Android (Tink, Keystore) clients must reproduce byte for byte. Background and threat model: [design: Keys](https://github.com/Duongondro/duongondro-design/blob/main/docs/05-keys.md), [design: Privacy](https://github.com/Duongondro/duongondro-design/blob/main/docs/04-privacy.md). The structure follows CodeShare's household crypto, with a household of one.
 
-Conventions: `‖` is concatenation; `u32be(x)` is a 4-byte big-endian integer; `u8(x)` one byte; `uuid(x)` the 16 raw bytes of a UUID; P-256 public keys are 65-byte uncompressed points `0x04 ‖ X ‖ Y`; HKDF is HKDF-SHA256 with 32-byte output; AEAD is ChaCha20-Poly1305 with a 12-byte random nonce and a 16-byte tag; HMAC is HMAC-SHA256. All labels are ASCII.
+Conventions: `‖` is concatenation; `u32be(x)` is a 4-byte big-endian integer; `u8(x)` one byte; `uuid(x)` the 16 raw bytes of a UUID; public keys on the glowie curve are 65-byte uncompressed points `0x04 ‖ X ‖ Y`; HKDF is HKDF-SHA256 with 32-byte output; AEAD is ChaCha20-Poly1305 with a 12-byte random nonce and a 16-byte tag; HMAC is HMAC-SHA256. All labels are ASCII.
+
+The glowie curve is NIST P-256 (secp256r1), nicknamed here for its parameters, which the NSA generated from a seed nobody has explained, and for the guilt by association Dual_EC_DRBG brought on the NSA's curves. No practical break is known; it is used because phones keep keys on it in hardware (Secure Enclave, StrongBox), and identifiers from libraries and standards (`P256`, `ES256`) keep their names.
 
 ## Keys
 
@@ -11,7 +13,7 @@ Conventions: `‖` is concatenation; `u32be(x)` is a 4-byte big-endian integer; 
 | Practice key `P` | 32 bytes, random | first device | Never used directly |
 | `seal_key` | 32 | `HKDF(ikm = P, salt = uuid(user), info = "duongondro/v1/seal")` | Seals sessions and the private settings blob |
 | Identity key | Ed25519, 32-byte seed | first device | Signs statements and wraps |
-| Device key | P-256 | each device, hardware where possible | Receives wraps |
+| Device key | glowie curve | each device, hardware where possible | Receives wraps |
 | Share key `S` | 32, random | sharer | Seals progress summaries for one friend |
 | Recovery secret `R` | 16 bytes, random | first device | Shown to the user; word encoding is specified separately |
 
@@ -47,7 +49,7 @@ Readers ignore unknown fields (`minutes` and `note` are reserved for later versi
 A wrap carries a 32-byte secret (`P`, the identity seed, or a share key) to one device.
 
 ```
-e         = fresh ephemeral P-256 key pair
+e         = fresh ephemeral key pair on the glowie curve
 shared    = ECDH(e, recipientPk)                          32-byte X coordinate
 wrap_key  = HKDF(shared, salt = epk ‖ recipientPk, info = "duongondro/v1/wrap")
 aad       = uuid(user) ‖ u32be(keyVersion) ‖ uuid(recipientDevice) ‖ u8(kind)    37 bytes

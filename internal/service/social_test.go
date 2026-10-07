@@ -108,45 +108,6 @@ func TestInvites(t *testing.T) {
 	}
 }
 
-func TestGender(t *testing.T) {
-	f := setup(t)
-	s := NewSocial(f.pool)
-	ctx := t.Context()
-	ana, bo := f.member(), f.member()
-	auth := f.invite(s, ana, "GENDER23")
-	p, sg := acceptance(bo, "GENDER23")
-	if _, err := s.Redeem(ctx, bo.User, "GENDER23", auth, p, sg); err != nil {
-		t.Fatal(err)
-	}
-	other := "other"
-	if err := s.SetGender(ctx, ana.ID, &other); !isValidation(err) {
-		t.Fatalf("an unknown gender: %v", err)
-	}
-	friendGender := func() *string {
-		friends, err := s.Friends(ctx, bo.ID)
-		if err != nil || len(friends) != 1 {
-			t.Fatalf("friends: %v %v", friends, err)
-		}
-		return friends[0].Gender
-	}
-	if g := friendGender(); g != nil {
-		t.Fatalf("a gender nobody gave: %q", *g)
-	}
-	female := "female"
-	if err := s.SetGender(ctx, ana.ID, &female); err != nil {
-		t.Fatal(err)
-	}
-	if g := friendGender(); g == nil || *g != "female" {
-		t.Fatalf("friends see %v", g)
-	}
-	if err := s.SetGender(ctx, ana.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	if g := friendGender(); g != nil {
-		t.Fatalf("a cleared gender is still %q", *g)
-	}
-}
-
 func TestBlocksAndReports(t *testing.T) {
 	f := setup(t)
 	s := NewSocial(f.pool)
@@ -192,7 +153,7 @@ func TestStreaks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := e2ee.Streak{Current: 42, Day: "2026-10-04", Deadline: time.Now().Add(30 * time.Hour).UnixMilli(), Longest: 42, Practice: "dorje-sempa", Seq: 1, User: ana.ID.String()}
+	st := e2ee.Streak{Current: 42, Day: today(0), Deadline: time.Now().Add(30 * time.Hour).UnixMilli(), Longest: 42, Practice: "dorje-sempa", Seq: 1, User: ana.ID.String()}
 	payload, sig := sign(ana, e2ee.TypeStreak, st)
 	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); !isValidation(err) {
 		t.Fatalf("path and statement disagree: %v", err)
@@ -220,7 +181,7 @@ func TestStreaks(t *testing.T) {
 		t.Fatalf("same day again: %v newDay=%v", err, newDay)
 	}
 	next := st
-	next.Seq, next.Day, next.Current, next.Longest = 3, "2026-10-05", 43, 43
+	next.Seq, next.Day, next.Current, next.Longest = 3, today(1), 43, 43
 	payload, sig = sign(ana, e2ee.TypeStreak, next)
 	if _, newDay, err := s.PutStreak(ctx, ana.User, "dorje-sempa", payload, sig); err != nil || !newDay {
 		t.Fatalf("next day: %v newDay=%v", err, newDay)
@@ -281,16 +242,13 @@ func (f *fixture) fillEveryTable(s *Social) member {
 	if err := s.Block(ctx, ana.ID, stranger.ID); err != nil {
 		f.t.Fatal(err)
 	}
-	st := e2ee.Streak{Current: 1, Day: "2026-10-04", Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 1, Practice: "mandala", Seq: 1, User: ana.ID.String()}
+	st := e2ee.Streak{Current: 1, Day: today(0), Deadline: time.Now().Add(time.Hour).UnixMilli(), Longest: 1, Practice: "mandala", Seq: 1, User: ana.ID.String()}
 	payload, sig = sign(ana, e2ee.TypeStreak, st)
 	if _, _, err := s.PutStreak(ctx, ana.User, "mandala", payload, sig); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := s.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
-		f.t.Fatal(err)
-	}
-	female := "female"
-	if err := s.SetGender(ctx, ana.ID, &female); err != nil {
+	if err := s.UpdateProfile(ctx, ana.ID, ProfileUpdate{DisplayName: ptr("Ana"), SetUsername: true, Username: ptr("ana"),
+		SetGender: true, Gender: ptr("female")}); err != nil {
 		f.t.Fatal(err)
 	}
 	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.
@@ -305,6 +263,10 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		f.t.Fatal(err)
 	}
 	if _, err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: []byte(`{}`), UserID: &ana.ID}); err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO admission_codes (code_hash, expires_at, used_by, used_at)
+		VALUES ($1, now() + interval '1 day', $2, now())`, random(32), ana.ID); err != nil {
 		f.t.Fatal(err)
 	}
 	nudges := NewNudges(f.pool, nil)
@@ -349,8 +311,13 @@ func TestExportCoversEveryTable(t *testing.T) {
 	raw, _ := json.Marshal(export)
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
+	var users struct{ Username, Gender *string }
+	_ = json.Unmarshal(fields["users"], &users)
+	if users.Username == nil || *users.Username != "ana" || users.Gender == nil || *users.Gender != "female" {
+		t.Errorf("the export lacks the username or gender: %s", fields["users"])
+	}
 	for _, table := range tables {
-		if table == "webauthn_sessions" || table == "auth_nonces" || table == "purge_log" {
+		if table == "webauthn_sessions" || table == "auth_nonces" || table == "purge_log" || table == "downloads" {
 			continue // exported as always empty (see ExportedTables)
 		}
 		v, ok := fields[table]
@@ -395,6 +362,11 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email = 'ana@example.com'`).Scan(&links)
 	if links != 0 {
 		t.Errorf("%d unused magic links to the purged address remain", links)
+	}
+	var named int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username = 'ana'`).Scan(&named)
+	if named != 0 {
+		t.Error("the purged user's username remains")
 	}
 	var anonymous int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM invite_tree WHERE user_id IS NULL`).Scan(&anonymous)

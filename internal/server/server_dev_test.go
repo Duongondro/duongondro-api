@@ -7,8 +7,10 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 	"uuid"
@@ -164,5 +166,104 @@ func TestWebsiteHosts(t *testing.T) {
 	}
 	if rec := get("api.duongondro.app", "/privacy/"); rec.Code != http.StatusNotFound {
 		t.Fatalf("website on the API host: %d", rec.Code)
+	}
+}
+
+// A sign-up carries an invitation or an admission code; an unknown code is a 404,
+// like an unknown invitation, and neither is a 400.
+func TestSignUpProofOverHTTP(t *testing.T) {
+	e := newTestServer(t, "server_signup_tests")
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": "zzzz-zzzz-zzzz-zzzz"}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown admission code: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no proof: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"invite": map[string]any{"id": "7K2MQ9XA", "auth": make([]byte, 32)}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown invitation: %d %s", rec.Code, rec.Body)
+	}
+	// An empty admissionCode is absent: beside an invitation it is no second proof.
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": "", "invite": map[string]any{"id": "7K2MQ9XA", "auth": make([]byte, 32)}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown invitation with an empty code: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": ""}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("an empty code alone: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A magic link is redeemed with its token alone, or with the address and the code.
+func TestMagicLinkRedemptionShapes(t *testing.T) {
+	e := newTestServer(t, "server_magic_tests")
+	for name, body := range map[string]map[string]any{
+		"nothing":        {},
+		"code alone":     {"code": "7K2M Q9XA"},
+		"token and code": {"token": "x", "email": "bo@example.com", "code": "7K2M Q9XA"},
+		"unknown token":  {"token": "x"},
+		"no such link":   {"email": "bo@example.com", "code": "7k2m-q9xa"},
+		"malformed code": {"email": "bo@example.com", "code": "7K2M"},
+	} {
+		if rec := serve(t, e, http.MethodPost, "/api/auth/magic-links/redeem", "", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
+// The apex's download link only redirects; the count beacon counts in the
+// database, once per request even when requests race, limited per client
+// address; the count endpoint reads the total back.
+func TestDownloadCounter(t *testing.T) {
+	e, _, err := New(dbtest.Fresh(t, "server_download_tests"), Config{
+		SignIn:   service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
+		WebHosts: []string{"duongondro.app"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(method, path, addr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Host = "duongondro.app"
+		req.RemoteAddr = addr + ":40000"
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	for range 3 {
+		if rec := send(http.MethodGet, "/download/android", "192.0.2.1"); rec.Code != http.StatusFound {
+			t.Fatalf("download link: %d", rec.Code)
+		}
+	}
+	// Twenty addresses click at once; one more address sends twelve beacons, of
+	// which the limiter lets ten through.
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Go(func() {
+			if rec := send(http.MethodPost, "/download/android/count", fmt.Sprintf("198.51.100.%d", i+1)); rec.Code != http.StatusNoContent {
+				t.Errorf("beacon: %d", rec.Code)
+			}
+		})
+	}
+	wg.Wait()
+	limited := 0
+	for range 12 {
+		if send(http.MethodPost, "/download/android/count", "203.0.113.9").Code == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited != 2 {
+		t.Errorf("%d of 12 beacons from one address limited, want 2", limited)
+	}
+	rec := send(http.MethodGet, "/download/android/count", "192.0.2.1")
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"count\":30}\n" || rec.Header().Get("Cache-Control") != "public, max-age=60" {
+		t.Fatalf("count: %d %q %q", rec.Code, rec.Body, rec.Header().Get("Cache-Control"))
+	}
+	// Reading the total and following the link are never limited.
+	for range 15 {
+		if rec := send(http.MethodGet, "/download/android/count", "203.0.113.9"); rec.Code != http.StatusOK {
+			t.Fatalf("count read limited: %d", rec.Code)
+		}
+	}
+	if rec := send(http.MethodGet, "/download/ios", "192.0.2.1"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown platform: %d", rec.Code)
 	}
 }
