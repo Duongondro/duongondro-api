@@ -88,6 +88,18 @@ func TestNudges(t *testing.T) {
 		t.Fatalf("done today: %+v", got)
 	}
 
+	// The loc-key follows the sender's grammatical gender; nonbinary gets the neutral one.
+	for _, c := range []struct{ gender, key string }{{"female", "FRIEND_DONE_FEMALE"}, {"male", "FRIEND_DONE_MALE"}, {"nonbinary", LocFriendDone}} {
+		if err := social.UpdateProfile(ctx, ana.ID, ProfileUpdate{SetGender: true, Gender: &c.gender}); err != nil {
+			t.Fatal(err)
+		}
+		n.DoneToday(ctx, f.reload(ana.User), "dorje-sempa", 42)
+		n.drain(ctx)
+		if got := sender.take(); len(got) != 1 || got[0].msg.LocKey != c.key {
+			t.Fatalf("done today, %s: %+v", c.gender, got)
+		}
+	}
+
 	// One poke per friend per day; strangers cannot be poked.
 	if err := n.Poke(ctx, bo.User, ana.ID); err != nil {
 		t.Fatal(err)
