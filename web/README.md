@@ -16,7 +16,7 @@ The handler:
 - answers `/download/android` with a `302` to the newest APK on GitHub (`releases/latest/download/duongondro.apk`), `Cache-Control: no-store`, and counts nothing, so link previews and crawlers following a shared link change nothing;
 - counts a download on `POST /download/android/count`, the beacon the landing page's script sends when someone clicks the button: `204`, `no-store`, limited to 10 a minute per client address (in memory, forgotten a minute later), not counted from crawler user agents or another site's page (`Sec-Fetch-Site`). The table `downloads` holds platform, UTC day and count, nothing about the visitor;
 - answers `GET /download/android/count` with `{"count": N}` (`application/json`, `Cache-Control: public, max-age=60`), which the page shows under the button;
-- caches `_assets/` (Astro's content-hashed scripts and stylesheet) and fonts for a year as immutable, the favicon and robots.txt for a week, pages for five minutes;
+- caches `_assets/` (Astro's content-hashed scripts and stylesheet) and fonts for a year as immutable, the favicons, the link-preview image `og.png` and robots.txt for a week, pages for five minutes;
 - sets a strict `Content-Security-Policy` (`default-src 'self'`), `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` on every response.
 
 Because of that CSP there are no inline scripts or styles; `internal/web` tests that the build has none. Caddy proxies the apex and `www` to the API like `api.`; it must not rewrite `/.well-known/` paths.

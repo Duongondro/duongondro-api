@@ -1,6 +1,7 @@
 package web
 
 import (
+	"image/png"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -44,8 +45,11 @@ func TestRoutes(t *testing.T) {
 		{"/f/7K2MQ9XA", "Add a friend", "no-store"},
 		{"/m", "Open this link on your phone", "no-store"},
 		{"/m/", "Open this link on your phone", "no-store"},
-		{"/favicon.svg", "<svg", "public, max-age=604800"},
+		{"/favicon-32.png", "\x89PNG", "public, max-age=604800"},
+		{"/apple-touch-icon.png", "\x89PNG", "public, max-age=604800"},
+		{"/og.png", "\x89PNG", "public, max-age=604800"},
 		{"/robots.txt", "Disallow: /i/", "public, max-age=604800"},
+		{"/robots.txt", "Disallow: /download/", "public, max-age=604800"},
 		{"/fonts/ibm-plex-sans-regular-latin1.woff2", "", "public, max-age=31536000, immutable"},
 		{"/I/7K2MQ9XA", "You have been invited", "no-store"},
 		{"/F/7K2MQ9XA", "Add a friend", "no-store"},
@@ -138,7 +142,7 @@ func TestInvitePagesDoNotLeak(t *testing.T) {
 }
 
 func TestNotFoundAndMethods(t *testing.T) {
-	for _, p := range []string{"/nope", "/README.md", "/fonts/", "/web.go", "/i/../README.md", "/embed.go",
+	for _, p := range []string{"/nope", "/README.md", "/fonts/", "/web.go", "/i/../README.md", "/embed.go", "/favicon.svg",
 		"/download/", "/download/ios", "/download/android/x", "/download/android/count/x"} {
 		rec := get(t, http.MethodGet, p)
 		if rec.Code != http.StatusNotFound {
@@ -168,5 +172,33 @@ func TestNoExternalOrigins(t *testing.T) {
 				t.Errorf("%s contains %q", p, bad)
 			}
 		}
+	}
+}
+
+// Every page names the link-preview image by its absolute URL, and the image is
+// served as a PNG of the size the tags give.
+func TestOpenGraph(t *testing.T) {
+	for _, p := range []string{"/", "/privacy/", "/i/x", "/f/x", "/m"} {
+		body := get(t, http.MethodGet, p).Body.String()
+		for _, tag := range []string{
+			`<meta property="og:image" content="https://duongondro.app/og.png">`,
+			`<meta property="og:image:width" content="1200">`,
+			`<meta property="og:image:height" content="630">`,
+			`<meta name="twitter:card" content="summary_large_image">`,
+			`<link rel="icon" href="/favicon-32.png"`,
+			`<link rel="apple-touch-icon" href="/apple-touch-icon.png">`,
+		} {
+			if !strings.Contains(body, tag) {
+				t.Errorf("%s lacks %s", p, tag)
+			}
+		}
+	}
+	rec := get(t, http.MethodGet, "/og.png")
+	if ct := rec.Header().Get("Content-Type"); rec.Code != http.StatusOK || ct != "image/png" {
+		t.Fatalf("og.png: %d %q", rec.Code, ct)
+	}
+	cfg, err := png.DecodeConfig(rec.Body)
+	if err != nil || cfg.Width != 1200 || cfg.Height != 630 {
+		t.Errorf("og.png: %dx%d, %v", cfg.Width, cfg.Height, err)
 	}
 }
