@@ -14,7 +14,7 @@ import (
 func get(t *testing.T, method, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	Handler().ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+	Handler(&fakeDownloads{}).ServeHTTP(rec, httptest.NewRequest(method, target, nil))
 	return rec
 }
 
@@ -138,7 +138,8 @@ func TestInvitePagesDoNotLeak(t *testing.T) {
 }
 
 func TestNotFoundAndMethods(t *testing.T) {
-	for _, p := range []string{"/nope", "/README.md", "/fonts/", "/web.go", "/i/../README.md", "/embed.go"} {
+	for _, p := range []string{"/nope", "/README.md", "/fonts/", "/web.go", "/i/../README.md", "/embed.go",
+		"/download/", "/download/ios", "/download/android/x", "/download/android/count/x"} {
 		rec := get(t, http.MethodGet, p)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s: status %d", p, rec.Code)

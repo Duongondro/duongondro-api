@@ -34,6 +34,7 @@ type Export struct {
 	Sessions           []time.Time                  `json:"sessions"`
 	Devices            []db.Device                  `json:"devices"`
 	DeviceLists        *db.DeviceList               `json:"device_lists"`
+	Downloads          []string                     `json:"downloads"`
 	KeyWraps           []db.KeyWrap                 `json:"key_wraps"`
 	PracticeLogs       []db.PracticeLog             `json:"practice_logs"`
 	RecoveryBoxes      []db.RecoveryBox             `json:"recovery_boxes"`
@@ -60,7 +61,9 @@ type Export struct {
 // webauthn_sessions are passkey ceremonies of the last five minutes: listed as
 // always empty, since one in flight is no stored data, and deleted by a purge.
 // auth_nonces are tied to nobody, and purge_log holds only hashes of purged ids:
-// both are listed as always empty.
+// both are listed as always empty. downloads holds per-platform, per-day totals of
+// the website's download links and nothing about who downloaded: listed as always
+// empty too.
 // admission_codes lists the code the account was admitted with, if any, without
 // the code's hash.
 // friendships lists friends as GET /api/friends does, with their display names and
@@ -69,7 +72,7 @@ type Export struct {
 // Apple's refresh token and the device token stay out).
 var ExportedTables = []string{
 	"admission_codes", "auth_identities", "auth_nonces", "blocks", "credentials", "database_generation", "device_lists",
-	"devices", "friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps",
+	"devices", "downloads", "friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps",
 	"magic_links", "nudges", "practice_logs", "purge_log", "push_tokens", "recovery_boxes", "reports",
 	"sessions", "streaks", "users", "webauthn_sessions",
 }
@@ -139,7 +142,7 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		if out.MagicLinks, err = q.ExportMagicLinks(ctx, userID); err != nil {
 			return err
 		}
-		out.WebauthnSessions, out.AuthNonces, out.PurgeLog = []string{}, []string{}, []string{}
+		out.WebauthnSessions, out.AuthNonces, out.PurgeLog, out.Downloads = []string{}, []string{}, []string{}, []string{}
 		if out.PushTokens, err = q.ExportPushTokens(ctx, userID); err != nil {
 			return err
 		}

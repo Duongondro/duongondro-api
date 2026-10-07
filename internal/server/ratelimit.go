@@ -25,6 +25,10 @@ var authRateLimit = RateLimit{Requests: 20, Per: time.Minute}
 // otherwise let an account probe which usernames exist.
 var profileRateLimit = RateLimit{Requests: 10, Per: time.Minute}
 
+// downloadRateLimit covers the website's download count beacon: a person clicks
+// the button a few times at most.
+var downloadRateLimit = RateLimit{Requests: 10, Per: time.Minute}
+
 // rateLimitPrefix limits requests whose path starts with prefix, keyed by the
 // client's address (only those Caddy appended to X-Forwarded-For are trusted), as
 // CodeShare limits its auth routes.

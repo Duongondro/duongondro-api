@@ -1,6 +1,6 @@
 // Package web serves the public website (landing page, privacy draft, invite
 // and add-friend pages, app-link association files) from the embedded files in
-// the top-level web directory.
+// the top-level web directory, and the counted download links (download.go).
 package web
 
 import (
@@ -25,12 +25,16 @@ const (
 	cacheImmutable = "public, max-age=31536000, immutable"
 )
 
-// Handler returns the website handler. It serves GET and HEAD only.
-func Handler() http.Handler {
-	return handler{files: webfs.FS}
+// Handler returns the website handler. It serves GET and HEAD only, except for
+// the POST that counts a download in downloads (download.go).
+func Handler(downloads Downloads) http.Handler {
+	return handler{files: webfs.FS, downloads: downloads}
 }
 
-type handler struct{ files fs.FS }
+type handler struct {
+	files     fs.FS
+	downloads Downloads
+}
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hd := w.Header()
@@ -38,13 +42,18 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hd.Set("X-Content-Type-Options", "nosniff")
 	hd.Set("Referrer-Policy", "no-referrer")
 
+	p := r.URL.Path
+	// The download links check their own methods: the count also takes a POST.
+	if strings.HasPrefix(p, "/download/") {
+		h.serveDownload(w, r, strings.TrimPrefix(p, "/download/"))
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		hd.Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	p := r.URL.Path
 	if !strings.HasPrefix(p, "/") || strings.Contains(p, "..") || strings.Contains(p, "\\") {
 		http.NotFound(w, r)
 		return

@@ -68,6 +68,12 @@ type DeviceList struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+type Download struct {
+	Platform string    `json:"platform"`
+	Day      time.Time `json:"day"`
+	Count    int64     `json:"count"`
+}
+
 type Friendship struct {
 	UserID     uuid.UUID `json:"userId"`
 	FriendID   uuid.UUID `json:"friendId"`

@@ -109,7 +109,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 	e.Use(rateLimitPrefix("/api/auth/", authRateLimit))
 	e.Use(rateLimitRoute(http.MethodPatch, "/api/me", profileRateLimit))
 	registerWellKnown(e, cfg.WellKnown)
-	serveWebsite(e, cfg.WebHosts)
+	serveWebsite(e, cfg.WebHosts, db.New(pool))
 	// Sign-in without any method; only in DEV builds.
 	registerDevSession(e, s.auth)
 	api.RegisterHandlers(e, api.NewStrictHandler(s, nil))

@@ -317,7 +317,7 @@ func TestExportCoversEveryTable(t *testing.T) {
 		t.Errorf("the export lacks the username or gender: %s", fields["users"])
 	}
 	for _, table := range tables {
-		if table == "webauthn_sessions" || table == "auth_nonces" || table == "purge_log" {
+		if table == "webauthn_sessions" || table == "auth_nonces" || table == "purge_log" || table == "downloads" {
 			continue // exported as always empty (see ExportedTables)
 		}
 		v, ok := fields[table]
