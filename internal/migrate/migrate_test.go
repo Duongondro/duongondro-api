@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -240,5 +241,39 @@ func TestEmailCollisionFailsFast(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM (SELECT lower(normalize(subject, NFC)) FROM auth_identities
 		WHERE provider = 'email' GROUP BY 1 HAVING count(*) > 1) clashes`).Scan(&pairs); err != nil || pairs != 1 {
 		t.Fatalf("the preflight SQL: %d pairs, %v", pairs, err)
+	}
+}
+
+// A table someone else holds (a backup's pg_dump) is skipped after lock_timeout, not
+// waited on forever; the rest are rewritten and migrate goes on.
+func TestRewriteSkipsALockedTable(t *testing.T) {
+	pool := dbtest.Empty(t, "migrate_rewrite_tests")
+	keys := dbtest.Keys()
+	ctx := t.Context()
+	upTo(t, pool, keys, 20261014183131)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `LOCK TABLE users IN ACCESS SHARE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer sqlDB.Close()
+	p, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.GooseFS(), goose.WithGoMigrations(
+		migrations.EncryptColumnsBackfill(keys), migrations.RewriteEncryptedTables(200*time.Millisecond)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatalf("with users locked: %v", err)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("took %s: the lock was waited on", took)
+	}
+	if v, _ := p.GetDBVersion(ctx); v != 20261014183133 {
+		t.Fatalf("at version %d", v)
 	}
 }

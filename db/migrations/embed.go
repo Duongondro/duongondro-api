@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	"github.com/pressly/goose/v3"
 
@@ -34,7 +35,7 @@ func GooseFS() fs.FS { return hidden{FS} }
 
 // Go returns the Go migrations, sealing under keys.
 func Go(keys *atrest.Keys) []*goose.Migration {
-	return []*goose.Migration{EncryptColumnsBackfill(keys)}
+	return []*goose.Migration{EncryptColumnsBackfill(keys), RewriteEncryptedTables(10 * time.Second)}
 }
 
 type hidden struct{ fsys embed.FS }
