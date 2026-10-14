@@ -22,7 +22,7 @@ import (
 func Up(ctx context.Context, pool *pgxpool.Pool, keys *atrest.Keys) error {
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS,
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.GooseFS(),
 		goose.WithGoMigrations(migrations.Go(keys)...))
 	if err != nil {
 		return fmt.Errorf("migrations: %w", err)

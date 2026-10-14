@@ -11,11 +11,15 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/atrest"
 )
 
-// EncryptColumnsBackfill is step 2 of 4 of encryption at rest: it seals every plain
-// personal value into the columns step 1 added, and computes the blind indexes, in
-// one transaction, so step 3 can drop the plain columns. SQL cannot call the
-// crypter, hence a Go migration; it runs inside `server migrate`, which the service
-// runs before it starts, so the deploy needs no extra step (only SECRET_KEY_BASE).
+// EncryptColumnsBackfill is step 2 of encryption at rest: it seals every plain
+// personal value into the columns step 1 added, computes the blind indexes, and then,
+// in the same transaction, runs 20261014183132_drop_plain_columns.sql, which drops
+// the plain columns. Sealing and dropping commit together or not at all: a failure
+// anywhere leaves only step 1's empty, nullable columns, and nothing can run between
+// them (an old binary writing plain values the drop would then lose). SQL cannot call
+// the crypter, hence a Go migration; it runs inside `server migrate`, which the
+// service runs before it starts, so the deploy needs no extra step (only
+// SECRET_KEY_BASE).
 //
 // It reads and writes this version's schema with plain SQL, never with sqlc's
 // queries, which follow the latest schema: a fresh database runs it too.
@@ -42,8 +46,19 @@ func backfill(ctx context.Context, tx *sql.Tx, k *atrest.Keys) error {
 			return fmt.Errorf("sealing %s: %w", s.name, err)
 		}
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM webauthn_sessions`)
-	return err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM webauthn_sessions`); err != nil {
+		return err
+	}
+	ddl, err := dropPlainColumnsUp()
+	if err != nil {
+		return err
+	}
+	// No arguments, so pgx sends it as one simple query: every statement, in this
+	// transaction.
+	if _, err := tx.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("dropping the plain columns: %w", err)
+	}
+	return nil
 }
 
 // rows reads every row of query before the updates start: one connection cannot

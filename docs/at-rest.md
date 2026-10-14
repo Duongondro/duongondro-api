@@ -52,14 +52,11 @@ Rows whose ids the database used to draw (devices, reports, passkey ceremonies) 
 
 ## Migrating
 
-Four goose migrations, all run by `server migrate`, which the service runs before it starts:
+Three goose migrations, all run by `server migrate`, which the service runs before it starts:
 
-1. `encrypt_columns` adds the `_encrypted` and `_hash` columns beside the plain ones.
-2. `encrypt_columns_backfill`, a Go migration (`db/migrations/*.go`, handed to goose with the keys by `migrations.Go`), seals every plain value and computes the hashes, normalising stored addresses, in one transaction. It deletes passkey ceremonies in flight instead. It uses plain SQL against that version's schema, never sqlc, so a fresh database runs it too.
-3. `drop_plain_columns` drops the plain columns, and moves primary keys, uniqueness and indexes to the hashes.
-4. `rewrite_encrypted_tables` runs `VACUUM FULL` on those tables, so the dropped values and old row versions leave the data files.
-
-A failure in step 2 rolls it back and stops the start; fix forward. Backups taken before the deploy still hold the plain values until they expire.
+1. `encrypt_columns` adds the `_encrypted` and `_hash` columns beside the plain ones, empty and nullable.
+2. `encrypt_columns_backfill`, a Go migration (`db/migrations/*.go`, handed to goose with the keys by `migrations.Go`), seals every plain value and computes the hashes, normalising stored addresses, deletes passkey ceremonies in flight, and then, in the same transaction, runs `drop_plain_columns.sql`: the plain columns go, and primary keys, uniqueness and indexes move to the hashes. Sealing and dropping commit together or not at all; a failure leaves only step 1's empty columns. goose itself never runs that `.sql` file (`migrations.GooseFS` hides it); it stays in version order for sqlc. The migration uses plain SQL against that version's schema, never sqlc, so a fresh database runs it too.
+3. `rewrite_encrypted_tables` runs `VACUUM FULL` on those tables, so the dropped values and old row versions leave the tables' files.
 
 ## Rotating the key
 

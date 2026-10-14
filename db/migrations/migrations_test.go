@@ -13,8 +13,10 @@
 package migrations_test
 
 import (
+	"io/fs"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -137,5 +139,21 @@ func TestGoMigrationsAreRegistered(t *testing.T) {
 		if !files[version] {
 			t.Errorf("migrations.Go returns version %d, which has no <version>_<name>.go file", version)
 		}
+	}
+}
+
+// The drop of the plain columns runs inside the Go migration's transaction, so goose
+// must not see it; sqlc still does, through FS.
+func TestGooseDoesNotRunTheDropItself(t *testing.T) {
+	const drop = "20261014183132_drop_plain_columns.sql"
+	if _, err := fs.Stat(migrations.FS, drop); err != nil {
+		t.Fatalf("FS lacks %s: %v", drop, err)
+	}
+	names, err := fs.Glob(migrations.GooseFS(), "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(names, drop) || len(names) == 0 {
+		t.Fatalf("goose sees %v", names)
 	}
 }

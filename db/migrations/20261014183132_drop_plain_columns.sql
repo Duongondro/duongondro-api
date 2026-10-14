@@ -1,8 +1,12 @@
 -- +goose Up
--- Encryption at rest, step 3 of 4: every row was sealed by step 2, so the plain
--- columns go, and the keys, uniqueness and lookups move to the blind indexes. From
--- here on the plain values exist only in the database's files until step 4 rewrites
--- them, and in backups taken before this deploy until they expire.
+-- Encryption at rest, the second half of step 2. NOT run by goose: the Go migration
+-- 20261014183131_encrypt_columns_backfill.go runs this Up section in its own
+-- transaction, right after sealing every row, so the seal and the drop commit
+-- together (migrations.GooseFS hides this file from goose; it stays here, in
+-- version order, for sqlc). The plain columns go, and the keys, uniqueness and
+-- lookups move to the blind indexes. From here on the plain values are left only in
+-- the database's files until step 3 rewrites the tables, and in backups taken before
+-- this deploy until they expire.
 
 -- users: the username's uniqueness moves to its hash. An empty display name is NULL.
 ALTER TABLE users

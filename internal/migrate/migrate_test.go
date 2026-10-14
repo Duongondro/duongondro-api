@@ -25,7 +25,7 @@ func upTo(t *testing.T, pool *pgxpool.Pool, keys *atrest.Keys, version int64) {
 	t.Helper()
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
-	p, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS, goose.WithGoMigrations(migrations.Go(keys)...))
+	p, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.GooseFS(), goose.WithGoMigrations(migrations.Go(keys)...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,5 +164,45 @@ func TestMigrateReseals(t *testing.T) {
 	after, _ := atrest.New(newBase, nil)
 	if u, err := after.User(db.New(pool).GetUser(ctx, id)); err != nil || u.DisplayName != "Ana" {
 		t.Fatalf("after the rotation: %+v %v", u, err)
+	}
+}
+
+// Sealing and dropping the plain columns commit together: when anything fails after
+// the rows are sealed (here the drop, blocked by a view on a plain column), nothing of
+// step 2 is applied, the plain values are untouched, and a later migrate succeeds.
+func TestFailedSealLeavesPlainColumns(t *testing.T) {
+	pool := dbtest.Empty(t, "migrate_fail_tests")
+	keys := dbtest.Keys()
+	ctx := t.Context()
+	upTo(t, pool, keys, beforeAtRest)
+	ana := uuid.NewV7()
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, display_name, username) VALUES ($1, 'Ana', 'ana')`, ana); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `CREATE VIEW names AS SELECT display_name FROM users`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, pool, keys); err == nil {
+		t.Fatal("the drop succeeded despite a view on display_name")
+	}
+	var version int64
+	_ = pool.QueryRow(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&version)
+	if version != 20261014183130 {
+		t.Fatalf("applied up to %d, want only step 1 (20261014183130)", version)
+	}
+	var name, username string
+	var sealed []byte
+	if err := pool.QueryRow(ctx, `SELECT display_name, username, display_name_encrypted FROM users WHERE id = $1`, ana).
+		Scan(&name, &username, &sealed); err != nil || name != "Ana" || username != "ana" || sealed != nil {
+		t.Fatalf("after the failure: %q %q sealed=%x %v", name, username, sealed, err)
+	}
+	if _, err := pool.Exec(ctx, `DROP VIEW names`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, pool, keys); err != nil {
+		t.Fatalf("migrating again: %v", err)
+	}
+	if u, err := keys.User(db.New(pool).GetUser(ctx, ana)); err != nil || u.DisplayName != "Ana" || *u.Username != "ana" {
+		t.Fatalf("after the retry: %+v %v", u, err)
 	}
 }
