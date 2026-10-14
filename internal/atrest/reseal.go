@@ -114,11 +114,7 @@ func resealRow(ctx context.Context, tx pgx.Tx, k *Keys, t Table, types map[strin
 		var h []byte
 		for i, c := range t.Sealed {
 			if c == ix.Of && sealed[i] != nil {
-				v := plain[i]
-				if ix.Norm == Email {
-					v = []byte(NormaliseEmail(string(v)))
-				}
-				h = k.Hash(v)
+				h = k.Hash(plain[i]) // stored normalised; hashed as stored
 			}
 		}
 		args = append(args, h)

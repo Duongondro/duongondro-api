@@ -305,10 +305,14 @@ func (k *Keys) HashOptional(s *string) []byte {
 }
 
 // NormaliseEmail is the form an address is hashed and stored in: surrounding
-// whitespace trimmed, Unicode NFC, the whole address lower-cased. No provider rules
-// (Gmail's dots and plus tags): two spellings a provider treats as one stay two.
+// whitespace trimmed, Unicode NFC, the whole address lower-cased, and NFC again, since
+// lower-casing can leave a string that is not NFC (İ followed by a combining accent
+// lowers to i, a dot above and the accent, which recompose differently). The second
+// NFC makes it idempotent: NormaliseEmail(NormaliseEmail(s)) == NormaliseEmail(s), so
+// a stored address hashes to the same index as the one it came from. No provider
+// rules (Gmail's dots and plus tags): two spellings a provider treats as one stay two.
 func NormaliseEmail(s string) string {
-	return strings.ToLower(norm.NFC.String(strings.TrimSpace(s)))
+	return norm.NFC.String(strings.ToLower(norm.NFC.String(strings.TrimSpace(s))))
 }
 
 // LockKey turns a blind index into a key for pg_advisory_xact_lock.

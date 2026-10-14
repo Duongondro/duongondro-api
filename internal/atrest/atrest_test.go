@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/text/unicode/norm"
 )
 
 // testBase is SECRET_KEY_BASE = the bytes 0x00 to 0x3f.
@@ -231,5 +232,25 @@ func TestPadding(t *testing.T) {
 		if _, err := unpad(bad); err == nil {
 			t.Errorf("unpad(%x) accepted bad padding", bad)
 		}
+	}
+}
+
+// NormaliseEmail is idempotent over every code point, alone and before a combining
+// accent, so a stored (normalised) address hashes as the typed one did.
+func TestNormaliseEmailIsIdempotent(t *testing.T) {
+	for r := rune(0); r <= 0x10FFFF; r++ {
+		if r >= 0xD800 && r <= 0xDFFF {
+			continue
+		}
+		for _, s := range []string{string(r), "a" + string(r) + "́", string(r) + "̇́"} {
+			once := NormaliseEmail(s)
+			if twice := NormaliseEmail(once); twice != once {
+				t.Fatalf("NormaliseEmail(%q) = %q, but again gives %q", s, once, twice)
+			}
+		}
+	}
+	// U+0130 then U+0301: lower-casing alone leaves a string NFC would change.
+	if s := "İ́"; strings.ToLower(norm.NFC.String(s)) == norm.NFC.String(strings.ToLower(norm.NFC.String(s))) {
+		t.Log("this Unicode version no longer needs the second NFC for U+0130 U+0301")
 	}
 }

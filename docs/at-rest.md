@@ -29,7 +29,7 @@ The nonce is random. PKCS#7 pads to 32-byte blocks (a full block when already al
 
 ## Blind indexes
 
-A value the server looks up gets `<name>_hash = HMAC-SHA256(blindIndexKey, normalised value)` beside it: equality only. E-mail addresses are normalised by trimming surrounding whitespace, Unicode NFC and lower-casing the whole address, with no provider rules (Gmail's dots and plus tags stay distinct); they are stored, mailed and hashed in that form. For the `email` provider the subject is the normalised address, so its `subject_hash` equals the address's `email_hash`. Every lookup, uniqueness check, rate limit and purge of an address goes through the hash; the per-address advisory lock takes the hash's first 8 bytes as its key. Logs show neither an address nor its hash.
+A value the server looks up gets `<name>_hash = HMAC-SHA256(blindIndexKey, normalised value)` beside it: equality only. E-mail addresses are normalised by trimming surrounding whitespace, Unicode NFC, lower-casing the whole address and NFC again (lower-casing can undo NFC; the second pass makes normalising idempotent), with no provider rules (Gmail's dots and plus tags stay distinct); they are stored, mailed and hashed in that form. For the `email` provider the subject is the normalised address, so its `subject_hash` equals the address's `email_hash`. Every lookup, uniqueness check, rate limit and purge of an address goes through the hash; the per-address advisory lock takes the hash's first 8 bytes as its key. Logs show neither an address nor its hash.
 
 ## Columns
 

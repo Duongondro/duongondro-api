@@ -34,21 +34,12 @@ var (
 	PushTokensToken = Column{"push_tokens", "token_encrypted"}
 )
 
-// Normalisation of a value before it is hashed.
-type Normalisation int
-
-const (
-	// Exact hashes the value as stored.
-	Exact Normalisation = iota
-	// Email hashes NormaliseEmail of the value (it is stored normalised too).
-	Email
-)
-
-// Index is a blind index: the hash of the plaintext of a sealed column.
+// Index is a blind index: the hash of the plaintext of a sealed column, as stored.
+// Values are stored already normalised (e-mail addresses by NormaliseEmail), so the
+// stored plaintext is hashed as it is, never normalised again.
 type Index struct {
 	Column Column // the hash column, e.g. users.username_hash
 	Of     Column // the sealed column it indexes
-	Norm   Normalisation
 }
 
 // Table describes how a table's sealed values are bound to their rows, for reseal
@@ -66,10 +57,10 @@ type Table struct {
 var Tables = []Table{
 	{Name: "users", Key: []string{"id"},
 		Sealed:  []Column{UsersIdentityPublicKey, UsersDisplayName, UsersUsername, UsersGender},
-		Indexes: []Index{{Column{"users", "username_hash"}, UsersUsername, Exact}}},
+		Indexes: []Index{{Column{"users", "username_hash"}, UsersUsername}}},
 	{Name: "devices", Key: []string{"id"},
 		Sealed:  []Column{DevicesPublicKey},
-		Indexes: []Index{{Column{"devices", "public_key_hash"}, DevicesPublicKey, Exact}}},
+		Indexes: []Index{{Column{"devices", "public_key_hash"}, DevicesPublicKey}}},
 	{Name: "device_lists", Key: []string{"user_id"}, Sealed: []Column{DeviceListsPayload}},
 	{Name: "invites", Key: []string{"id"}, Sealed: []Column{InvitesPayload}},
 	{Name: "invite_redemptions", Key: []string{"invite_id", "invitee_id"}, Sealed: []Column{InviteRedemptionsPayload}},
@@ -78,22 +69,22 @@ var Tables = []Table{
 	// under the stored hash and seals under the new one.
 	{Name: "streaks", Key: []string{"user_id", "practice_hash"},
 		Sealed:  []Column{StreaksPractice, StreaksPayload},
-		Indexes: []Index{{Column{"streaks", "practice_hash"}, StreaksPractice, Exact}}},
+		Indexes: []Index{{Column{"streaks", "practice_hash"}, StreaksPractice}}},
 	{Name: "credentials", Key: []string{"id"}, Sealed: []Column{CredentialsData}},
 	{Name: "webauthn_sessions", Key: []string{"id"},
 		Sealed: []Column{WebauthnSessionsUsername, WebauthnSessionsDisplayName, WebauthnSessionsGender}},
 	{Name: "auth_identities", Key: []string{"provider", "subject_hash"},
 		Sealed: []Column{AuthIdentitiesSubject, AuthIdentitiesEmail, AuthIdentitiesRefreshToken},
 		// Apple and Google subjects are opaque; an e-mail subject is the normalised
-		// address, already stored normalised, so hashing it exactly is the same.
+		// address, stored normalised.
 		Indexes: []Index{
-			{Column{"auth_identities", "subject_hash"}, AuthIdentitiesSubject, Exact},
-			{Column{"auth_identities", "email_hash"}, AuthIdentitiesEmail, Email},
+			{Column{"auth_identities", "subject_hash"}, AuthIdentitiesSubject},
+			{Column{"auth_identities", "email_hash"}, AuthIdentitiesEmail},
 		}},
 	{Name: "magic_links", Key: []string{"token_hash"},
 		Sealed:  []Column{MagicLinksEmail},
-		Indexes: []Index{{Column{"magic_links", "email_hash"}, MagicLinksEmail, Email}}},
+		Indexes: []Index{{Column{"magic_links", "email_hash"}, MagicLinksEmail}}},
 	{Name: "push_tokens", Key: []string{"device_id"},
 		Sealed:  []Column{PushTokensToken},
-		Indexes: []Index{{Column{"push_tokens", "token_hash"}, PushTokensToken, Exact}}},
+		Indexes: []Index{{Column{"push_tokens", "token_hash"}, PushTokensToken}}},
 }
