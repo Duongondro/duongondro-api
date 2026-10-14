@@ -51,6 +51,9 @@ func NormalizeInviteID(id string) string { return strings.ToUpper(id) }
 // which must be the canonical form: verifiers check the bytes they receive, so the
 // server stores only bytes every client would produce for the same content.
 func decodeStatement(key []byte, typ string, payload, signature []byte, v any) error {
+	if err := checkPayloadSize(payload, maxStatementPayload); err != nil {
+		return err
+	}
 	if key == nil {
 		return conflict("set the identity key first")
 	}
@@ -64,6 +67,21 @@ func decodeStatement(key []byte, typ string, payload, signature []byte, v any) e
 	}
 	if canonical, err := e2ee.Marshal(v); err != nil || !bytes.Equal(canonical, payload) {
 		return invalid("payload is not in canonical form (compact JSON, keys in order)")
+	}
+	return nil
+}
+
+// Payload sizes the plain columns checked before they were encrypted at rest: a
+// sealed column's length is the ciphertext's, so the service checks them instead.
+const (
+	minPayload           = 2
+	maxStatementPayload  = 4096  // invites, acceptances, streaks
+	maxDeviceListPayload = 16384 // a device list
+)
+
+func checkPayloadSize(payload []byte, max int) error {
+	if len(payload) < minPayload || len(payload) > max {
+		return invalid("payload must be %d to %d bytes", minPayload, max)
 	}
 	return nil
 }

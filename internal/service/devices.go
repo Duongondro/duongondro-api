@@ -92,6 +92,9 @@ func (d *Devices) DeviceList(ctx context.Context, userID uuid.UUID) (atrest.Devi
 // them with that key and tier, and that the version goes up. A stolen session can
 // register a device but cannot get it into a list, since it has no identity key.
 func (d *Devices) PutDeviceList(ctx context.Context, user atrest.User, payload, signature []byte) error {
+	if err := checkPayloadSize(payload, maxDeviceListPayload); err != nil {
+		return err
+	}
 	if user.IdentityPublicKey == nil {
 		return conflict("set the identity key before publishing a device list")
 	}

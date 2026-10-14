@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
@@ -243,4 +246,37 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// The payload bounds the plain columns' CHECKs enforced, now in the service: 2 to
+// 4096 bytes for invites, acceptances and streaks, 2 to 16384 for device lists.
+func TestPayloadSizes(t *testing.T) {
+	f := setup(t)
+	s := NewSocial(f.pool, f.keys)
+	ctx := t.Context()
+	ana := f.member()
+	sizeErr := func(err error, max int) bool {
+		return isValidation(err) && strings.Contains(err.Error(), fmt.Sprintf("2 to %d bytes", max))
+	}
+	for _, n := range []int{0, 1, 4097} {
+		p := bytes.Repeat([]byte{'x'}, n)
+		if err := s.CreateInvite(ctx, ana.User, "Q9XA7K2M", random(32), time.Now().Add(time.Hour), p, random(64), random(32)); !sizeErr(err, 4096) {
+			t.Errorf("an invite of %d bytes: %v", n, err)
+		}
+		if _, err := s.Redeem(ctx, ana.User, "Q9XA7K2M", random(32), p, random(64)); !sizeErr(err, 4096) {
+			t.Errorf("an acceptance of %d bytes: %v", n, err)
+		}
+		if _, _, err := s.PutStreak(ctx, ana.User, "mandala", p, random(64)); !sizeErr(err, 4096) {
+			t.Errorf("a streak of %d bytes: %v", n, err)
+		}
+	}
+	for _, n := range []int{1, 16385} {
+		if err := f.devices.PutDeviceList(ctx, ana.User, bytes.Repeat([]byte{'x'}, n), random(64)); !sizeErr(err, 16384) {
+			t.Errorf("a device list of %d bytes: %v", n, err)
+		}
+	}
+	// Within the bounds, the size is not what refuses an unsigned payload.
+	if err := f.devices.PutDeviceList(ctx, ana.User, bytes.Repeat([]byte{'x'}, 16384), random(64)); err == nil || sizeErr(err, 16384) {
+		t.Errorf("a device list of 16384 bytes: %v", err)
+	}
 }
