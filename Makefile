@@ -19,17 +19,19 @@ gen:                  ## Regenerate internal/api from api/openapi.yaml and inter
 	go generate ./internal/api/
 	sqlc generate
 
+# The local database is migrated by a DEV build, whose default SECRET_KEY_BASE seals
+# its columns (as `make serve` reads them); set SECRET_KEY_BASE to use another.
 db-setup:             ## Create and migrate the local databases
 	createdb duongondro 2>/dev/null || true
 	createdb duongondro_test 2>/dev/null || true
-	DATABASE_URL="$(DATABASE_URL)" go run ./cmd/duongondro-api migrate
+	DATABASE_URL="$(DATABASE_URL)" go run -tags DEV ./cmd/duongondro-api migrate
 
 db-new:               ## New migration stamped with the current UTC second: make db-new name=add_x
 	@test -n "$(name)" || (echo "usage: make db-new name=snake_case_name"; exit 1)
 	goose -dir db/migrations create "$(name)" sql
 
 migrate:
-	DATABASE_URL="$(DATABASE_URL)" go run ./cmd/duongondro-api migrate
+	DATABASE_URL="$(DATABASE_URL)" go run -tags DEV ./cmd/duongondro-api migrate
 
 serve:                ## DEV build on 127.0.0.1:8080, with POST /api/dev/session and magic links on stderr
 	DATABASE_URL="$(DATABASE_URL)" RP_ID=localhost RP_ORIGINS=http://localhost:8080 \

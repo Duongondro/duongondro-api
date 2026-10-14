@@ -44,9 +44,9 @@ const boToken = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 
 func TestNudges(t *testing.T) {
 	f := setup(t)
-	social := NewSocial(f.pool)
+	social := NewSocial(f.pool, f.keys)
 	sender := &fakeSender{}
-	n := NewNudges(f.pool, sender)
+	n := NewNudges(f.pool, f.keys, sender)
 	ctx := t.Context()
 	ana, bo := f.member(), f.member()
 	_ = social.SetDisplayName(ctx, ana.ID, "Ana")

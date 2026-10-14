@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 )
@@ -21,7 +22,7 @@ func NewRecovery(pool *pgxpool.Pool) *Recovery { return &Recovery{q: db.New(pool
 
 // Put stores a box signed by the user's identity key (docs/crypto.md, Recovery), so a
 // session alone cannot replace it and quietly break recovery.
-func (r *Recovery) Put(ctx context.Context, user db.User, kind int, box, signature []byte) error {
+func (r *Recovery) Put(ctx context.Context, user atrest.User, kind int, box, signature []byte) error {
 	if kind != int(e2ee.KindPracticeKey) && kind != int(e2ee.KindIdentitySeed) {
 		return invalid("kind must be 1 (practice key) or 2 (identity seed)")
 	}

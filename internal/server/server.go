@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/Duongondro/duongondro-api/internal/api"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/buildinfo"
 	"github.com/Duongondro/duongondro-api/internal/db"
@@ -43,6 +44,8 @@ type Server struct {
 
 // Config carries what the sign-in methods need from the environment.
 type Config struct {
+	// Keys seal the personal columns at rest (SECRET_KEY_BASE).
+	Keys   *atrest.Keys
 	SignIn service.SignInConfig
 	// MagicLinkBase is prefixed to a magic link's token: an App Link and Universal
 	// Link on duongondro.app that opens the app.
@@ -79,24 +82,28 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 		}
 	})
 
-	devices := service.NewDevices(pool)
-	authSvc := auth.New(pool)
-	social := service.NewSocial(pool)
-	signIn, err := service.NewSignIn(pool, authSvc, social, cfg.SignIn)
+	if cfg.Keys == nil {
+		return nil, nil, errors.New("server: Config.Keys is required")
+	}
+	keys := cfg.Keys
+	devices := service.NewDevices(pool, keys)
+	authSvc := auth.New(pool, keys)
+	social := service.NewSocial(pool, keys)
+	signIn, err := service.NewSignIn(pool, keys, authSvc, social, cfg.SignIn)
 	if err != nil {
 		return nil, nil, err
 	}
 	s := &Server{
 		auth:     authSvc,
-		accounts: service.NewAccounts(pool),
+		accounts: service.NewAccounts(pool, keys),
 		devices:  devices,
-		wraps:    service.NewWraps(pool, devices),
+		wraps:    service.NewWraps(pool, keys, devices),
 		logs:     service.NewLogs(pool),
 		recovery: service.NewRecovery(pool),
 		social:   social,
-		gdpr:     service.NewGDPR(pool),
+		gdpr:     service.NewGDPR(pool, keys),
 		signIn:   signIn,
-		nudges:   service.NewNudges(pool, cfg.Push),
+		nudges:   service.NewNudges(pool, keys, cfg.Push),
 		version:  buildinfo.Read(),
 
 		clientErrors: service.NewClientErrors(nil, service.ClientErrorLimit, service.ClientErrorWindow),
@@ -118,16 +125,16 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 
 // authenticate resolves the Authorization header to its user. ok is false for a
 // missing or invalid token (answer 401); err is the server's.
-func (s *Server) authenticate(ctx context.Context, header string) (user db.User, ok bool, err error) {
+func (s *Server) authenticate(ctx context.Context, header string) (user atrest.User, ok bool, err error) {
 	token, ok := auth.BearerPrefix(header)
 	if !ok {
-		return db.User{}, false, nil
+		return atrest.User{}, false, nil
 	}
 	user, err = s.auth.SessionUser(ctx, token)
 	if errors.Is(err, auth.ErrInvalidToken) {
-		return db.User{}, false, nil
+		return atrest.User{}, false, nil
 	} else if err != nil {
-		return db.User{}, false, err
+		return atrest.User{}, false, err
 	}
 	return user, true, nil
 }

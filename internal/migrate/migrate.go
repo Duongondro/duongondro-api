@@ -1,4 +1,5 @@
-// Package migrate applies the goose migrations embedded from db/migrations.
+// Package migrate applies the goose migrations embedded from db/migrations, and,
+// during a key rotation, reseals the encrypted columns under the new key.
 package migrate
 
 import (
@@ -12,12 +13,17 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/Duongondro/duongondro-api/db/migrations"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 )
 
-func Up(ctx context.Context, pool *pgxpool.Pool) error {
+// Up applies the pending migrations; the Go ones seal under keys. When keys carry a
+// previous key (a rotation), it then reseals every value still under that key, so
+// the server starts with every row and blind index under the current one.
+func Up(ctx context.Context, pool *pgxpool.Pool, keys *atrest.Keys) error {
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS,
+		goose.WithGoMigrations(migrations.Go(keys)...))
 	if err != nil {
 		return fmt.Errorf("migrations: %w", err)
 	}
@@ -26,8 +32,18 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	for _, r := range results {
-		// Base name: a Go migration's Path is the absolute path it was built from.
-		slog.Info("migrated", "version", r.Source.Version, "file", filepath.Base(r.Source.Path))
+		file := "(Go)" // handed to goose by migrations.Go, so without a path
+		if r.Source.Path != "" {
+			file = filepath.Base(r.Source.Path)
+		}
+		slog.Info("migrated", "version", r.Source.Version, "file", file)
+	}
+	if keys.Rotating() {
+		n, err := atrest.Reseal(ctx, pool, keys)
+		if err != nil {
+			return err
+		}
+		slog.Info("resealed under the current key", "rows", n)
 	}
 	return nil
 }

@@ -10,12 +10,13 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 )
 
 type member struct {
-	db.User
+	atrest.User
 	identity ed25519.PrivateKey
 }
 
@@ -50,7 +51,7 @@ func acceptance(m member, id string) ([]byte, []byte) {
 
 func TestInvites(t *testing.T) {
 	f := setup(t)
-	s := NewSocial(f.pool)
+	s := NewSocial(f.pool, f.keys)
 	ctx := t.Context()
 	ana, bo, cy := f.member(), f.member(), f.member()
 
@@ -110,7 +111,7 @@ func TestInvites(t *testing.T) {
 
 func TestBlocksAndReports(t *testing.T) {
 	f := setup(t)
-	s := NewSocial(f.pool)
+	s := NewSocial(f.pool, f.keys)
 	ctx := t.Context()
 	ana, bo, stranger := f.member(), f.member(), f.member()
 	auth := f.invite(s, ana, "H4N8R2CJ")
@@ -144,7 +145,7 @@ func TestBlocksAndReports(t *testing.T) {
 
 func TestStreaks(t *testing.T) {
 	f := setup(t)
-	s := NewSocial(f.pool)
+	s := NewSocial(f.pool, f.keys)
 	ctx := t.Context()
 	ana, bo, stranger := f.member(), f.member(), f.member()
 	auth := f.invite(s, ana, "T6PW3ZQF")
@@ -252,24 +253,34 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		f.t.Fatal(err)
 	}
 	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.
-	if err := f.q.CreateCredential(ctx, db.CreateCredentialParams{ID: random(16), UserID: ana.ID, Data: []byte(`{}`)}); err != nil {
+	credID := random(16)
+	if err := f.q.CreateCredential(ctx, db.CreateCredentialParams{ID: credID, UserID: ana.ID,
+		DataEncrypted: f.keys.Seal(atrest.CredentialsData, atrest.RowOf(credID), []byte(`{"publicKey":"ana's passkey"}`))}); err != nil {
 		f.t.Fatal(err)
 	}
 	email := "ana@example.com"
-	if err := f.q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: "email", Subject: email, UserID: ana.ID, Email: &email}); err != nil {
+	hash := f.keys.HashString(email)
+	row := atrest.IdentityRow("email", hash)
+	if err := f.q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: "email", UserID: ana.ID,
+		SubjectEncrypted: f.keys.SealString(atrest.AuthIdentitiesSubject, row, email), SubjectHash: hash,
+		EmailEncrypted: f.keys.SealString(atrest.AuthIdentitiesEmail, row, email), EmailHash: hash}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: random(32), Email: email}); err != nil {
+	linkHash := random(32)
+	if err := f.q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: linkHash,
+		EmailEncrypted: f.keys.SealString(atrest.MagicLinksEmail, atrest.RowOf(linkHash), email), EmailHash: hash}); err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: []byte(`{}`), UserID: &ana.ID}); err != nil {
+	ceremony := uuid.NewV7()
+	if err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{ID: ceremony, Data: []byte(`{}`), UserID: &ana.ID,
+		DisplayNameEncrypted: f.keys.SealString(atrest.WebauthnSessionsDisplayName, atrest.IDRow(ceremony), "Ana mid-ceremony")}); err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(ctx, `INSERT INTO admission_codes (code_hash, expires_at, used_by, used_at)
 		VALUES ($1, now() + interval '1 day', $2, now())`, random(32), ana.ID); err != nil {
 		f.t.Fatal(err)
 	}
-	nudges := NewNudges(f.pool, nil)
+	nudges := NewNudges(f.pool, f.keys, nil)
 	if err := nudges.PutToken(ctx, ana.ID, dev.ID, "apns", boToken); err != nil {
 		f.t.Fatal(err)
 	}
@@ -299,12 +310,12 @@ func (f *fixture) tables() []string {
 // export and deletion › Testing).
 func TestExportCoversEveryTable(t *testing.T) {
 	f := setup(t)
-	ana := f.fillEveryTable(NewSocial(f.pool))
+	ana := f.fillEveryTable(NewSocial(f.pool, f.keys))
 	tables := f.tables()
 	if !slices.Equal(tables, ExportedTables) {
 		t.Fatalf("tables %v, but the export covers %v: add the new table to Export", tables, ExportedTables)
 	}
-	export, err := NewGDPR(f.pool).Export(t.Context(), ana.ID)
+	export, err := NewGDPR(f.pool, f.keys).Export(t.Context(), ana.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,9 +342,9 @@ func TestExportCoversEveryTable(t *testing.T) {
 // deletion › Testing); the invite tree keeps an anonymous node.
 func TestPurgeLeavesNoTrace(t *testing.T) {
 	f := setup(t)
-	ana := f.fillEveryTable(NewSocial(f.pool))
+	ana := f.fillEveryTable(NewSocial(f.pool, f.keys))
 	ctx := t.Context()
-	if err := NewGDPR(f.pool).Purge(ctx, ana.ID); err != nil {
+	if err := NewGDPR(f.pool, f.keys).Purge(ctx, ana.ID); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := f.pool.Query(ctx, `SELECT table_name, column_name FROM information_schema.columns
@@ -359,12 +370,12 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 		}
 	}
 	var links int
-	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email = 'ana@example.com'`).Scan(&links)
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email_hash = $1`, f.keys.HashString("ana@example.com")).Scan(&links)
 	if links != 0 {
 		t.Errorf("%d unused magic links to the purged address remain", links)
 	}
 	var named int
-	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username = 'ana'`).Scan(&named)
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username_hash = $1`, f.keys.HashString("ana")).Scan(&named)
 	if named != 0 {
 		t.Error("the purged user's username remains")
 	}

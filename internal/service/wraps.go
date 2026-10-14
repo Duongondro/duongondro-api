@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 	"github.com/Duongondro/duongondro-api/internal/repository"
@@ -26,19 +27,20 @@ type WrapInput struct {
 
 type Wraps struct {
 	q       *db.Queries
+	keys    *atrest.Keys
 	repo    *repository.Wraps
 	devices *Devices
 }
 
-func NewWraps(pool *pgxpool.Pool, devices *Devices) *Wraps {
-	return &Wraps{q: db.New(pool), repo: repository.NewWraps(pool), devices: devices}
+func NewWraps(pool *pgxpool.Pool, keys *atrest.Keys, devices *Devices) *Wraps {
+	return &Wraps{q: db.New(pool), keys: keys, repo: repository.NewWraps(pool, keys), devices: devices}
 }
 
 // Put stores a wrap to one of the user's devices. What the server cannot verify is
 // limited to where the design needs it (design: Keys): an enrolment tag only for a
 // device that has no wraps yet (its first, from the QR secret), a self tag never over
 // a signed wrap. So a session alone cannot swap a verifiable wrap for a blob.
-func (w *Wraps) Put(ctx context.Context, user db.User, deviceID uuid.UUID, in WrapInput) error {
+func (w *Wraps) Put(ctx context.Context, user atrest.User, deviceID uuid.UUID, in WrapInput) error {
 	dev, err := w.devices.Owned(ctx, user.ID, deviceID)
 	if err != nil {
 		return err
@@ -79,11 +81,11 @@ type RotationWrap struct {
 // Rotate moves the practice key to newVersion. The wraps must carry it to exactly the
 // devices holding the current version, each once, all of kind 1 at newVersion: a
 // device left out would lose the practice key.
-func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps []RotationWrap) error {
+func (w *Wraps) Rotate(ctx context.Context, user atrest.User, newVersion int, wraps []RotationWrap) error {
 	if user.IdentityPublicKey == nil {
 		return conflict("set the identity key before rotating the practice key")
 	}
-	return w.repo.Rotate(ctx, user.ID, newVersion, func(locked db.User, holders []db.PracticeKeyHoldersRow) ([]db.PutWrapParams, error) {
+	return w.repo.Rotate(ctx, user.ID, newVersion, func(locked atrest.User, holders []atrest.Device) ([]db.PutWrapParams, error) {
 		if newVersion != int(locked.KeyVersion)+1 {
 			return nil, conflict("newVersion must be %d", locked.KeyVersion+1)
 		}
@@ -93,7 +95,7 @@ func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps 
 		if err != nil {
 			return nil, err
 		}
-		pending := map[uuid.UUID]db.PracticeKeyHoldersRow{}
+		pending := map[uuid.UUID]atrest.Device{}
 		for _, h := range holders {
 			if listed == nil || listed[h.ID.String()] {
 				pending[h.ID] = h
@@ -114,8 +116,7 @@ func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps 
 			if rw.AuthType != "signature" {
 				return nil, invalid("rotation wraps are signed by the identity key")
 			}
-			dev := db.Device{ID: h.ID, PublicKey: h.PublicKey}
-			if err := validateWrap(locked, dev, rw.WrapInput, newVersion); err != nil {
+			if err := validateWrap(locked, h, rw.WrapInput, newVersion); err != nil {
 				return nil, err
 			}
 			params = append(params, wrapParams(h.ID, rw.WrapInput))
@@ -129,8 +130,8 @@ func (w *Wraps) Rotate(ctx context.Context, user db.User, newVersion int, wraps 
 
 // listedDevices returns the device ids in the user's signed device list, or nil when
 // none has been published yet.
-func (w *Wraps) listedDevices(ctx context.Context, user db.User) (map[string]bool, error) {
-	stored, err := w.q.GetDeviceList(ctx, user.ID)
+func (w *Wraps) listedDevices(ctx context.Context, user atrest.User) (map[string]bool, error) {
+	stored, err := w.keys.DeviceList(w.q.GetDeviceList(ctx, user.ID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
@@ -152,7 +153,7 @@ func (w *Wraps) listedDevices(ctx context.Context, user db.User) (map[string]boo
 // against the identity key over the wrap and the AAD rebuilt here, so a wrap cannot
 // be moved to another device, user, kind or version; HMAC tags only the devices
 // can check, so their size is all the server sees.
-func validateWrap(user db.User, dev db.Device, in WrapInput, maxVersion int) error {
+func validateWrap(user atrest.User, dev atrest.Device, in WrapInput, maxVersion int) error {
 	if in.Kind != int(e2ee.KindPracticeKey) && in.Kind != int(e2ee.KindIdentitySeed) {
 		return invalid("kind must be 1 (practice key) or 2 (identity seed)")
 	}

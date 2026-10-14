@@ -11,16 +11,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 )
 
 type Devices struct {
-	q *db.Queries
+	q    *db.Queries
+	keys *atrest.Keys
 }
 
-func NewDevices(pool *pgxpool.Pool) *Devices {
-	return &Devices{q: db.New(pool)}
+func NewDevices(pool *pgxpool.Pool, keys *atrest.Keys) *Devices {
+	return &Devices{q: db.New(pool), keys: keys}
 }
 
 var tiers = map[string]bool{"hardware": true, "tee": true, "software": true}
@@ -33,23 +35,25 @@ func validPublicKey(key []byte) bool {
 // Register adds a device key; the same key again returns the existing device
 // (created false). Nobody is refused over a software-tier key: the tier is
 // information, not a gate.
-func (d *Devices) Register(ctx context.Context, userID uuid.UUID, publicKey []byte, tier string) (db.Device, bool, error) {
+func (d *Devices) Register(ctx context.Context, userID uuid.UUID, publicKey []byte, tier string) (atrest.Device, bool, error) {
 	if !validPublicKey(publicKey) {
-		return db.Device{}, false, invalid("publicKey must be a 65-byte uncompressed point on the glowie curve")
+		return atrest.Device{}, false, invalid("publicKey must be a 65-byte uncompressed point on the glowie curve")
 	}
 	if !tiers[tier] {
-		return db.Device{}, false, invalid("tier must be hardware, tee or software")
+		return atrest.Device{}, false, invalid("tier must be hardware, tee or software")
 	}
-	dev, err := d.q.CreateDevice(ctx, db.CreateDeviceParams{UserID: userID, PublicKey: publicKey, Tier: tier})
+	id, hash := uuid.NewV7(), d.keys.Hash(publicKey)
+	dev, err := d.keys.Device(d.q.CreateDevice(ctx, db.CreateDeviceParams{ID: id, UserID: userID,
+		PublicKeyEncrypted: d.keys.Seal(atrest.DevicesPublicKey, atrest.IDRow(id), publicKey), PublicKeyHash: hash, Tier: tier}))
 	if errors.Is(err, pgx.ErrNoRows) {
-		dev, err = d.q.GetDeviceByKey(ctx, db.GetDeviceByKeyParams{UserID: userID, PublicKey: publicKey})
+		dev, err = d.keys.Device(d.q.GetDeviceByKey(ctx, db.GetDeviceByKeyParams{UserID: userID, PublicKeyHash: hash}))
 		return dev, false, err
 	}
 	return dev, err == nil, err
 }
 
-func (d *Devices) List(ctx context.Context, userID uuid.UUID) ([]db.Device, error) {
-	return d.q.ListDevices(ctx, userID)
+func (d *Devices) List(ctx context.Context, userID uuid.UUID) ([]atrest.Device, error) {
+	return d.keys.Devices(d.q.ListDevices(ctx, userID))
 }
 
 // Delete removes one of the user's devices; its wraps go with it.
@@ -65,16 +69,16 @@ func (d *Devices) Delete(ctx context.Context, userID, deviceID uuid.UUID) error 
 }
 
 // Owned returns one of the user's devices, or ErrNotFound.
-func (d *Devices) Owned(ctx context.Context, userID, deviceID uuid.UUID) (db.Device, error) {
-	dev, err := d.q.GetDevice(ctx, deviceID)
+func (d *Devices) Owned(ctx context.Context, userID, deviceID uuid.UUID) (atrest.Device, error) {
+	dev, err := d.keys.Device(d.q.GetDevice(ctx, deviceID))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && dev.UserID != userID) {
-		return db.Device{}, ErrNotFound
+		return atrest.Device{}, ErrNotFound
 	}
 	return dev, err
 }
 
-func (d *Devices) DeviceList(ctx context.Context, userID uuid.UUID) (db.DeviceList, error) {
-	list, err := d.q.GetDeviceList(ctx, userID)
+func (d *Devices) DeviceList(ctx context.Context, userID uuid.UUID) (atrest.DeviceList, error) {
+	list, err := d.keys.DeviceList(d.q.GetDeviceList(ctx, userID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return list, ErrNotFound
 	}
@@ -87,7 +91,7 @@ func (d *Devices) DeviceList(ctx context.Context, userID uuid.UUID) (db.DeviceLi
 // same bytes), that it names this user, that every listed device is registered to
 // them with that key and tier, and that the version goes up. A stolen session can
 // register a device but cannot get it into a list, since it has no identity key.
-func (d *Devices) PutDeviceList(ctx context.Context, user db.User, payload, signature []byte) error {
+func (d *Devices) PutDeviceList(ctx context.Context, user atrest.User, payload, signature []byte) error {
 	if user.IdentityPublicKey == nil {
 		return conflict("set the identity key before publishing a device list")
 	}
@@ -109,11 +113,11 @@ func (d *Devices) PutDeviceList(ctx context.Context, user db.User, payload, sign
 	if list.Version < 1 || list.IssuedAt <= 0 || len(list.Devices) == 0 {
 		return invalid("version, issuedAt and at least one device are required")
 	}
-	registered, err := d.q.ListDevices(ctx, user.ID)
+	registered, err := d.List(ctx, user.ID)
 	if err != nil {
 		return err
 	}
-	byID := map[string]db.Device{}
+	byID := map[string]atrest.Device{}
 	for _, dev := range registered {
 		byID[dev.ID.String()] = dev
 	}
@@ -128,7 +132,8 @@ func (d *Devices) PutDeviceList(ctx context.Context, user db.User, payload, sign
 			return invalid("device %s is listed with a key or tier other than its registered one", item.ID)
 		}
 	}
-	n, err := d.q.PutDeviceList(ctx, db.PutDeviceListParams{UserID: user.ID, Version: list.Version, Payload: payload, Signature: signature})
+	n, err := d.q.PutDeviceList(ctx, db.PutDeviceListParams{UserID: user.ID, Version: list.Version,
+		PayloadEncrypted: d.keys.Seal(atrest.DeviceListsPayload, atrest.IDRow(user.ID), payload), Signature: signature})
 	if err != nil {
 		return fmt.Errorf("put device list: %w", err)
 	}

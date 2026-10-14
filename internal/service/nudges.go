@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/push"
 )
@@ -51,13 +52,14 @@ type delivery struct {
 // a full queue drops a nudge (logged) rather than slowing requests down.
 type Nudges struct {
 	q      *db.Queries
+	keys   *atrest.Keys
 	sender push.Sender
 	queue  chan delivery
 	now    func() time.Time
 }
 
-func NewNudges(pool *pgxpool.Pool, sender push.Sender) *Nudges {
-	return &Nudges{q: db.New(pool), sender: sender, queue: make(chan delivery, 1024), now: time.Now}
+func NewNudges(pool *pgxpool.Pool, keys *atrest.Keys, sender push.Sender) *Nudges {
+	return &Nudges{q: db.New(pool), keys: keys, sender: sender, queue: make(chan delivery, 1024), now: time.Now}
 }
 
 // Run delivers queued nudges and sends streak-at-risk pushes until ctx ends.
@@ -96,7 +98,7 @@ func (n *Nudges) deliver(ctx context.Context, d delivery) {
 	if n.sender == nil {
 		return
 	}
-	tokens, err := n.q.PushTokensOf(ctx, d.userID)
+	tokens, err := n.keys.PushTokens(n.q.PushTokensOf(ctx, d.userID))
 	if err != nil {
 		slog.WarnContext(ctx, "Loading push tokens failed", "user_id", d.userID.String(), "error", err.Error())
 		return
@@ -106,7 +108,7 @@ func (n *Nudges) deliver(ctx context.Context, d delivery) {
 		err := n.sender.Send(sendCtx, t.Platform, t.Token, d.msg)
 		cancel()
 		if errors.Is(err, push.ErrUnregistered) {
-			if err := n.q.DropPushToken(ctx, db.DropPushTokenParams{Platform: t.Platform, Token: t.Token}); err != nil {
+			if err := n.q.DropPushToken(ctx, db.DropPushTokenParams{Platform: t.Platform, TokenHash: t.TokenHash}); err != nil {
 				slog.WarnContext(ctx, "Dropping a push token failed", "error", err.Error())
 			}
 		} else if err != nil {
@@ -133,10 +135,12 @@ func (n *Nudges) PutToken(ctx context.Context, userID, deviceID uuid.UUID, platf
 		return err
 	}
 	// A token reaches one device: a phone signed in to another account before loses it.
-	if err := n.q.ReleasePushToken(ctx, db.ReleasePushTokenParams{Platform: platform, Token: token, DeviceID: deviceID}); err != nil {
+	hash := n.keys.HashString(token)
+	if err := n.q.ReleasePushToken(ctx, db.ReleasePushTokenParams{Platform: platform, TokenHash: hash, DeviceID: deviceID}); err != nil {
 		return err
 	}
-	return n.q.PutPushToken(ctx, db.PutPushTokenParams{DeviceID: deviceID, Platform: platform, Token: token})
+	return n.q.PutPushToken(ctx, db.PutPushTokenParams{DeviceID: deviceID, Platform: platform,
+		TokenEncrypted: n.keys.SealString(atrest.PushTokensToken, atrest.IDRow(deviceID), token), TokenHash: hash})
 }
 
 // DropDeviceToken removes a device's push token, as its session signs out.
@@ -166,7 +170,7 @@ func (n *Nudges) SetNotifyDone(ctx context.Context, userID, friendID uuid.UUID, 
 
 // DoneToday tells the friends who opted in that user practised: "Tomasz just did his
 // Dorje Sempa · day 42". Only the public statement's contents go out.
-func (n *Nudges) DoneToday(ctx context.Context, user db.User, practice string, current int) {
+func (n *Nudges) DoneToday(ctx context.Context, user atrest.User, practice string, current int) {
 	recipients, err := n.q.DoneTodayRecipients(ctx, user.ID)
 	if err != nil {
 		slog.WarnContext(ctx, "Loading done-today recipients failed", "user_id", user.ID.String(), "error", err.Error())
@@ -179,7 +183,7 @@ func (n *Nudges) DoneToday(ctx context.Context, user db.User, practice string, c
 }
 
 // Poke nudges a friend by hand, once per friend per UTC day.
-func (n *Nudges) Poke(ctx context.Context, user db.User, friendID uuid.UUID) error {
+func (n *Nudges) Poke(ctx context.Context, user atrest.User, friendID uuid.UUID) error {
 	friends, err := n.q.AreFriends(ctx, db.AreFriendsParams{UserID: user.ID, FriendID: friendID})
 	if err != nil {
 		return err
@@ -205,7 +209,7 @@ func (n *Nudges) Poke(ctx context.Context, user db.User, friendID uuid.UUID) err
 // so this needs no idea where the user is; private streaks are reminded locally on
 // the phone, and the server learns nothing about them.
 func (n *Nudges) SweepAtRisk(ctx context.Context) {
-	streaks, err := n.q.StreaksAtRisk(ctx)
+	streaks, err := n.keys.Streaks(n.q.StreaksAtRisk(ctx))
 	if err != nil {
 		slog.WarnContext(ctx, "Loading streaks at risk failed", "error", err.Error())
 		return
@@ -217,7 +221,7 @@ func (n *Nudges) SweepAtRisk(ctx context.Context) {
 			ThreadID: "streak-" + st.Practice}) {
 			return
 		}
-		if err := n.q.MarkAtRiskSent(ctx, db.MarkAtRiskSentParams{UserID: st.UserID, Practice: st.Practice, AtRiskSentSeq: st.Seq}); err != nil {
+		if err := n.q.MarkAtRiskSent(ctx, db.MarkAtRiskSentParams{UserID: st.UserID, PracticeHash: st.PracticeHash, AtRiskSentSeq: st.Seq}); err != nil {
 			slog.WarnContext(ctx, "Marking a streak nudged failed", "error", err.Error())
 		}
 	}

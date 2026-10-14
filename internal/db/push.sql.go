@@ -51,17 +51,17 @@ func (q *Queries) DoneTodayRecipients(ctx context.Context, friendID uuid.UUID) (
 }
 
 const dropPushToken = `-- name: DropPushToken :exec
-DELETE FROM push_tokens WHERE platform = $1 AND token = $2
+DELETE FROM push_tokens WHERE platform = $1 AND token_hash = $2
 `
 
 type DropPushTokenParams struct {
-	Platform string `json:"platform"`
-	Token    string `json:"token"`
+	Platform  string `json:"platform"`
+	TokenHash []byte `json:"tokenHash"`
 }
 
 // The provider reported the token unregistered.
 func (q *Queries) DropPushToken(ctx context.Context, arg DropPushTokenParams) error {
-	_, err := q.db.Exec(ctx, dropPushToken, arg.Platform, arg.Token)
+	_, err := q.db.Exec(ctx, dropPushToken, arg.Platform, arg.TokenHash)
 	return err
 }
 
@@ -126,22 +126,22 @@ func (q *Queries) ExportPushTokens(ctx context.Context, userID uuid.UUID) ([]Exp
 }
 
 const markAtRiskSent = `-- name: MarkAtRiskSent :exec
-UPDATE streaks SET at_risk_sent_seq = $3 WHERE user_id = $1 AND practice = $2 AND seq = $3
+UPDATE streaks SET at_risk_sent_seq = $3 WHERE user_id = $1 AND practice_hash = $2 AND seq = $3
 `
 
 type MarkAtRiskSentParams struct {
 	UserID        uuid.UUID `json:"userId"`
-	Practice      string    `json:"practice"`
+	PracticeHash  []byte    `json:"practiceHash"`
 	AtRiskSentSeq int64     `json:"atRiskSentSeq"`
 }
 
 func (q *Queries) MarkAtRiskSent(ctx context.Context, arg MarkAtRiskSentParams) error {
-	_, err := q.db.Exec(ctx, markAtRiskSent, arg.UserID, arg.Practice, arg.AtRiskSentSeq)
+	_, err := q.db.Exec(ctx, markAtRiskSent, arg.UserID, arg.PracticeHash, arg.AtRiskSentSeq)
 	return err
 }
 
 const pushTokensOf = `-- name: PushTokensOf :many
-SELECT push_tokens.device_id, push_tokens.platform, push_tokens.token, push_tokens.updated_at FROM push_tokens JOIN devices ON devices.id = push_tokens.device_id
+SELECT push_tokens.device_id, push_tokens.platform, push_tokens.updated_at, push_tokens.token_encrypted, push_tokens.token_hash FROM push_tokens JOIN devices ON devices.id = push_tokens.device_id
 WHERE devices.user_id = $1
 `
 
@@ -157,8 +157,9 @@ func (q *Queries) PushTokensOf(ctx context.Context, userID uuid.UUID) ([]PushTok
 		if err := rows.Scan(
 			&i.DeviceID,
 			&i.Platform,
-			&i.Token,
 			&i.UpdatedAt,
+			&i.TokenEncrypted,
+			&i.TokenHash,
 		); err != nil {
 			return nil, err
 		}
@@ -171,18 +172,25 @@ func (q *Queries) PushTokensOf(ctx context.Context, userID uuid.UUID) ([]PushTok
 }
 
 const putPushToken = `-- name: PutPushToken :exec
-INSERT INTO push_tokens (device_id, platform, token) VALUES ($1, $2, $3)
-ON CONFLICT (device_id) DO UPDATE SET platform = EXCLUDED.platform, token = EXCLUDED.token, updated_at = now()
+INSERT INTO push_tokens (device_id, platform, token_encrypted, token_hash) VALUES ($1, $2, $3, $4)
+ON CONFLICT (device_id) DO UPDATE SET platform = EXCLUDED.platform, token_encrypted = EXCLUDED.token_encrypted,
+    token_hash = EXCLUDED.token_hash, updated_at = now()
 `
 
 type PutPushTokenParams struct {
-	DeviceID uuid.UUID `json:"deviceId"`
-	Platform string    `json:"platform"`
-	Token    string    `json:"token"`
+	DeviceID       uuid.UUID `json:"deviceId"`
+	Platform       string    `json:"platform"`
+	TokenEncrypted []byte    `json:"tokenEncrypted"`
+	TokenHash      []byte    `json:"tokenHash"`
 }
 
 func (q *Queries) PutPushToken(ctx context.Context, arg PutPushTokenParams) error {
-	_, err := q.db.Exec(ctx, putPushToken, arg.DeviceID, arg.Platform, arg.Token)
+	_, err := q.db.Exec(ctx, putPushToken,
+		arg.DeviceID,
+		arg.Platform,
+		arg.TokenEncrypted,
+		arg.TokenHash,
+	)
 	return err
 }
 
@@ -205,18 +213,18 @@ func (q *Queries) RecordNudge(ctx context.Context, arg RecordNudgeParams) (int64
 }
 
 const releasePushToken = `-- name: ReleasePushToken :exec
-DELETE FROM push_tokens WHERE platform = $1 AND token = $2 AND device_id <> $3
+DELETE FROM push_tokens WHERE platform = $1 AND token_hash = $2 AND device_id <> $3
 `
 
 type ReleasePushTokenParams struct {
-	Platform string    `json:"platform"`
-	Token    string    `json:"token"`
-	DeviceID uuid.UUID `json:"deviceId"`
+	Platform  string    `json:"platform"`
+	TokenHash []byte    `json:"tokenHash"`
+	DeviceID  uuid.UUID `json:"deviceId"`
 }
 
 // A token reaches one device: drop it from any other before storing it.
 func (q *Queries) ReleasePushToken(ctx context.Context, arg ReleasePushTokenParams) error {
-	_, err := q.db.Exec(ctx, releasePushToken, arg.Platform, arg.Token, arg.DeviceID)
+	_, err := q.db.Exec(ctx, releasePushToken, arg.Platform, arg.TokenHash, arg.DeviceID)
 	return err
 }
 
@@ -239,7 +247,7 @@ func (q *Queries) SetNotifyDone(ctx context.Context, arg SetNotifyDoneParams) (i
 }
 
 const streaksAtRisk = `-- name: StreaksAtRisk :many
-SELECT user_id, practice, seq, payload, signature, deadline_at, updated_at, at_risk_sent_seq FROM streaks
+SELECT user_id, seq, signature, deadline_at, updated_at, at_risk_sent_seq, practice_encrypted, practice_hash, payload_encrypted FROM streaks
 WHERE deadline_at > now() AND deadline_at <= now() + interval '2 hours' AND at_risk_sent_seq < seq
 ORDER BY deadline_at
 LIMIT 500
@@ -258,13 +266,14 @@ func (q *Queries) StreaksAtRisk(ctx context.Context) ([]Streak, error) {
 		var i Streak
 		if err := rows.Scan(
 			&i.UserID,
-			&i.Practice,
 			&i.Seq,
-			&i.Payload,
 			&i.Signature,
 			&i.DeadlineAt,
 			&i.UpdatedAt,
 			&i.AtRiskSentSeq,
+			&i.PracticeEncrypted,
+			&i.PracticeHash,
+			&i.PayloadEncrypted,
 		); err != nil {
 			return nil, err
 		}

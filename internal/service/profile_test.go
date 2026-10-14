@@ -13,7 +13,7 @@ func ptr[T any](v T) *T { return &v }
 
 func TestProfile(t *testing.T) {
 	f := setup(t)
-	s := NewSocial(f.pool)
+	s := NewSocial(f.pool, f.keys)
 	ctx := t.Context()
 	ana, bo := f.member(), f.member()
 
@@ -133,7 +133,7 @@ func TestPasskeySignUpWithProfile(t *testing.T) {
 	if err != nil || !session.Created {
 		t.Fatalf("sign-up with a profile: %v", err)
 	}
-	got, err := f.q.GetUser(ctx, session.UserID)
+	got, err := f.keys.User(f.q.GetUser(ctx, session.UserID))
 	if err != nil || got.Username == nil || *got.Username != "cy.k" || got.DisplayName != "Cy" || got.Gender == nil || *got.Gender != "nonbinary" {
 		t.Fatalf("the new account's profile: %v %v %q %v", err, got.Username, got.DisplayName, got.Gender)
 	}

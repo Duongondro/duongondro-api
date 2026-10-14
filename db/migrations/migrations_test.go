@@ -18,6 +18,9 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/Duongondro/duongondro-api/db/migrations"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 )
 
 var filenamePattern = regexp.MustCompile(`^(\d{14})_\w+\.(sql|go)$`)
@@ -100,4 +103,39 @@ func parseUTCInstant(version string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return at, true
+}
+
+// Every <version>_<name>.go file here is handed to goose by migrations.Go, under its
+// file's version, and nothing else is: a Go migration missing from Go would be
+// skipped silently.
+func TestGoMigrationsAreRegistered(t *testing.T) {
+	keys, err := atrest.New(make([]byte, atrest.MinSecretKeyBase), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := map[int64]bool{}
+	for _, m := range migrations.Go(keys) {
+		registered[m.Version] = true
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[int64]bool{}
+	for _, entry := range entries {
+		match := filenamePattern.FindStringSubmatch(entry.Name())
+		if match == nil || match[2] != "go" {
+			continue
+		}
+		version, _ := strconv.ParseInt(match[1], 10, 64)
+		files[version] = true
+		if !registered[version] {
+			t.Errorf("%s is not returned by migrations.Go", entry.Name())
+		}
+	}
+	for version := range registered {
+		if !files[version] {
+			t.Errorf("migrations.Go returns version %d, which has no <version>_<name>.go file", version)
+		}
+	}
 }

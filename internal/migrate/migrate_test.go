@@ -1,0 +1,168 @@
+package migrate_test
+
+import (
+	"bytes"
+	"context"
+	"testing"
+	"uuid"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
+
+	"github.com/Duongondro/duongondro-api/db/migrations"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
+	"github.com/Duongondro/duongondro-api/internal/db"
+	"github.com/Duongondro/duongondro-api/internal/dbtest"
+	"github.com/Duongondro/duongondro-api/internal/migrate"
+)
+
+// beforeAtRest is the last migration before encryption at rest: production's schema
+// when it ships.
+const beforeAtRest = 20261007052551
+
+func upTo(t *testing.T, pool *pgxpool.Pool, keys *atrest.Keys, version int64) {
+	t.Helper()
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer sqlDB.Close()
+	p, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS, goose.WithGoMigrations(migrations.Go(keys)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), version); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A database with rows in every plain personal column, as production has them, is
+// sealed by the migrations: every value opens to what it was (addresses normalised),
+// the blind indexes find it, and the plain columns are gone.
+func TestMigrationSealsExistingRows(t *testing.T) {
+	pool := dbtest.Empty(t, "migrate_tests")
+	keys := dbtest.Keys()
+	ctx := t.Context()
+	upTo(t, pool, keys, beforeAtRest)
+
+	ana, bo := uuid.NewV7(), uuid.NewV7()
+	dev := uuid.NewV7()
+	report := uuid.NewV7()
+	identityKey, deviceKey := bytes.Repeat([]byte{1}, 32), append([]byte{4}, bytes.Repeat([]byte{2}, 64)...)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	exec(`INSERT INTO users (id, identity_public_key, display_name, username, gender) VALUES ($1, $2, 'Ana', 'ana', 'female'), ($3, NULL, '', NULL, NULL)`,
+		ana, identityKey, bo)
+	exec(`INSERT INTO devices (id, user_id, public_key, tier) VALUES ($1, $2, $3, 'hardware')`, dev, ana, deviceKey)
+	exec(`INSERT INTO device_lists (user_id, version, payload, signature) VALUES ($1, 1, '{"list":1}', $2)`, ana, make([]byte, 64))
+	exec(`INSERT INTO invites (id, inviter_id, auth_hash, payload, signature, mac, expires_at)
+		VALUES ('Q9XA7K2M', $1, $2, '{"invite":1}', $3, $2, now() + interval '1 day')`, ana, make([]byte, 32), make([]byte, 64))
+	exec(`INSERT INTO invite_redemptions (invite_id, invitee_id, payload, signature) VALUES ('Q9XA7K2M', $1, '{"accept":1}', $2)`, bo, make([]byte, 64))
+	exec(`INSERT INTO reports (id, reporter_id, reported_id, reason) VALUES ($1, $2, $3, 'rude')`, report, bo, ana)
+	exec(`INSERT INTO streaks (user_id, practice, seq, payload, signature, deadline_at) VALUES ($1, 'mandala', 1, '{"streak":1}', $2, now())`,
+		ana, make([]byte, 64))
+	exec(`INSERT INTO credentials (id, user_id, data) VALUES ('\x0102'::bytea, $1, '{"passkey": true}')`, ana)
+	exec(`INSERT INTO webauthn_sessions (data, user_id, display_name) VALUES ('{}', $1, 'Ana')`, ana)
+	// Stored lower-cased by the old code, but not NFC: e and a combining acute.
+	exec(`INSERT INTO auth_identities (provider, subject, user_id, email, refresh_token) VALUES
+		('email', 'zoe`+"́"+`@example.com', $1, 'zoe`+"́"+`@example.com', NULL),
+		('apple', '001234.abc', $1, 'ana@icloud.com', 'refresh-me')`, ana)
+	exec(`INSERT INTO magic_links (token_hash, email) VALUES ($1, 'ana@example.com')`, bytes.Repeat([]byte{9}, 32))
+	exec(`INSERT INTO push_tokens (device_id, platform, token) VALUES ($1, 'apns', 'abcdef0123456789abcdef0123456789')`, dev)
+
+	if err := migrate.Up(ctx, pool, keys); err != nil {
+		t.Fatalf("migrating the rows: %v", err)
+	}
+	q := db.New(pool)
+
+	u, err := keys.User(q.GetUser(ctx, ana))
+	if err != nil || !bytes.Equal(u.IdentityPublicKey, identityKey) || u.DisplayName != "Ana" || *u.Username != "ana" || *u.Gender != "female" {
+		t.Fatalf("users: %+v %v", u, err)
+	}
+	if taken, _ := q.UsernameTaken(ctx, keys.HashString("ana")); !taken {
+		t.Error("the username's blind index does not find it")
+	}
+	if u, err := keys.User(q.GetUser(ctx, bo)); err != nil || u.DisplayName != "" || u.Username != nil || u.Gender != nil || u.IdentityPublicKey != nil {
+		t.Errorf("an empty profile: %+v %v", u, err)
+	}
+	if d, err := keys.Device(q.GetDeviceByKey(ctx, db.GetDeviceByKeyParams{UserID: ana, PublicKeyHash: keys.Hash(deviceKey)})); err != nil ||
+		d.ID != dev || !bytes.Equal(d.PublicKey, deviceKey) {
+		t.Errorf("devices: %+v %v", d, err)
+	}
+	if l, err := keys.DeviceList(q.GetDeviceList(ctx, ana)); err != nil || string(l.Payload) != `{"list":1}` {
+		t.Errorf("device_lists: %v", err)
+	}
+	if i, err := keys.Invite(q.GetLiveInvite(ctx, "Q9XA7K2M")); err != nil || string(i.Payload) != `{"invite":1}` {
+		t.Errorf("invites: %v", err)
+	}
+	if r, err := keys.InviteRedemptions(q.ExportRedemptions(ctx, bo)); err != nil || len(r) != 1 || string(r[0].Payload) != `{"accept":1}` {
+		t.Errorf("invite_redemptions: %v", err)
+	}
+	if r, err := keys.Reports(q.ExportReports(ctx, bo)); err != nil || len(r) != 1 || r[0].Reason != "rude" {
+		t.Errorf("reports: %v", err)
+	}
+	if s, err := keys.Streak(q.GetStreak(ctx, db.GetStreakParams{UserID: ana, PracticeHash: keys.HashString("mandala")})); err != nil ||
+		s.Practice != "mandala" || string(s.Payload) != `{"streak":1}` {
+		t.Errorf("streaks: %+v %v", s, err)
+	}
+	if c, err := keys.Credentials(q.ListCredentials(ctx, ana)); err != nil || len(c) != 1 || string(c[0].Data) != `{"passkey": true}` {
+		t.Errorf("credentials: %v", err)
+	}
+	var ceremonies int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM webauthn_sessions`).Scan(&ceremonies)
+	if ceremonies != 0 {
+		t.Errorf("%d passkey ceremonies survived", ceremonies)
+	}
+	zoe := atrest.NormaliseEmail("zoé@example.com")
+	if zoe != "zoé@example.com" {
+		t.Fatalf("NFC: %q", zoe)
+	}
+	if i, err := keys.Identity(q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", SubjectHash: keys.HashString(zoe)})); err != nil ||
+		i.Subject != zoe || *i.Email != zoe {
+		t.Errorf("an e-mail identity, normalised: %+v %v", i, err)
+	}
+	if i, err := keys.Identity(q.GetIdentity(ctx, db.GetIdentityParams{Provider: "apple", SubjectHash: keys.HashString("001234.abc")})); err != nil ||
+		*i.Email != "ana@icloud.com" || *i.RefreshToken != "refresh-me" {
+		t.Errorf("an Apple identity: %+v %v", i, err)
+	}
+	var links int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email_hash = $1`, keys.HashString("ana@example.com")).Scan(&links)
+	if links != 1 {
+		t.Errorf("magic_links by hash: %d", links)
+	}
+	if p, err := keys.PushTokens(q.PushTokensOf(ctx, ana)); err != nil || len(p) != 1 || p[0].Token != "abcdef0123456789abcdef0123456789" ||
+		!bytes.Equal(p[0].TokenHash, keys.HashString(p[0].Token)) {
+		t.Errorf("push_tokens: %v", err)
+	}
+
+	var plain int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema()
+		AND (table_name, column_name) IN (('users', 'display_name'), ('users', 'username'), ('auth_identities', 'email'),
+			('magic_links', 'email'), ('push_tokens', 'token'), ('streaks', 'practice'), ('reports', 'reason'))`).Scan(&plain)
+	if plain != 0 {
+		t.Errorf("%d plain columns remain", plain)
+	}
+}
+
+// Migrating again, with a previous key configured, reseals: the rotation runs as part
+// of `server migrate`.
+func TestMigrateReseals(t *testing.T) {
+	pool := dbtest.Fresh(t, "migrate_reseal_tests")
+	ctx := t.Context()
+	keys := dbtest.Keys()
+	id := uuid.NewV7()
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, display_name_encrypted) VALUES ($1, $2)`, id, keys.SealDisplayName(id, "Ana")); err != nil {
+		t.Fatal(err)
+	}
+	newBase := []byte("a new SECRET_KEY_BASE for the migrate test, 32+ bytes")
+	rotating, _ := atrest.New(newBase, dbtest.SecretKeyBase)
+	if err := migrate.Up(ctx, pool, rotating); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := atrest.New(newBase, nil)
+	if u, err := after.User(db.New(pool).GetUser(ctx, id)); err != nil || u.DisplayName != "Ana" {
+		t.Fatalf("after the rotation: %+v %v", u, err)
+	}
+}

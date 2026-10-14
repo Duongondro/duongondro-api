@@ -19,4 +19,4 @@ SELECT node_id, parent_id, created_at FROM invite_tree WHERE user_id = $1;
 SELECT * FROM invite_redemptions WHERE invitee_id = $1 ORDER BY created_at;
 
 -- name: ExportReports :many
-SELECT id, reported_id, reason, created_at FROM reports WHERE reporter_id = $1 ORDER BY created_at;
+SELECT id, reported_id, reason_encrypted, created_at FROM reports WHERE reporter_id = $1 ORDER BY created_at;

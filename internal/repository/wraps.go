@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 )
 
@@ -16,21 +17,22 @@ var ErrStaleRotation = errors.New("the practice key was rotated concurrently")
 
 type Wraps struct {
 	pool *pgxpool.Pool
+	keys *atrest.Keys
 }
 
-func NewWraps(pool *pgxpool.Pool) *Wraps { return &Wraps{pool: pool} }
+func NewWraps(pool *pgxpool.Pool, keys *atrest.Keys) *Wraps { return &Wraps{pool: pool, keys: keys} }
 
 // Rotate locks the user, lets check turn the request into wraps against the locked
 // row and the devices holding the current key, stores them and bumps the version,
 // all in one transaction.
 func (r *Wraps) Rotate(ctx context.Context, userID uuid.UUID, newVersion int,
-	check func(locked db.User, holders []db.PracticeKeyHoldersRow) ([]db.PutWrapParams, error)) error {
+	check func(locked atrest.User, holders []atrest.Device) ([]db.PutWrapParams, error)) error {
 	return inTx(ctx, r.pool, pgx.TxOptions{}, func(q *db.Queries) error {
-		user, err := q.LockUser(ctx, userID)
+		user, err := r.keys.User(q.LockUser(ctx, userID))
 		if err != nil {
 			return err
 		}
-		holders, err := q.PracticeKeyHolders(ctx, db.PracticeKeyHoldersParams{UserID: userID, KeyVersion: user.KeyVersion})
+		holders, err := r.keys.PracticeKeyHolders(q.PracticeKeyHolders(ctx, db.PracticeKeyHoldersParams{UserID: userID, KeyVersion: user.KeyVersion}))
 		if err != nil {
 			return err
 		}

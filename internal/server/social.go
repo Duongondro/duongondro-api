@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/Duongondro/duongondro-api/internal/api"
-	"github.com/Duongondro/duongondro-api/internal/db"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/service"
 )
 
@@ -348,7 +348,7 @@ func (s *Server) DeleteStreak(ctx context.Context, req api.DeleteStreakRequestOb
 	return api.DeleteStreak204Response{}, nil
 }
 
-func streakList(streaks []db.Streak) api.StreakList {
+func streakList(streaks []atrest.Streak) api.StreakList {
 	out := api.StreakList{Streaks: make([]api.StreakStatement, len(streaks))}
 	for i, st := range streaks {
 		out.Streaks[i] = api.StreakStatement{UserId: st.UserID, Practice: st.Practice, Payload: st.Payload, Signature: st.Signature}

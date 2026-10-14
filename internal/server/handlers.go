@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Duongondro/duongondro-api/internal/api"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/repository"
@@ -331,11 +332,11 @@ func (s *Server) Sync(ctx context.Context, req api.SyncRequestObject) (api.SyncR
 	return out, nil
 }
 
-func deviceDTO(d db.Device) api.Device {
+func deviceDTO(d atrest.Device) api.Device {
 	return api.Device{Id: d.ID, PublicKey: d.PublicKey, Tier: api.Tier(d.Tier), CreatedAt: d.CreatedAt}
 }
 
-func deviceDTOs(ds []db.Device) []api.Device {
+func deviceDTOs(ds []atrest.Device) []api.Device {
 	out := make([]api.Device, len(ds))
 	for i, d := range ds {
 		out[i] = deviceDTO(d)
