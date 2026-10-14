@@ -62,8 +62,24 @@ Every personal column the server must read (display names, usernames, genders, e
    ```
 
    Nothing else changes in `group_vars/all/vars.yml`; its duongondro comment may mention the new secret. A restored backup needs the same key, so the vault copy is the one to keep.
-3. Then deploys (`make deploy`). The restart runs `./server migrate`, which adds the sealed columns, seals every existing row in one transaction (seconds at today's size), drops the plain columns and rewrites those tables; then the server starts. If the key is missing, migrate exits before touching the database and the service stays down until it is added and the service restarted.
-4. Afterwards, `GET /api/version` shows the new revision and the apps work as before. Backups taken before the deploy still hold the plain values until they expire (30 days); newer ones hold only ciphertext.
+3. Runs the read-only check in [docs/at-rest.md](docs/at-rest.md#before-deploying) against production: no rows means no two e-mail sign-ins become one address. (The migration checks again and stops, changing nothing, if any do.)
+4. Takes a backup right before deploying, which is also the only way back (step 7):
+
+   ```sh
+   sudo -u duongondro sh -c 'set -a; . /path/to/duongondro.env; exec pg_dump -Fc "$DATABASE_URL"' > duongondro-before-at-rest.dump
+   ```
+
+   It holds the plain values: keep it private and delete it once the deploy has settled.
+5. Optionally rehearses the migration on a local restore of that backup, with a release build and the real key:
+
+   ```sh
+   createdb duongondro_restore_test && pg_restore --no-owner -d duongondro_restore_test duongondro-before-at-rest.dump
+   DATABASE_URL=postgres:///duongondro_restore_test SECRET_KEY_BASE='…' go run ./cmd/duongondro-api migrate
+   dropdb duongondro_restore_test
+   ```
+
+6. Deploys (`make deploy`). The restart runs `./server migrate`: one migration adds the empty sealed columns; the next, in a single transaction, seals every existing row and drops the plain columns (seconds at today's size); the last rewrites those tables. Then the server starts. If the key is missing, migrate exits before touching the database and the service stays down until it is added and the service restarted. If sealing fails, its transaction rolls back and only the empty columns remain, which the old release ignores.
+7. Checks that `GET /api/version` shows the new revision and the apps work as before. **Once the sealing migration has committed, the old release cannot read the database: never restart it (nor point `current` at an older release).** The only rollback is restoring the backup from step 4, losing what was written since. Backups taken before the deploy still hold the plain values until they expire (30 days); newer ones hold only ciphertext.
 
 Rotating the key later: set the new key as `SECRET_KEY_BASE` and the old one as `SECRET_KEY_BASE_PREVIOUS`, restart (migrate reseals every row under the new key before the server starts), then remove `SECRET_KEY_BASE_PREVIOUS` and restart again.
 
