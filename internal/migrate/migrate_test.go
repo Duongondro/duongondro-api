@@ -3,6 +3,7 @@ package migrate_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"uuid"
 
@@ -204,5 +205,40 @@ func TestFailedSealLeavesPlainColumns(t *testing.T) {
 	}
 	if u, err := keys.User(db.New(pool).GetUser(ctx, ana)); err != nil || u.DisplayName != "Ana" || *u.Username != "ana" {
 		t.Fatalf("after the retry: %+v %v", u, err)
+	}
+}
+
+// Two e-mail identities that are one address once normalised stop the migration
+// before it changes anything, naming the accounts.
+func TestEmailCollisionFailsFast(t *testing.T) {
+	pool := dbtest.Empty(t, "migrate_collision_tests")
+	keys := dbtest.Keys()
+	ctx := t.Context()
+	upTo(t, pool, keys, beforeAtRest)
+	a, b := uuid.NewV7(), uuid.NewV7()
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id) VALUES ($1), ($2)`, a, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO auth_identities (provider, subject, user_id) VALUES
+		('email', 'zo`+"é"+`@example.com', $1), ('email', 'zoe`+"́"+`@example.com', $2)`, a, b); err != nil {
+		t.Fatal(err)
+	}
+	err := migrate.Up(ctx, pool, keys)
+	if err == nil || !strings.Contains(err.Error(), a.String()) || !strings.Contains(err.Error(), b.String()) ||
+		strings.Contains(err.Error(), "example.com") {
+		t.Fatalf("want a failure naming both accounts and no address: %v", err)
+	}
+	var version int64
+	var subjects int
+	_ = pool.QueryRow(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&version)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM auth_identities WHERE subject_encrypted IS NULL AND subject IS NOT NULL`).Scan(&subjects)
+	if version != 20261014183130 || subjects != 2 {
+		t.Fatalf("applied up to %d with %d plain subjects", version, subjects)
+	}
+	// The preflight SQL in docs/at-rest.md finds the same pair.
+	var pairs int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM (SELECT lower(normalize(subject, NFC)) FROM auth_identities
+		WHERE provider = 'email' GROUP BY 1 HAVING count(*) > 1) clashes`).Scan(&pairs); err != nil || pairs != 1 {
+		t.Fatalf("the preflight SQL: %d pairs, %v", pairs, err)
 	}
 }

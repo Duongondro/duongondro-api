@@ -58,6 +58,19 @@ Three goose migrations, all run by `server migrate`, which the service runs befo
 2. `encrypt_columns_backfill`, a Go migration (`db/migrations/*.go`, handed to goose with the keys by `migrations.Go`), seals every plain value and computes the hashes, normalising stored addresses, deletes passkey ceremonies in flight, and then, in the same transaction, runs `drop_plain_columns.sql`: the plain columns go, and primary keys, uniqueness and indexes move to the hashes. Sealing and dropping commit together or not at all; a failure leaves only step 1's empty columns. goose itself never runs that `.sql` file (`migrations.GooseFS` hides it); it stays in version order for sqlc. The migration uses plain SQL against that version's schema, never sqlc, so a fresh database runs it too.
 3. `rewrite_encrypted_tables` runs `VACUUM FULL` on those tables, so the dropped values and old row versions leave the tables' files.
 
+## Before deploying
+
+The new primary key of `auth_identities` is `(provider, subject_hash)`, and an e-mail subject is now hashed in NFC. The old code stored addresses trimmed and lower-cased but not normalised, so two accounts may hold one address typed once composed and once decomposed. Step 2 checks this before it writes anything and, if so, fails naming the accounts. The same check, read-only, against production (or a restored backup) before deploying:
+
+```sql
+-- No rows: nothing collides.
+SELECT lower(normalize(subject, NFC)) AS address, array_agg(user_id) AS accounts
+FROM auth_identities WHERE provider = 'email'
+GROUP BY 1 HAVING count(*) > 1;
+```
+
+Postgres's `lower` follows the database's locale rather than Go's case mapping, so treat a hit as certain and an empty result as very likely; the migration's own check is the exact one. A hit is resolved by hand: decide which account keeps the address and delete the other identity.
+
 ## Rotating the key
 
 1. Set `SECRET_KEY_BASE` to a new key and `SECRET_KEY_BASE_PREVIOUS` to the old one, and restart: `server migrate` sees the previous key and reseals every value not under the current key, recomputing the row's blind indexes (the new key changes them too), one transaction per table. `duongondro-api reseal` does the same without migrating; running either again changes nothing.

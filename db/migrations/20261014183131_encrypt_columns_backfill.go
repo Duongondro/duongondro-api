@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
+	"strings"
 	"uuid"
 
 	"github.com/pressly/goose/v3"
@@ -33,6 +35,10 @@ func EncryptColumnsBackfill(keys *atrest.Keys) *goose.Migration {
 }
 
 func backfill(ctx context.Context, tx *sql.Tx, k *atrest.Keys) error {
+	// Before anything is written: the new primary key would refuse these.
+	if err := checkEmailCollisions(ctx, tx); err != nil {
+		return err
+	}
 	steps := []struct {
 		name string
 		fn   func(context.Context, *sql.Tx, *atrest.Keys) error
@@ -367,4 +373,39 @@ func backfillPushTokens(ctx context.Context, tx *sql.Tx, k *atrest.Keys) error {
 		}
 	}
 	return nil
+}
+
+// checkEmailCollisions fails when two e-mail identities are one address once
+// normalised. The old code stored addresses trimmed and lower-cased but not NFC, so
+// an address typed once composed and once decomposed made two accounts; their
+// subjects would get the same hash, and the new primary key (provider, subject_hash)
+// would refuse the second. Which account keeps the address is the owner's call, so
+// this stops before touching anything and names the accounts (no addresses, which
+// would reach the log). docs/at-rest.md has the same check as SQL, to run first.
+func checkEmailCollisions(ctx context.Context, tx *sql.Tx) error {
+	type identity struct{ user, subject string }
+	all, err := rows(ctx, tx, `SELECT user_id::text, subject FROM auth_identities WHERE provider = 'email'`,
+		func(r *sql.Rows) (i identity, err error) { return i, r.Scan(&i.user, &i.subject) })
+	if err != nil {
+		return err
+	}
+	byAddress := map[string][]string{}
+	for _, i := range all {
+		n := atrest.NormaliseEmail(i.subject)
+		byAddress[n] = append(byAddress[n], i.user)
+	}
+	var clashes []string
+	for _, users := range byAddress {
+		if len(users) > 1 {
+			slices.Sort(users)
+			clashes = append(clashes, strings.Join(users, " and "))
+		}
+	}
+	if len(clashes) == 0 {
+		return nil
+	}
+	slices.Sort(clashes)
+	return fmt.Errorf("nothing was changed: %d e-mail sign-ins are one address once normalised (NFC), held by the accounts "+
+		"%s; delete or re-point one identity of each pair, then migrate again (docs/at-rest.md, Before deploying)",
+		len(clashes), strings.Join(clashes, "; "))
 }
