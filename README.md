@@ -21,7 +21,7 @@ The server stores sealed blobs and signed public streaks. It never receives a pr
 | `internal/server` | Echo strict server: authentication and DTO mapping |
 | `internal/service` | The rules: what is checked before a key, wrap, signed statement or sealed log is stored |
 | `internal/repository` | Transactions: practice-key rotation, the sync read |
-| `cmd/duongondro-api` | The server binary (`serve`, `migrate`, `reseal`, `reapply-purges`, `admit`) |
+| `cmd/duongondro-api` | The server binary (`serve`, `migrate`, `reapply-purges`, `admit`) |
 
 ## Commands
 

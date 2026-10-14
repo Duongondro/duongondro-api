@@ -4,8 +4,10 @@
 //	                         server's env file sets PORT), else 127.0.0.1:8080; behind Caddy
 //	duongondro-api migrate   apply the database migrations and exit; with
 //	                         SECRET_KEY_BASE_PREVIOUS set, then reseal every encrypted
-//	                         column under SECRET_KEY_BASE (a key rotation)
-//	duongondro-api reseal    only the reseal, for a rotation without a deploy
+//	                         column under SECRET_KEY_BASE (a key rotation). There is
+//	                         no separate reseal command: run while the server runs
+//	                         with other keys, it would break it. migrate runs with
+//	                         the service stopped, before it starts.
 //	duongondro-api reapply-purges
 //	                         after restoring a backup, delete again every account
 //	                         purged since (only hashes of their ids are kept)
@@ -89,14 +91,12 @@ func main() {
 		err = serve(ctx)
 	case "migrate":
 		err = runMigrate(ctx)
-	case "reseal":
-		err = reseal(ctx)
 	case "reapply-purges":
 		err = reapplyPurges(ctx)
 	case "admit":
 		err = admit(ctx, os.Args[2:])
 	default:
-		err = fmt.Errorf("unknown command %q (serve, migrate, reseal, reapply-purges or admit)", command)
+		err = fmt.Errorf("unknown command %q (serve, migrate, reapply-purges or admit)", command)
 	}
 	if err != nil {
 		slog.Error("fatal", "error", err.Error())
@@ -130,23 +130,6 @@ func runMigrate(ctx context.Context) error {
 	}
 	defer pool.Close()
 	return migrate.Up(ctx, pool, keys)
-}
-
-func reseal(ctx context.Context) error {
-	keys, err := loadKeys()
-	if err != nil {
-		return err
-	}
-	pool, err := openPool(ctx)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-	n, err := atrest.Reseal(ctx, pool, keys)
-	if err == nil {
-		slog.Info("resealed under the current key", "rows", n)
-	}
-	return err
 }
 
 func reapplyPurges(ctx context.Context) error {

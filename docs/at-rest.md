@@ -14,7 +14,7 @@ The server's own column encryption, for what it must be able to read: names, e-m
 | blind-index key | 32 | `DatabaseHMAC` |
 | key id | 4 | `ColumnLevelEncryptionKeyId` |
 
-Release builds refuse to start (`serve`, `migrate`, `reseal`, `reapply-purges`) without `SECRET_KEY_BASE`; DEV builds fall back to a fixed development key. Vectors computed with OpenSSL are in `internal/atrest/atrest_test.go`.
+Release builds refuse to start (`serve`, `migrate`, `reapply-purges`) without `SECRET_KEY_BASE`; DEV builds fall back to a fixed development key. Vectors computed with OpenSSL are in `internal/atrest/atrest_test.go`.
 
 ## Sealed values
 
@@ -75,7 +75,7 @@ Postgres's `lower` follows the database's locale rather than Go's case mapping, 
 
 ## Rotating the key
 
-1. Set `SECRET_KEY_BASE` to a new key and `SECRET_KEY_BASE_PREVIOUS` to the old one, and restart: `server migrate` sees the previous key and reseals every value not under the current key, recomputing the row's blind indexes (the new key changes them too), one transaction per table. `duongondro-api reseal` does the same without migrating; running either again changes nothing.
+1. Set `SECRET_KEY_BASE` to a new key and `SECRET_KEY_BASE_PREVIOUS` to the old one, and restart: `server migrate` sees the previous key and reseals every value not under the current key, recomputing the row's blind indexes (the new key changes them too), one transaction per table. Running it again changes nothing. There is deliberately no separate reseal command: migrate runs with the service stopped, before it starts, whereas a reseal while a server runs with only the old key would leave it unable to open what was rewritten.
 2. Remove `SECRET_KEY_BASE_PREVIOUS` and restart. A value still under the old key would then fail to open, which is why the reseal runs before the server starts.
 
 ## Tests

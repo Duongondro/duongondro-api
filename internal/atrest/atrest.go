@@ -101,7 +101,7 @@ func DeriveKey(base []byte, info string, size int) ([]byte, error) {
 }
 
 // Keys seals and opens columns and computes blind indexes. Values are sealed and
-// hashed under the current key; a previous key, kept while `duongondro-api reseal`
+// hashed under the current key; a previous key, kept while Reseal
 // (run by migrate) rewrites the rows, still opens what it sealed.
 type Keys struct {
 	current  key
