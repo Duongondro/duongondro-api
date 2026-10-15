@@ -13,8 +13,8 @@ import (
 
 // Open sign-up (design: Social › Open sign-up, decision 20): a sign-up that marks
 // itself as one (signUp: true) needs no invitation or admission code; the owner
-// decided against a switch for it. The account is a root of the invite tree and makes no friendship. Such
-// sign-ups by passkey, Apple or Google are limited per client address when they make
+// decided against a switch for it. The account is a root of the invite tree and
+// makes no friendship. Such sign-ups by passkey, Apple or Google are limited per client address when they make
 // the account; e-mail ones, whose link may go to any address, when they ask for the
 // mail, under a limit of their own beside the magic link's per-address one.
 

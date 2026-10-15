@@ -101,9 +101,9 @@ type InviteProof struct {
 	Auth []byte
 }
 
-// ErrNoAccount answers a sign-in by a method no account uses, without an invite or
-// admission code to create one: the app then asks for an invitation.
-var ErrNoAccount = errors.New("no account uses this sign-in; an invitation is needed to create one")
+// ErrNoAccount answers a sign-in by a method no account uses, when the request is
+// not a sign-up: the app then offers to make an account.
+var ErrNoAccount = errors.New("no account uses this sign-in; sign up to create one")
 
 // createAccount makes a user (with id, when given) inside the caller's transaction:
 // a child of the inviter in the invite tree when g is an invite, a root (no inviter,

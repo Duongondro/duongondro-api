@@ -101,7 +101,7 @@ func TestSignUpWithoutCodeNeedsNoConfiguration(t *testing.T) {
 	}
 }
 
-func TestOpenSignUpOn(t *testing.T) {
+func TestOpenSignUp(t *testing.T) {
 	f := setup(t)
 	s, social, verifier, mailer := f.signInWith()
 	ctx := from(t.Context(), "198.51.100.8")
@@ -193,7 +193,7 @@ func TestOpenSignUpOn(t *testing.T) {
 	invAuth := f.invite(social, inviter, "FR1ENDXX")
 	invited, err := f.passkeySignUp(s, ctx, SignUpProof{Invite: &InviteProof{ID: "FR1ENDXX", Auth: invAuth}, SignUp: true, Consent: true})
 	if err != nil || !invited.Created || f.isRoot(social, invited.UserID) {
-		t.Fatalf("invited sign-up with open sign-up on: %v", err)
+		t.Fatalf("invited sign-up with open sign-up: %v", err)
 	}
 	u, err := f.keys.User(f.q.GetUser(ctx, invited.UserID))
 	if err != nil {
@@ -210,7 +210,7 @@ func TestOpenSignUpOn(t *testing.T) {
 	// An admission code is still spent when given.
 	code, normalized := f.admissionCode(time.Hour)
 	if s, err := f.passkeySignUp(s, ctx, SignUpProof{AdmissionCode: code}); err != nil || !f.isRoot(social, s.UserID) {
-		t.Fatalf("admission code with open sign-up on: %v", err)
+		t.Fatalf("admission code with open sign-up: %v", err)
 	}
 	var used int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM admission_codes WHERE code_hash = $1 AND used_at IS NOT NULL`, sha(normalized)).Scan(&used)
