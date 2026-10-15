@@ -31,6 +31,7 @@ type Server struct {
 	wraps    *service.Wraps
 	logs     *service.Logs
 	recovery *service.Recovery
+	unlock   *service.Unlock
 	social   *service.Social
 	gdpr     *service.GDPR
 	signIn   *service.SignIn
@@ -100,6 +101,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 		wraps:    service.NewWraps(pool, keys, devices),
 		logs:     service.NewLogs(pool),
 		recovery: service.NewRecovery(pool),
+		unlock:   service.NewUnlock(pool, keys),
 		social:   social,
 		gdpr:     service.NewGDPR(pool, keys),
 		signIn:   signIn,

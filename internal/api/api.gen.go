@@ -360,8 +360,9 @@ type InviteSummary struct {
 
 // KeyRotation defines model for KeyRotation.
 type KeyRotation struct {
-	NewVersion int            `json:"newVersion"`
-	Wraps      []RotationWrap `json:"wraps"`
+	NewVersion  int               `json:"newVersion"`
+	UserKeyWrap *UserKeyWrapInput `json:"userKeyWrap,omitempty"`
+	Wraps       []RotationWrap    `json:"wraps"`
 }
 
 // MagicLinkRedemption Either token alone (from the link), or email and code (typed).
@@ -448,7 +449,10 @@ type OldKeyError struct {
 // Passkey defines model for Passkey.
 type Passkey struct {
 	// Aaguid The authenticator's AAGUID, absent when it gave none (all zeros)
-	Aaguid    *string   `json:"aaguid,omitempty"`
+	Aaguid *string `json:"aaguid,omitempty"`
+
+	// CanUnlock It holds a box of the user key, so signing in with it brings the keys to a new phone
+	CanUnlock bool      `json:"canUnlock"`
 	CreatedAt time.Time `json:"createdAt"`
 
 	// Current This session signed in with this passkey, so removing it signs this phone out
@@ -460,6 +464,16 @@ type Passkey struct {
 
 	// Name Absent when the person has not named it
 	Name *string `json:"name,omitempty"`
+}
+
+// PasskeyBoxInput defines model for PasskeyBoxInput.
+type PasskeyBoxInput struct {
+	// Box U's scalar sealed under the PRF key, 60 bytes
+	Box []byte `json:"box"`
+
+	// Signature Ed25519 by the identity key over prf-sig ‖ aad ‖ box (docs/crypto.md)
+	Signature []byte `json:"signature"`
+	UserKeyId UUID   `json:"userKeyId"`
 }
 
 // PasskeyList defines model for PasskeyList.
@@ -511,6 +525,13 @@ type PasskeySignUp struct {
 
 	// Username 3 to 32 of a-z, 0-9, dot and underscore; stored lowercased, unique regardless of case
 	Username *string `json:"username,omitempty"`
+}
+
+// PasskeyUnlock defines model for PasskeyUnlock.
+type PasskeyUnlock struct {
+	Box       []byte       `json:"box"`
+	Signature []byte       `json:"signature"`
+	UserKey   UserKeyState `json:"userKey"`
 }
 
 // PracticeLog defines model for PracticeLog.
@@ -641,7 +662,9 @@ type RotationWrap struct {
 	// EphemeralKey 65 bytes
 	EphemeralKey []byte `json:"ephemeralKey"`
 	KeyVersion   int    `json:"keyVersion"`
-	Kind         int    `json:"kind"`
+
+	// Kind 1 practice key, 2 identity seed, 4 user key (signed, keyVersion = the user key's version); not 3
+	Kind int `json:"kind"`
 }
 
 // SignInResult defines model for SignInResult.
@@ -693,6 +716,47 @@ type Tier string
 // UUID defines model for UUID.
 type UUID = uuid.UUID
 
+// UserKeyState defines model for UserKeyState.
+type UserKeyState struct {
+	Id UUID `json:"id"`
+
+	// Statement Exact payload bytes (compact JSON, sorted keys) and their Ed25519 signature.
+	Statement SignedStatement `json:"statement"`
+	Version   int64           `json:"version"`
+	Wraps     []UserKeyWrap   `json:"wraps"`
+}
+
+// UserKeyWrap defines model for UserKeyWrap.
+type UserKeyWrap struct {
+	// Box nonce ‖ ciphertext ‖ tag, 60 bytes
+	Box       []byte    `json:"box"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// EphemeralKey 65 bytes
+	EphemeralKey []byte `json:"ephemeralKey"`
+	KeyVersion   int    `json:"keyVersion"`
+	Kind         int    `json:"kind"`
+
+	// Signature Ed25519 by the identity key (docs/crypto.md, Wraps)
+	Signature []byte `json:"signature"`
+	UserKeyId UUID   `json:"userKeyId"`
+}
+
+// UserKeyWrapInput defines model for UserKeyWrapInput.
+type UserKeyWrapInput struct {
+	// Box nonce ‖ ciphertext ‖ tag, 60 bytes
+	Box []byte `json:"box"`
+
+	// EphemeralKey 65 bytes
+	EphemeralKey []byte `json:"ephemeralKey"`
+	KeyVersion   int    `json:"keyVersion"`
+	Kind         int    `json:"kind"`
+
+	// Signature Ed25519 by the identity key (docs/crypto.md, Wraps)
+	Signature []byte `json:"signature"`
+	UserKeyId UUID   `json:"userKeyId"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	Go       string `json:"go"`
@@ -721,7 +785,9 @@ type Wrap struct {
 	// EphemeralKey 65 bytes
 	EphemeralKey []byte `json:"ephemeralKey"`
 	KeyVersion   int    `json:"keyVersion"`
-	Kind         int    `json:"kind"`
+
+	// Kind 1 practice key, 2 identity seed, 4 user key (signed, keyVersion = the user key's version); not 3
+	Kind int `json:"kind"`
 }
 
 // WrapInput defines model for WrapInput.
@@ -739,7 +805,9 @@ type WrapInput struct {
 	// EphemeralKey 65 bytes
 	EphemeralKey []byte `json:"ephemeralKey"`
 	KeyVersion   int    `json:"keyVersion"`
-	Kind         int    `json:"kind"`
+
+	// Kind 1 practice key, 2 identity seed, 4 user key (signed, keyVersion = the user key's version); not 3
+	Kind int `json:"kind"`
 }
 
 // WrapList defines model for WrapList.
@@ -948,6 +1016,24 @@ type RenamePasskeyParams struct {
 	Authorization Authorization `json:"Authorization"`
 }
 
+// DeletePasskeyUnlockParams defines parameters for DeletePasskeyUnlock.
+type DeletePasskeyUnlockParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// GetPasskeyUnlockParams defines parameters for GetPasskeyUnlock.
+type GetPasskeyUnlockParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// PutPasskeyUnlockParams defines parameters for PutPasskeyUnlock.
+type PutPasskeyUnlockParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
 // GetDeviceListParams defines parameters for GetDeviceList.
 type GetDeviceListParams struct {
 	// Authorization Bearer <session token>
@@ -1041,6 +1127,24 @@ type SignOutOthersParams struct {
 	Authorization Authorization `json:"Authorization"`
 }
 
+// GetUserKeyParams defines parameters for GetUserKey.
+type GetUserKeyParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// PutUserKeyParams defines parameters for PutUserKey.
+type PutUserKeyParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
+// PutUserKeyWrapParams defines parameters for PutUserKeyWrap.
+type PutUserKeyWrapParams struct {
+	// Authorization Bearer <session token>
+	Authorization Authorization `json:"Authorization"`
+}
+
 // PutPracticeLogParams defines parameters for PutPracticeLog.
 type PutPracticeLogParams struct {
 	// Authorization Bearer <session token>
@@ -1121,6 +1225,9 @@ type UpdateMeJSONRequestBody = MeUpdate
 // RenamePasskeyJSONRequestBody defines body for RenamePasskey for application/json ContentType.
 type RenamePasskeyJSONRequestBody = PasskeyRename
 
+// PutPasskeyUnlockJSONRequestBody defines body for PutPasskeyUnlock for application/json ContentType.
+type PutPasskeyUnlockJSONRequestBody = PasskeyBoxInput
+
 // PutDeviceListJSONRequestBody defines body for PutDeviceList for application/json ContentType.
 type PutDeviceListJSONRequestBody = SignedStatement
 
@@ -1144,6 +1251,12 @@ type FinishPasskeyAddJSONRequestBody = PasskeyResponse
 
 // PutRecoveryBoxJSONRequestBody defines body for PutRecoveryBox for application/json ContentType.
 type PutRecoveryBoxJSONRequestBody = RecoveryBoxInput
+
+// PutUserKeyJSONRequestBody defines body for PutUserKey for application/json ContentType.
+type PutUserKeyJSONRequestBody = SignedStatement
+
+// PutUserKeyWrapJSONRequestBody defines body for PutUserKeyWrap for application/json ContentType.
+type PutUserKeyWrapJSONRequestBody = UserKeyWrapInput
 
 // PutPracticeLogJSONRequestBody defines body for PutPracticeLog for application/json ContentType.
 type PutPracticeLogJSONRequestBody = PracticeLogInput
@@ -1259,6 +1372,15 @@ type ServerInterface interface {
 	// (PATCH /api/me/credentials/{credentialId})
 	RenamePasskey(ctx *echo.Context, credentialId CredentialId, params RenamePasskeyParams) error
 
+	// (DELETE /api/me/credentials/{credentialId}/unlock)
+	DeletePasskeyUnlock(ctx *echo.Context, credentialId CredentialId, params DeletePasskeyUnlockParams) error
+
+	// (GET /api/me/credentials/{credentialId}/unlock)
+	GetPasskeyUnlock(ctx *echo.Context, credentialId CredentialId, params GetPasskeyUnlockParams) error
+
+	// (PUT /api/me/credentials/{credentialId}/unlock)
+	PutPasskeyUnlock(ctx *echo.Context, credentialId CredentialId, params PutPasskeyUnlockParams) error
+
 	// (GET /api/me/device-list)
 	GetDeviceList(ctx *echo.Context, params GetDeviceListParams) error
 
@@ -1303,6 +1425,15 @@ type ServerInterface interface {
 
 	// (DELETE /api/me/sessions)
 	SignOutOthers(ctx *echo.Context, params SignOutOthersParams) error
+
+	// (GET /api/me/user-key)
+	GetUserKey(ctx *echo.Context, params GetUserKeyParams) error
+
+	// (PUT /api/me/user-key)
+	PutUserKey(ctx *echo.Context, params PutUserKeyParams) error
+
+	// (POST /api/me/user-key/wraps)
+	PutUserKeyWrap(ctx *echo.Context, params PutUserKeyWrapParams) error
 
 	// (PUT /api/practice-logs/{logId})
 	PutPracticeLog(ctx *echo.Context, logId UUID, params PutPracticeLogParams) error
@@ -2331,6 +2462,120 @@ func (w *ServerInterfaceWrapper) RenamePasskey(ctx *echo.Context) error {
 	return err
 }
 
+// DeletePasskeyUnlock converts echo context to params.
+func (w *ServerInterfaceWrapper) DeletePasskeyUnlock(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "credentialId" -------------
+	var credentialId CredentialId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credentialId", ctx.Param("credentialId"), &credentialId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter credentialId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeletePasskeyUnlockParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.DeletePasskeyUnlock(ctx, credentialId, params)
+	return err
+}
+
+// GetPasskeyUnlock converts echo context to params.
+func (w *ServerInterfaceWrapper) GetPasskeyUnlock(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "credentialId" -------------
+	var credentialId CredentialId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credentialId", ctx.Param("credentialId"), &credentialId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter credentialId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPasskeyUnlockParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetPasskeyUnlock(ctx, credentialId, params)
+	return err
+}
+
+// PutPasskeyUnlock converts echo context to params.
+func (w *ServerInterfaceWrapper) PutPasskeyUnlock(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "credentialId" -------------
+	var credentialId CredentialId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credentialId", ctx.Param("credentialId"), &credentialId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter credentialId: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutPasskeyUnlockParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PutPasskeyUnlock(ctx, credentialId, params)
+	return err
+}
+
 // GetDeviceList converts echo context to params.
 func (w *ServerInterfaceWrapper) GetDeviceList(ctx *echo.Context) error {
 	var err error
@@ -2817,6 +3062,99 @@ func (w *ServerInterfaceWrapper) SignOutOthers(ctx *echo.Context) error {
 	return err
 }
 
+// GetUserKey converts echo context to params.
+func (w *ServerInterfaceWrapper) GetUserKey(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetUserKeyParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetUserKey(ctx, params)
+	return err
+}
+
+// PutUserKey converts echo context to params.
+func (w *ServerInterfaceWrapper) PutUserKey(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutUserKeyParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PutUserKey(ctx, params)
+	return err
+}
+
+// PutUserKeyWrap converts echo context to params.
+func (w *ServerInterfaceWrapper) PutUserKeyWrap(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutUserKeyWrapParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Authorization, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Authorization: %s", err))
+		}
+
+		params.Authorization = Authorization
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Authorization is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.PutUserKeyWrap(ctx, params)
+	return err
+}
+
 // PutPracticeLog converts echo context to params.
 func (w *ServerInterfaceWrapper) PutPracticeLog(ctx *echo.Context) error {
 	var err error
@@ -3143,6 +3481,12 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/me/credentials", wrapper.ListPasskeys, options.OperationMiddlewares["listPasskeys"]...)
 	router.DELETE(options.BaseURL+"/api/me/credentials/:credentialId", wrapper.DeletePasskey, options.OperationMiddlewares["deletePasskey"]...)
 	router.PATCH(options.BaseURL+"/api/me/credentials/:credentialId", wrapper.RenamePasskey, options.OperationMiddlewares["renamePasskey"]...)
+	router.DELETE(options.BaseURL+"/api/me/credentials/:credentialId/unlock", wrapper.DeletePasskeyUnlock, options.OperationMiddlewares["deletePasskeyUnlock"]...)
+	router.GET(options.BaseURL+"/api/me/credentials/:credentialId/unlock", wrapper.GetPasskeyUnlock, options.OperationMiddlewares["getPasskeyUnlock"]...)
+	router.PUT(options.BaseURL+"/api/me/credentials/:credentialId/unlock", wrapper.PutPasskeyUnlock, options.OperationMiddlewares["putPasskeyUnlock"]...)
+	router.GET(options.BaseURL+"/api/me/user-key", wrapper.GetUserKey, options.OperationMiddlewares["getUserKey"]...)
+	router.PUT(options.BaseURL+"/api/me/user-key", wrapper.PutUserKey, options.OperationMiddlewares["putUserKey"]...)
+	router.POST(options.BaseURL+"/api/me/user-key/wraps", wrapper.PutUserKeyWrap, options.OperationMiddlewares["putUserKeyWrap"]...)
 	router.POST(options.BaseURL+"/api/me/identities/:provider", wrapper.LinkProvider, options.OperationMiddlewares["linkProvider"]...)
 	router.DELETE(options.BaseURL+"/api/me/email", wrapper.RemoveEmail, options.OperationMiddlewares["removeEmail"]...)
 	router.POST(options.BaseURL+"/api/me/email", wrapper.RequestEmailConfirmation, options.OperationMiddlewares["requestEmailConfirmation"]...)
@@ -4789,6 +5133,155 @@ func (response RenamePasskey404JSONResponse) VisitRenamePasskeyResponse(w http.R
 	return err
 }
 
+type DeletePasskeyUnlockRequestObject struct {
+	CredentialId CredentialId `json:"credentialId"`
+	Params       DeletePasskeyUnlockParams
+}
+
+type DeletePasskeyUnlockResponseObject interface {
+	VisitDeletePasskeyUnlockResponse(w http.ResponseWriter) error
+}
+
+type DeletePasskeyUnlock204Response struct {
+}
+
+func (response DeletePasskeyUnlock204Response) VisitDeletePasskeyUnlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePasskeyUnlock401Response = UnauthorizedResponse
+
+func (response DeletePasskeyUnlock401Response) VisitDeletePasskeyUnlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type DeletePasskeyUnlock404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeletePasskeyUnlock404JSONResponse) VisitDeletePasskeyUnlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPasskeyUnlockRequestObject struct {
+	CredentialId CredentialId `json:"credentialId"`
+	Params       GetPasskeyUnlockParams
+}
+
+type GetPasskeyUnlockResponseObject interface {
+	VisitGetPasskeyUnlockResponse(w http.ResponseWriter) error
+}
+
+type GetPasskeyUnlock200JSONResponse PasskeyUnlock
+
+func (response GetPasskeyUnlock200JSONResponse) VisitGetPasskeyUnlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPasskeyUnlock401Response = UnauthorizedResponse
+
+func (response GetPasskeyUnlock401Response) VisitGetPasskeyUnlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type GetPasskeyUnlock404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPasskeyUnlock404JSONResponse) VisitGetPasskeyUnlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPasskeyUnlockRequestObject struct {
+	CredentialId CredentialId `json:"credentialId"`
+	Params       PutPasskeyUnlockParams
+	Body         *PutPasskeyUnlockJSONRequestBody
+}
+
+type PutPasskeyUnlockResponseObject interface {
+	VisitPutPasskeyUnlockResponse(w http.ResponseWriter) error
+}
+
+type PutPasskeyUnlock204Response struct {
+}
+
+func (response PutPasskeyUnlock204Response) VisitPutPasskeyUnlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PutPasskeyUnlock400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutPasskeyUnlock400JSONResponse) VisitPutPasskeyUnlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPasskeyUnlock401Response = UnauthorizedResponse
+
+func (response PutPasskeyUnlock401Response) VisitPutPasskeyUnlockResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type PutPasskeyUnlock404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutPasskeyUnlock404JSONResponse) VisitPutPasskeyUnlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPasskeyUnlock409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutPasskeyUnlock409JSONResponse) VisitPutPasskeyUnlockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetDeviceListRequestObject struct {
 	Params GetDeviceListParams
 }
@@ -5421,6 +5914,153 @@ func (response SignOutOthers401Response) VisitSignOutOthersResponse(w http.Respo
 	return nil
 }
 
+type GetUserKeyRequestObject struct {
+	Params GetUserKeyParams
+}
+
+type GetUserKeyResponseObject interface {
+	VisitGetUserKeyResponse(w http.ResponseWriter) error
+}
+
+type GetUserKey200JSONResponse UserKeyState
+
+func (response GetUserKey200JSONResponse) VisitGetUserKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserKey401Response = UnauthorizedResponse
+
+func (response GetUserKey401Response) VisitGetUserKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type GetUserKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetUserKey404JSONResponse) VisitGetUserKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutUserKeyRequestObject struct {
+	Params PutUserKeyParams
+	Body   *PutUserKeyJSONRequestBody
+}
+
+type PutUserKeyResponseObject interface {
+	VisitPutUserKeyResponse(w http.ResponseWriter) error
+}
+
+type PutUserKey204Response struct {
+}
+
+func (response PutUserKey204Response) VisitPutUserKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PutUserKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutUserKey400JSONResponse) VisitPutUserKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutUserKey401Response = UnauthorizedResponse
+
+func (response PutUserKey401Response) VisitPutUserKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type PutUserKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutUserKey409JSONResponse) VisitPutUserKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutUserKeyWrapRequestObject struct {
+	Params PutUserKeyWrapParams
+	Body   *PutUserKeyWrapJSONRequestBody
+}
+
+type PutUserKeyWrapResponseObject interface {
+	VisitPutUserKeyWrapResponse(w http.ResponseWriter) error
+}
+
+type PutUserKeyWrap204Response struct {
+}
+
+func (response PutUserKeyWrap204Response) VisitPutUserKeyWrapResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PutUserKeyWrap400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutUserKeyWrap400JSONResponse) VisitPutUserKeyWrapResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutUserKeyWrap401Response = UnauthorizedResponse
+
+func (response PutUserKeyWrap401Response) VisitPutUserKeyWrapResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type PutUserKeyWrap409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutUserKeyWrap409JSONResponse) VisitPutUserKeyWrapResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PutPracticeLogRequestObject struct {
 	LogId  UUID `json:"logId"`
 	Params PutPracticeLogParams
@@ -5859,6 +6499,15 @@ type StrictServerInterface interface {
 	// (PATCH /api/me/credentials/{credentialId})
 	RenamePasskey(ctx context.Context, request RenamePasskeyRequestObject) (RenamePasskeyResponseObject, error)
 
+	// (DELETE /api/me/credentials/{credentialId}/unlock)
+	DeletePasskeyUnlock(ctx context.Context, request DeletePasskeyUnlockRequestObject) (DeletePasskeyUnlockResponseObject, error)
+
+	// (GET /api/me/credentials/{credentialId}/unlock)
+	GetPasskeyUnlock(ctx context.Context, request GetPasskeyUnlockRequestObject) (GetPasskeyUnlockResponseObject, error)
+
+	// (PUT /api/me/credentials/{credentialId}/unlock)
+	PutPasskeyUnlock(ctx context.Context, request PutPasskeyUnlockRequestObject) (PutPasskeyUnlockResponseObject, error)
+
 	// (GET /api/me/device-list)
 	GetDeviceList(ctx context.Context, request GetDeviceListRequestObject) (GetDeviceListResponseObject, error)
 
@@ -5903,6 +6552,15 @@ type StrictServerInterface interface {
 
 	// (DELETE /api/me/sessions)
 	SignOutOthers(ctx context.Context, request SignOutOthersRequestObject) (SignOutOthersResponseObject, error)
+
+	// (GET /api/me/user-key)
+	GetUserKey(ctx context.Context, request GetUserKeyRequestObject) (GetUserKeyResponseObject, error)
+
+	// (PUT /api/me/user-key)
+	PutUserKey(ctx context.Context, request PutUserKeyRequestObject) (PutUserKeyResponseObject, error)
+
+	// (POST /api/me/user-key/wraps)
+	PutUserKeyWrap(ctx context.Context, request PutUserKeyWrapRequestObject) (PutUserKeyWrapResponseObject, error)
 
 	// (PUT /api/practice-logs/{logId})
 	PutPracticeLog(ctx context.Context, request PutPracticeLogRequestObject) (PutPracticeLogResponseObject, error)
@@ -7019,6 +7677,100 @@ func (sh *strictHandler) RenamePasskey(ctx *echo.Context, credentialId Credentia
 	return nil
 }
 
+// DeletePasskeyUnlock operation middleware
+func (sh *strictHandler) DeletePasskeyUnlock(ctx *echo.Context, credentialId CredentialId, params DeletePasskeyUnlockParams) error {
+	var request DeletePasskeyUnlockRequestObject
+
+	request.CredentialId = credentialId
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePasskeyUnlock(ctx.Request().Context(), request.(DeletePasskeyUnlockRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePasskeyUnlock")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(DeletePasskeyUnlockResponseObject); ok {
+		return validResponse.VisitDeletePasskeyUnlockResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetPasskeyUnlock operation middleware
+func (sh *strictHandler) GetPasskeyUnlock(ctx *echo.Context, credentialId CredentialId, params GetPasskeyUnlockParams) error {
+	var request GetPasskeyUnlockRequestObject
+
+	request.CredentialId = credentialId
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPasskeyUnlock(ctx.Request().Context(), request.(GetPasskeyUnlockRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPasskeyUnlock")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetPasskeyUnlockResponseObject); ok {
+		return validResponse.VisitGetPasskeyUnlockResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// PutPasskeyUnlock operation middleware
+func (sh *strictHandler) PutPasskeyUnlock(ctx *echo.Context, credentialId CredentialId, params PutPasskeyUnlockParams) error {
+	var request PutPasskeyUnlockRequestObject
+
+	request.CredentialId = credentialId
+	request.Params = params
+
+	var body PutPasskeyUnlockJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PutPasskeyUnlock(ctx.Request().Context(), request.(PutPasskeyUnlockRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutPasskeyUnlock")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PutPasskeyUnlockResponseObject); ok {
+		return validResponse.VisitPutPasskeyUnlockResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // GetDeviceList operation middleware
 func (sh *strictHandler) GetDeviceList(ctx *echo.Context, params GetDeviceListParams) error {
 	var request GetDeviceListRequestObject
@@ -7525,6 +8277,113 @@ func (sh *strictHandler) SignOutOthers(ctx *echo.Context, params SignOutOthersPa
 	return nil
 }
 
+// GetUserKey operation middleware
+func (sh *strictHandler) GetUserKey(ctx *echo.Context, params GetUserKeyParams) error {
+	var request GetUserKeyRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserKey(ctx.Request().Context(), request.(GetUserKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserKey")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetUserKeyResponseObject); ok {
+		return validResponse.VisitGetUserKeyResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// PutUserKey operation middleware
+func (sh *strictHandler) PutUserKey(ctx *echo.Context, params PutUserKeyParams) error {
+	var request PutUserKeyRequestObject
+
+	request.Params = params
+
+	var body PutUserKeyJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PutUserKey(ctx.Request().Context(), request.(PutUserKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutUserKey")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PutUserKeyResponseObject); ok {
+		return validResponse.VisitPutUserKeyResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// PutUserKeyWrap operation middleware
+func (sh *strictHandler) PutUserKeyWrap(ctx *echo.Context, params PutUserKeyWrapParams) error {
+	var request PutUserKeyWrapRequestObject
+
+	request.Params = params
+
+	var body PutUserKeyWrapJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = echo.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PutUserKeyWrap(ctx.Request().Context(), request.(PutUserKeyWrapRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutUserKeyWrap")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(PutUserKeyWrapResponseObject); ok {
+		return validResponse.VisitPutUserKeyWrapResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // PutPracticeLog operation middleware
 func (sh *strictHandler) PutPracticeLog(ctx *echo.Context, logId UUID, params PutPracticeLogParams) error {
 	var request PutPracticeLogRequestObject
@@ -7777,179 +8636,192 @@ func (sh *strictHandler) GetHealth(ctx *echo.Context) error {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"dmr34MsfX/7/AA==",
+	"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",
+	"1AvFV7yQg2YBVu/bH9/+/wA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

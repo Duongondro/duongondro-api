@@ -128,7 +128,12 @@ func (s *Server) RotatePracticeKey(ctx context.Context, req api.RotatePracticeKe
 			AuthType: string(w.AuthType), Authenticator: w.Authenticator,
 		}}
 	}
-	err = s.wraps.Rotate(ctx, user, req.Body.NewVersion, wraps)
+	var toUserKey *service.UserKeyWrapInput
+	if w := req.Body.UserKeyWrap; w != nil {
+		in := userKeyWrapInput(*w)
+		toUserKey = &in
+	}
+	err = s.wraps.Rotate(ctx, user, req.Body.NewVersion, wraps, toUserKey)
 	if errors.Is(err, repository.ErrStaleRotation) {
 		return api.RotatePracticeKey409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(errorBody(err))}, nil
 	}

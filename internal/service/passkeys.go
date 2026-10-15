@@ -24,6 +24,7 @@ type Passkey struct {
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	Current    bool // the asking session signed in with it
+	CanUnlock  bool // it holds a box of the user key (docs/crypto.md, Passkey unlock)
 }
 
 // Passkeys lists the account's passkeys, oldest first; current is the credential the
@@ -33,10 +34,18 @@ func (s *SignIn) Passkeys(ctx context.Context, userID uuid.UUID, current []byte)
 	if err != nil {
 		return nil, err
 	}
+	unlocking, err := s.q.UnlockingCredentials(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	canUnlock := map[string]bool{}
+	for _, id := range unlocking {
+		canUnlock[string(id)] = true
+	}
 	out := make([]Passkey, len(rows))
 	for i, r := range rows {
 		out[i] = Passkey{ID: r.ID, Name: r.Name, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt,
-			Current: current != nil && string(current) == string(r.ID)}
+			Current: current != nil && string(current) == string(r.ID), CanUnlock: canUnlock[string(r.ID)]}
 		var c webauthn.Credential
 		if json.Unmarshal(r.Data, &c) == nil {
 			out[i].AAGUID = aaguid(c.Authenticator.AAGUID)

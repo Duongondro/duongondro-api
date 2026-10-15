@@ -119,6 +119,24 @@ func (k *Keys) DeviceList(r db.DeviceList, err error) (DeviceList, error) {
 	return DeviceList{UserID: r.UserID, Version: r.Version, Payload: payload, Signature: r.Signature, UpdatedAt: r.UpdatedAt}, err
 }
 
+// UserKey is the signed user-key statement (docs/crypto.md, Passkey unlock).
+type UserKey struct {
+	UserID    uuid.UUID `json:"userId"`
+	ID        uuid.UUID `json:"id"`
+	Version   int64     `json:"version"`
+	Payload   []byte    `json:"payload"`
+	Signature []byte    `json:"signature"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func (k *Keys) UserKey(r db.UserKey, err error) (UserKey, error) {
+	if err != nil {
+		return UserKey{}, err
+	}
+	payload, err := k.Open(UserKeysPayload, IDRow(r.UserID), r.PayloadEncrypted)
+	return UserKey{UserID: r.UserID, ID: r.ID, Version: r.Version, Payload: payload, Signature: r.Signature, UpdatedAt: r.UpdatedAt}, err
+}
+
 type Invite struct {
 	ID        string     `json:"id"`
 	InviterID uuid.UUID  `json:"inviterId"`
