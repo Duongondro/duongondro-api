@@ -114,7 +114,7 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if user, err = createAccount(ctx, q, g, nil); err != nil {
+		if user, err = createAccount(ctx, q, s.keys, g, nil); err != nil {
 			return err
 		}
 		return s.createIdentity(ctx, q, provider, claims.Subject, user.ID, verifiedEmail(claims))
@@ -440,7 +440,7 @@ func (s *SignIn) signInWithLink(ctx context.Context, link atrest.MagicLink) (Ses
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if user, err = createAccount(ctx, q, g, nil); err != nil {
+		if user, err = createAccount(ctx, q, s.keys, g, nil); err != nil {
 			return err
 		}
 		email := link.Email
