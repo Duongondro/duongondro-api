@@ -85,7 +85,8 @@ func (s *Service) SessionDevice(ctx context.Context, token string) (*uuid.UUID, 
 }
 
 // RevokeOthers ends every session of the user but this one ("sign out everywhere
-// else"), reporting how many.
+// else"), reporting how many, and drops the push tokens of every device but this
+// session's, so the phones signed out stop receiving the account's pushes.
 func (s *Service) RevokeOthers(ctx context.Context, userID uuid.UUID, token string) (int64, error) {
 	return s.q.DeleteOtherSessions(ctx, db.DeleteOtherSessionsParams{UserID: userID, TokenHash: hashToken(token)})
 }
