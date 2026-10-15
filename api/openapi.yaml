@@ -11,16 +11,14 @@ info:
     Contract first: edit this file, then `make gen`. The Android client is generated
     from it too.
 
-    Every sign-in ends in a bearer token. An account is created with a valid
-    invitation, an unused admission code (`duongondro-api admit`, for members nobody
-    can invite), or, when the server runs with OPEN_SIGNUP=true, neither: a request
-    that sets `signUp: true` (with `consent: true`) and carries no invitation or code
-    makes an account that is a root of the invite tree and has no friends. Such
+    Every sign-in ends in a bearer token. Anyone can make an account: a request that
+    sets `signUp: true` (with `consent: true`) needs no invitation or admission code,
+    and makes an account that is a root of the invite tree and has no friends. Such
     sign-ups are limited per client address, answered 429: five accounts an hour by
-    passkey, Apple or Google, and ten magic-link requests an hour. With
-    OPEN_SIGNUP off they are answered 403, as is any sign-up that needs an
-    invitation. A request without `signUp` but with an invitation or code is still a
-    sign-up, as before; signing in never grants keys. The DEV build's POST /api/dev/session is
+    passkey, Apple or Google, and ten magic-link requests an hour. A friend's
+    invitation or an admission code (`duongondro-api admit`) still works beside the
+    flag, and a request without `signUp` but with one is still a sign-up, as older
+    apps send it; signing in never grants keys. The DEV build's POST /api/dev/session is
     registered outside this file, so a release build has no trace of it.
 servers:
   - url: https://api.duongondro.app
@@ -559,10 +557,9 @@ paths:
       description: |
         Starts creating an account with a passkey; the invitation or admission code is
         checked now and when it finishes. 404: no such live invitation, or the code is
-        wrong, spent or expired. With `signUp: true` and neither, an open sign-up: 403
-        when the server does not allow one (an invitation is needed), 429 when this
-        address has made five such accounts within the hour (checked now, counted
-        when the ceremony finishes). Without `signUp` and without an invitation or
+        wrong, spent or expired. With `signUp: true` and neither, an open sign-up: 429
+        when this address has made five such accounts within the hour (checked now,
+        counted when the ceremony finishes). Without `signUp` and without an invitation or
         code: 400, as before. The optional profile (as PATCH /api/me takes it) is
         set on the account when it is made and names the passkey; 409: the username is
         taken, now or by the time the ceremony finishes.
@@ -578,7 +575,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Ceremony"}
         "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -598,8 +594,8 @@ paths:
       operationId: finishPasskey
       description: |
         Completes a passkey sign-up or sign-in with the authenticator's response. For
-        an open sign-up: 403 if the server stopped allowing them since it began, 429
-        if this address made five accounts without an invitation within the hour.
+        an open sign-up: 429 if this address made five accounts without an invitation
+        within the hour.
       parameters: [{$ref: "#/components/parameters/CeremonyId"}]
       requestBody:
         required: true
@@ -613,7 +609,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/SignInResult"}
         "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -637,9 +632,9 @@ paths:
         Signs in with a Sign in with Apple or Google ID token; with an invitation or
         admission code, or `signUp: true`, and no account for that provider account,
         creates one (an existing account is signed in, `created: false`). 403 means no
-        account uses it and an invitation is needed: none was sent, or `signUp` was
-        sent without one to a server that does not allow open sign-up. 429 also when
-        this address made five accounts without an invitation within the hour.
+        account uses it and the request is no sign-up (neither `signUp: true` nor an
+        invitation or code). 429 also when this address made five accounts without an
+        invitation within the hour.
       parameters: [{$ref: "#/components/parameters/Provider"}]
       requestBody:
         required: true
@@ -667,9 +662,7 @@ paths:
         same whether or not an account uses the address, which therefore is never
         revealed. With an invitation or code, or with `signUp: true`, the mail goes
         out to an address without an account too, and the link makes the account;
-        without any of them, only to an address with one. 403: `signUp: true` without
-        an invitation or code, and the server does not allow open sign-up (whatever
-        the address). 429: three mails per address per 15 minutes; or, for a request
+        without any of them, only to an address with one. 429: three mails per address per 15 minutes; or, for a request
         with `signUp: true` and no invitation or code, ten such requests an hour from
         this client address, each counted whether or not the address has an account
         (so the answer reveals nothing about it); or the sign-in routes' limit.
@@ -681,7 +674,6 @@ paths:
       responses:
         "204": {description: Sent, or nothing to send.}
         "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/magic-links/redeem:
@@ -888,7 +880,7 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: No account uses this sign-in, or a sign-up has neither invitation nor admission code and the server does not allow open sign-up; an invitation (or admission code) is needed to create one.
+      description: "No account uses this sign-in, and the request was no sign-up; send `signUp: true` (with `consent: true`) to create one."
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -1214,8 +1206,8 @@ components:
       type: boolean
       description: |
         This request starts a sign-up: create an account if none uses this sign-in.
-        Needed for a sign-up without an invitation or admission code (OPEN_SIGNUP);
-        optional with one, which still makes a request a sign-up on its own (older
+        Needed for a sign-up without an invitation or admission code; optional with
+        one, which still makes a request a sign-up on its own (older
         apps send no flag). false is the same as absent. Requires `consent: true`.
     Consent:
       type: boolean

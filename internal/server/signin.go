@@ -68,9 +68,7 @@ func (s *Server) BeginPasskeySignUp(ctx context.Context, req api.BeginPasskeySig
 	}
 	profile := service.SignUpProfile{Username: b.Username, DisplayName: b.DisplayName, Gender: (*string)(b.Gender)}
 	c, err := s.signIn.BeginPasskeySignUp(ctx, *proof, profile)
-	if errors.Is(err, service.ErrInvitationRequired) {
-		return api.BeginPasskeySignUp403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
-	} else if errors.Is(err, service.ErrSignUpRateLimited) {
+	if errors.Is(err, service.ErrSignUpRateLimited) {
 		return api.BeginPasskeySignUp429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
 	}
 	if err != nil {
@@ -99,9 +97,7 @@ func (s *Server) BeginPasskeySignIn(ctx context.Context, _ api.BeginPasskeySignI
 
 func (s *Server) FinishPasskey(ctx context.Context, req api.FinishPasskeyRequestObject) (api.FinishPasskeyResponseObject, error) {
 	session, err := s.signIn.FinishPasskey(ctx, req.SessionId, credentialJSON(req.Body.Credential))
-	if errors.Is(err, service.ErrInvitationRequired) {
-		return api.FinishPasskey403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
-	} else if errors.Is(err, service.ErrSignUpRateLimited) {
+	if errors.Is(err, service.ErrSignUpRateLimited) {
 		return api.FinishPasskey429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
 	}
 	if err != nil {
@@ -157,7 +153,7 @@ func (s *Server) ProviderSignIn(ctx context.Context, req api.ProviderSignInReque
 		code = *b.AuthorizationCode
 	}
 	session, err := s.signIn.ProviderSignIn(ctx, string(req.Provider), b.IdToken, b.Nonce, code, signUpProof(b.Invite, b.AdmissionCode, b.SignUp, b.Consent))
-	if errors.Is(err, service.ErrNoAccount) || errors.Is(err, service.ErrInvitationRequired) {
+	if errors.Is(err, service.ErrNoAccount) {
 		return api.ProviderSignIn403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
 	} else if errors.Is(err, service.ErrSignUpRateLimited) {
 		return api.ProviderSignIn429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
@@ -202,9 +198,6 @@ func (s *Server) LinkProvider(ctx context.Context, req api.LinkProviderRequestOb
 func (s *Server) RequestMagicLink(ctx context.Context, req api.RequestMagicLinkRequestObject) (api.RequestMagicLinkResponseObject, error) {
 	b := req.Body
 	err := s.signIn.RequestMagicLink(ctx, b.Email, signUpProof(b.Invite, b.AdmissionCode, b.SignUp, b.Consent), s.magicLinkBase)
-	if errors.Is(err, service.ErrInvitationRequired) {
-		return api.RequestMagicLink403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
-	}
 	if errors.Is(err, service.ErrMailRateLimited) || errors.Is(err, service.ErrSignUpMailRateLimited) {
 		return api.RequestMagicLink429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
 	}
@@ -232,7 +225,7 @@ func (s *Server) RedeemMagicLink(ctx context.Context, req api.RedeemMagicLinkReq
 		return api.RedeemMagicLink400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(errorBody(
 			errors.New("send the link's token, or the e-mail address and the code")))}, nil
 	}
-	if errors.Is(err, service.ErrNoAccount) || errors.Is(err, service.ErrInvitationRequired) {
+	if errors.Is(err, service.ErrNoAccount) {
 		return api.RedeemMagicLink403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
 	}
 	if err != nil {

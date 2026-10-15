@@ -108,7 +108,7 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 	if err != nil {
 		return Session{}, err
 	}
-	if err := s.admitOpen(ctx, g, true); err != nil {
+	if err := s.countOpen(ctx, g); err != nil {
 		return Session{}, err
 	}
 	var user db.User
@@ -424,7 +424,7 @@ func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (S
 
 // signInWithLink signs in the account of a consumed link's address, or creates it
 // when the link was requested with an invite or admission code, or as an open
-// sign-up while the server still allows them.
+// sign-up.
 func (s *SignIn) signInWithLink(ctx context.Context, link atrest.MagicLink) (Session, error) {
 	identity, err := s.identity(ctx, s.q, "email", link.Email)
 	if err == nil {
@@ -436,9 +436,6 @@ func (s *SignIn) signInWithLink(ctx context.Context, link atrest.MagicLink) (Ses
 		open: link.SignUp && link.InviteID == nil && link.AdmissionID == nil}
 	if g == (gate{}) {
 		return Session{}, ErrNoAccount
-	}
-	if err := s.admitOpen(ctx, g, false); err != nil {
-		return Session{}, err
 	}
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {

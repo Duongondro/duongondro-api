@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// Open sign-up (design: Social › Open sign-up, decision 20): with OPEN_SIGNUP=true a
-// sign-up that marks itself as one (signUp: true) needs no invitation or admission
-// code. The account is a root of the invite tree and makes no friendship. Such
+// Open sign-up (design: Social › Open sign-up, decision 20): a sign-up that marks
+// itself as one (signUp: true) needs no invitation or admission code; the owner
+// decided against a switch for it. The account is a root of the invite tree and makes no friendship. Such
 // sign-ups by passkey, Apple or Google are limited per client address when they make
 // the account; e-mail ones, whose link may go to any address, when they ask for the
 // mail, under a limit of their own beside the magic link's per-address one.
@@ -32,14 +32,10 @@ const (
 
 // ErrSignUpMailRateLimited answers an open magic-link request beyond the client
 // address's limit (429).
-var ErrSignUpMailRateLimited = errors.New("too many sign-up mails requested from this network; try again later, or use an invitation")
-
-// ErrInvitationRequired answers a sign-up with neither an invitation nor an admission
-// code when the server does not allow open sign-up (403, as ErrNoAccount).
-var ErrInvitationRequired = errors.New("an invitation or an admission code is needed to create an account")
+var ErrSignUpMailRateLimited = errors.New("too many sign-up mails requested from this network; try again later, or use a friendship code")
 
 // ErrSignUpRateLimited answers an open sign-up beyond the client address's limit (429).
-var ErrSignUpRateLimited = errors.New("too many new accounts from this network; try again later, or use an invitation")
+var ErrSignUpRateLimited = errors.New("too many new accounts from this network; try again later, or use a friendship code")
 
 type clientAddressKey struct{}
 
@@ -151,17 +147,11 @@ func (s *SignIn) SetOpenSignUpClock(now func() time.Time) {
 	s.openLimit.now, s.openMailLimit.now = now, now
 }
 
-// admitOpen lets an open sign-up (g.open) make its account: refused when the server
-// no longer allows open sign-up, and, when counted, beyond the client address's limit.
-// Other gates pass untouched.
-func (s *SignIn) admitOpen(ctx context.Context, g gate, counted bool) error {
-	if !g.open {
-		return nil
-	}
-	if !s.openSignUp {
-		return ErrInvitationRequired
-	}
-	if counted && !s.openLimit.take(clientAddress(ctx)) {
+// countOpen counts an account an open sign-up (g.open) by passkey, Apple or Google is
+// about to make against the client address's limit, refusing it beyond. Other gates,
+// and e-mail sign-ups (limited when they ask for the mail), are not counted.
+func (s *SignIn) countOpen(ctx context.Context, g gate) error {
+	if g.open && !s.openLimit.take(clientAddress(ctx)) {
 		return ErrSignUpRateLimited
 	}
 	return nil

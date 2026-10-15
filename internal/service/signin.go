@@ -24,9 +24,9 @@ import (
 // SignIn holds the sign-in methods (design: From CodeShare › Sign-in). Three rules
 // hold across them:
 //
-//   - An account is created only with a valid invitation, an unused admission code,
-//     or, when the server allows open sign-up, by a request marked as a sign-up
-//     (opensignup.go): every method can sign in, none can sign up otherwise.
+//   - An account is created only by a request that is a sign-up: one marked as one
+//     (signUp, opensignup.go), or one with a valid invitation or an unused admission
+//     code. Every method can sign in.
 //   - Signing in never grants keys: a new device still enrols from an existing one
 //     or the recovery code.
 //   - Linking is explicit: a method is added to an account only from a signed-in
@@ -44,10 +44,9 @@ type SignIn struct {
 	now    func() time.Time
 	// codeKey keys the hashes of magic-link codes; random per process, never stored.
 	codeKey []byte
-	// openSignUp allows sign-ups with neither invitation nor admission code
-	// (OPEN_SIGNUP); openLimit counts them per client address.
-	openSignUp bool
-	openLimit  *addressLimiter
+	// openLimit counts accounts made with neither invitation nor admission code per
+	// client address.
+	openLimit *addressLimiter
 	// openMailLimit counts open sign-up requests for a magic link per client
 	// address, mailed or not.
 	openMailLimit *addressLimiter
@@ -64,9 +63,6 @@ type SignInConfig struct {
 	Verifiers map[string]TokenVerifier
 	Mailer    Mailer
 	Apple     AppleRevoker
-	// OpenSignUp lets a request marked as a sign-up create an account without an
-	// invitation or admission code (OPEN_SIGNUP=true).
-	OpenSignUp bool
 }
 
 func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *Social, cfg SignInConfig) (*SignIn, error) {
@@ -84,7 +80,7 @@ func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *S
 	}
 	s := &SignIn{pool: pool, q: db.New(pool), keys: keys, auth: a, social: social, web: web, oidc: cfg.Verifiers,
 		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey,
-		openSignUp: cfg.OpenSignUp, openLimit: newAddressLimiter(OpenSignUpLimit, OpenSignUpWindow),
+		openLimit:     newAddressLimiter(OpenSignUpLimit, OpenSignUpWindow),
 		openMailLimit: newAddressLimiter(OpenSignUpMailLimit, OpenSignUpWindow)}
 	if s.oidc == nil {
 		s.oidc = map[string]TokenVerifier{}
@@ -112,7 +108,7 @@ var ErrNoAccount = errors.New("no account uses this sign-in; an invitation is ne
 // createAccount makes a user (with id, when given) inside the caller's transaction:
 // a child of the inviter in the invite tree when g is an invite, a root (no inviter,
 // no friendship) when it is an admission code, which it spends, or open (the caller
-// has let it through admitOpen). It locks the invite
+// has counted it with countOpen, if it counts). It locks the invite
 // or code and checks it is still live, so a revocation, the inviter's purge or
 // another sign-up with the same code since the first check stops the sign-up
 // (ErrNotFound) rather than slipping through.
@@ -379,7 +375,7 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 	if err != nil {
 		return Session{}, err
 	}
-	if err := s.admitOpen(ctx, g, true); err != nil {
+	if err := s.countOpen(ctx, g); err != nil {
 		return Session{}, err
 	}
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {

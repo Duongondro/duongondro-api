@@ -11,14 +11,14 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/oidc"
 )
 
-// signInWith is f.signIn with OPEN_SIGNUP set to open, Google and a mailer.
-func (f *fixture) signInWith(open bool) (*SignIn, *Social, fakeVerifier, *fakeMailer) {
+// signInWith is f.signIn with Google and a mailer.
+func (f *fixture) signInWith() (*SignIn, *Social, fakeVerifier, *fakeMailer) {
 	f.t.Helper()
 	social := NewSocial(f.pool, f.keys)
 	verifier := fakeVerifier{claims: map[string]oidc.Claims{}}
 	mailer := &fakeMailer{sent: make(chan string, 16)}
 	s, err := NewSignIn(f.pool, f.keys, auth.New(f.pool, f.keys), social, SignInConfig{RPID: testRPID, RPOrigins: []string{testOrigin},
-		Verifiers: map[string]TokenVerifier{"google": verifier}, Mailer: mailer, OpenSignUp: open})
+		Verifiers: map[string]TokenVerifier{"google": verifier}, Mailer: mailer})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -50,39 +50,38 @@ func (f *fixture) passkeySignUp(s *SignIn, ctx context.Context, proof SignUpProo
 	return s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(f.t, c.Options))
 }
 
-func TestOpenSignUpOff(t *testing.T) {
+// Sign-up needs no invitation and no configuration: the plain sign-in, as every
+// other test builds it, makes an account for a request marked as a sign-up.
+// Invitations and admission codes work as before, with or without the flag.
+func TestSignUpWithoutCodeNeedsNoConfiguration(t *testing.T) {
 	f := setup(t)
-	s, social, verifier, mailer := f.signInWith(false)
+	mailer := &fakeMailer{sent: make(chan string, 16)}
+	s, social := f.signIn(nil, mailer, nil)
 	ctx := from(t.Context(), "198.51.100.7")
 
-	// Without the flag, as before: 400 for a passkey, 403 for a provider, no mail.
+	session, err := f.passkeySignUp(s, ctx, openProof)
+	if err != nil || !session.Created || !f.isRoot(social, session.UserID) {
+		t.Fatalf("passkey sign-up without a code: %v %+v", err, session)
+	}
+	if err := s.RequestMagicLink(ctx, "new@example.com", &openProof, "https://duongondro.app/m#"); err != nil {
+		t.Fatal(err)
+	}
+	_, token := mailOf(t, mailer)
+	if viaMail, err := s.RedeemMagicLink(ctx, token); err != nil || !viaMail.Created || !f.isRoot(social, viaMail.UserID) {
+		t.Fatalf("magic-link sign-up without a code: %v", err)
+	}
+	// Without the flag and without a code it is no sign-up, as before.
 	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{}, SignUpProfile{}); !isValidation(err) {
 		t.Fatalf("passkey sign-up without anything: %v", err)
 	}
-	// With the flag and nothing else: 403, an invitation is needed.
-	if _, err := s.BeginPasskeySignUp(ctx, openProof, SignUpProfile{}); !errors.Is(err, ErrInvitationRequired) {
-		t.Fatalf("open passkey sign-up while closed: %v", err)
-	}
-	nonce, _ := s.NewNonce(ctx)
-	verifier.claims["tok"] = oidc.Claims{Subject: "g-closed", Nonce: nonce}
-	if _, err := s.ProviderSignIn(ctx, "google", "tok", nonce, "", &openProof); !errors.Is(err, ErrInvitationRequired) {
-		t.Fatalf("open Google sign-up while closed: %v", err)
-	}
-	if err := s.RequestMagicLink(ctx, "new@example.com", &openProof, "https://duongondro.app/m#"); !errors.Is(err, ErrInvitationRequired) {
-		t.Fatalf("open magic link while closed: %v", err)
-	}
-	if len(mailer.sent) != 0 {
-		t.Fatal("mail went out for a closed sign-up")
-	}
 
-	// Invitations and admission codes work as before, with or without the flag.
 	inviter := f.member()
-	invAuth := f.invite(social, inviter, "C10SEDXX")
-	session, err := f.passkeySignUp(s, ctx, SignUpProof{Invite: &InviteProof{ID: "C10SEDXX", Auth: invAuth}})
+	invAuth := f.invite(social, inviter, "C0DEDXXX")
+	session, err = f.passkeySignUp(s, ctx, SignUpProof{Invite: &InviteProof{ID: "C0DEDXXX", Auth: invAuth}})
 	if err != nil || !session.Created || f.isRoot(social, session.UserID) {
 		t.Fatalf("invited sign-up without the flag: %v %+v", err, session)
 	}
-	session, err = f.passkeySignUp(s, ctx, SignUpProof{Invite: &InviteProof{ID: "C10SEDXX", Auth: invAuth}, SignUp: true, Consent: true})
+	session, err = f.passkeySignUp(s, ctx, SignUpProof{Invite: &InviteProof{ID: "C0DEDXXX", Auth: invAuth}, SignUp: true, Consent: true})
 	if err != nil || !session.Created {
 		t.Fatalf("invited sign-up with the flag: %v", err)
 	}
@@ -97,14 +96,14 @@ func TestOpenSignUpOff(t *testing.T) {
 		t.Fatalf("admission code with the flag: %v", err)
 	}
 	// The flag without consent is refused, invitation or not.
-	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "C10SEDXX", Auth: invAuth}, SignUp: true}, SignUpProfile{}); !isValidation(err) {
+	if _, err := s.BeginPasskeySignUp(ctx, SignUpProof{Invite: &InviteProof{ID: "C0DEDXXX", Auth: invAuth}, SignUp: true}, SignUpProfile{}); !isValidation(err) {
 		t.Fatalf("flag without consent: %v", err)
 	}
 }
 
 func TestOpenSignUpOn(t *testing.T) {
 	f := setup(t)
-	s, social, verifier, mailer := f.signInWith(true)
+	s, social, verifier, mailer := f.signInWith()
 	ctx := from(t.Context(), "198.51.100.8")
 	var before int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&before)
@@ -222,7 +221,7 @@ func TestOpenSignUpOn(t *testing.T) {
 
 func TestOpenSignUpRateLimit(t *testing.T) {
 	f := setup(t)
-	s, _, verifier, mailer := f.signInWith(true)
+	s, _, verifier, mailer := f.signInWith()
 	now := time.Now()
 	s.SetOpenSignUpClock(func() time.Time { return now })
 	ctx := from(t.Context(), "203.0.113.9")
@@ -283,29 +282,6 @@ func TestOpenSignUpRateLimit(t *testing.T) {
 	}
 }
 
-// A link or ceremony begun while sign-up was open does not make an account once the
-// server no longer allows it.
-func TestOpenSignUpClosedMeanwhile(t *testing.T) {
-	f := setup(t)
-	s, _, _, mailer := f.signInWith(true)
-	ctx := from(t.Context(), "192.0.2.44")
-	c, err := s.BeginPasskeySignUp(ctx, openProof, SignUpProfile{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RequestMagicLink(ctx, "late@example.com", &openProof, "https://duongondro.app/m#"); err != nil {
-		t.Fatal(err)
-	}
-	_, token := mailOf(t, mailer)
-	s.openSignUp = false
-	if _, err := s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options)); !errors.Is(err, ErrInvitationRequired) {
-		t.Fatalf("passkey finished after closing: %v", err)
-	}
-	if _, err := s.RedeemMagicLink(ctx, token); !errors.Is(err, ErrInvitationRequired) {
-		t.Fatalf("link redeemed after closing: %v", err)
-	}
-}
-
 func TestAddressLimiterForgets(t *testing.T) {
 	l := newAddressLimiter(2, time.Hour)
 	now := time.Now()
@@ -328,7 +304,7 @@ func TestAddressLimiterForgets(t *testing.T) {
 // the 429 says nothing about the address.
 func TestOpenSignUpMailLimit(t *testing.T) {
 	f := setup(t)
-	s, _, _, mailer := f.signInWith(true)
+	s, _, _, mailer := f.signInWith()
 	ctx := from(t.Context(), "198.51.100.20")
 	const base = "https://duongondro.app/m#"
 
