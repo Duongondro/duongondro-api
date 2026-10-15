@@ -8,6 +8,8 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/go-webauthn/webauthn/protocol"
+
 	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/oidc"
 	"github.com/Duongondro/duongondro-api/internal/service/names"
@@ -126,5 +128,54 @@ func TestSignUpCeremonyWithEmptyName(t *testing.T) {
 	}
 	if u, err := f.keys.User(f.q.GetUser(ctx, session.UserID)); err != nil || !isRandomName(u.DisplayName) {
 		t.Fatalf("an empty ceremony name cleared the random one: %q %v", u.DisplayName, err)
+	}
+}
+
+// A passkey sign-up's random name is drawn when the ceremony begins: it labels the
+// passkey (the options' user) and becomes the account's name, the same one.
+func TestPasskeyIsNamedLikeTheAccount(t *testing.T) {
+	f := setup(t)
+	s, _ := f.signIn(nil, nil, nil)
+	ctx := t.Context()
+	signUp := func(profile SignUpProfile) (user protocol.UserEntity, displayName string, username *string) {
+		t.Helper()
+		typed, _ := f.admissionCode(time.Hour)
+		c, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: typed}, profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		user = c.Options.(*protocol.CredentialCreation).Response.User
+		session, err := s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options))
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, err := f.keys.User(f.q.GetUser(ctx, session.UserID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return user, u.DisplayName, u.Username
+	}
+
+	seen := map[string]bool{}
+	for range 3 {
+		user, name, _ := signUp(SignUpProfile{})
+		if !isRandomName(user.DisplayName) || user.Name != user.DisplayName || name != user.DisplayName {
+			t.Fatalf("passkey labelled %q / %q, account named %q", user.Name, user.DisplayName, name)
+		}
+		seen[name] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("every passkey got the same name")
+	}
+	// A username still names the passkey; the random display name goes beside it.
+	username := "otterfan"
+	user, name, stored := signUp(SignUpProfile{Username: &username})
+	if user.Name != "otterfan" || !isRandomName(user.DisplayName) || name != user.DisplayName || stored == nil || *stored != "otterfan" {
+		t.Fatalf("with a username: %q / %q, account %q", user.Name, user.DisplayName, name)
+	}
+	// A given name is used as before.
+	ana := "Ana"
+	if user, name, _ := signUp(SignUpProfile{DisplayName: &ana}); user.Name != "Ana" || user.DisplayName != "Ana" || name != "Ana" {
+		t.Fatalf("with a name: %q / %q, account %q", user.Name, user.DisplayName, name)
 	}
 }

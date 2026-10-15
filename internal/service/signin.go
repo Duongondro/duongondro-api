@@ -175,7 +175,9 @@ func (s *SignIn) session(ctx context.Context, userID uuid.UUID, created bool) (S
 // passkeyUser adapts an account (or one about to be created) to webauthn.User. The
 // user handle is the account id, so a discoverable sign-in finds the account. The
 // names label the passkey in the phone's password manager: the username, else the
-// display name, else "Duongöndro" (an account being created has neither yet).
+// display name, else "Duongöndro" (a sign-up always has a display name, given or
+// drawn at random when the ceremony begins, so only an unnamed account's added
+// passkey falls back to it).
 type passkeyUser struct {
 	id                uuid.UUID
 	name, displayName string
@@ -295,6 +297,16 @@ func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof, prof
 		} else if taken {
 			return Ceremony{}, conflict("that username is taken")
 		}
+	}
+	// Without a display name, the random one is drawn now rather than when the account
+	// is made, so that it labels the passkey in the password manager too (not
+	// "Duongöndro" on every account's) and the label and the name match.
+	if profile.DisplayName == nil {
+		name, err := names.Random()
+		if err != nil {
+			return Ceremony{}, err
+		}
+		profile.DisplayName = &name
 	}
 	id := uuid.NewV7()
 	u := &passkeyUser{id: id}
