@@ -84,7 +84,8 @@ func (s *SignIn) RenamePasskey(ctx context.Context, userID uuid.UUID, id []byte,
 
 // RemovePasskey deletes one of the account's passkeys, and with it every session it
 // signed in with (sessions.credential_id cascades). It refuses to remove the last way
-// to sign in: an account without an e-mail keeps its only passkey.
+// to sign in: an account with no other passkey, e-mail, Apple or Google identity
+// keeps its only passkey.
 func (s *SignIn) RemovePasskey(ctx context.Context, userID uuid.UUID, id []byte) error {
 	return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
@@ -108,7 +109,7 @@ func (s *SignIn) RemovePasskey(ctx context.Context, userID uuid.UUID, id []byte)
 			return err
 		}
 		if left == 0 {
-			return conflict("this is the account's last way to sign in; add another passkey or an e-mail first")
+			return conflict("this is the account's last way to sign in; add another passkey or an e-mail, or link Apple or Google, first")
 		}
 		return nil
 	})

@@ -60,6 +60,10 @@ func (s *Server) RenamePasskey(ctx context.Context, req api.RenamePasskeyRequest
 	if !ok {
 		return api.RenamePasskey404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(errorBody(service.ErrNotFound))}, nil
 	}
+	// name is required: null clears it, but a body without it is a mistake.
+	if req.Body == nil || !req.Body.Name.IsSpecified() {
+		return api.RenamePasskey400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(api.Error{Error: "name is required (null clears it)"})}, nil
+	}
 	var name *string
 	if v, err := req.Body.Name.Get(); err == nil {
 		name = &v
