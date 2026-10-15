@@ -62,12 +62,22 @@ type Acceptance struct {
 	InviteeIdentityPk Bytes  `json:"inviteeIdentityPk"`
 }
 
+// UserKey publishes the user key U (docs/crypto.md, Passkey unlock): a new key has a
+// new id and a higher version.
+type UserKey struct {
+	ID      string `json:"id"`
+	PK      Bytes  `json:"pk"`
+	User    string `json:"user"`
+	Version int64  `json:"version"`
+}
+
 // Statement types as signed.
 const (
 	TypeDeviceList = "device-list"
 	TypeStreak     = "streak"
 	TypeInvite     = "invite"
 	TypeAcceptance = "acceptance"
+	TypeUserKey    = "user-key"
 )
 
 // Marshal encodes a payload in the canonical form: compact, keys in order,
