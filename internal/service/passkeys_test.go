@@ -114,4 +114,9 @@ func TestPasskeyManagement(t *testing.T) {
 	if err := s.RemovePasskey(ctx, ana.ID, laptop); err != nil {
 		t.Fatalf("with an e-mail, the last passkey can go: %v", err)
 	}
+
+	// A sign-in that finishes after its passkey was removed is refused, not a 500.
+	if _, err := s.passkeySession(ctx, ana.ID, laptop, false); !isValidation(err) {
+		t.Fatalf("a session for a removed passkey: %v", err)
+	}
 }

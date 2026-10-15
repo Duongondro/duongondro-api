@@ -176,6 +176,9 @@ func (s *SignIn) session(ctx context.Context, userID uuid.UUID, created bool) (S
 // passkeySession is a session a passkey signed in with; removing the passkey ends it.
 func (s *SignIn) passkeySession(ctx context.Context, userID uuid.UUID, credentialID []byte, created bool) (Session, error) {
 	token, err := s.auth.NewPasskeySession(ctx, userID, credentialID)
+	if repository.IsForeignKeyViolation(err) {
+		return Session{}, invalid("the passkey was not accepted") // removed meanwhile
+	}
 	return Session{Token: token, UserID: userID, Created: created}, err
 }
 
@@ -495,9 +498,13 @@ func (s *SignIn) finishSignIn(ctx context.Context, row atrest.Ceremony, data web
 	if err != nil {
 		return Session{}, err
 	}
-	if err := s.q.UpdateCredential(ctx, db.UpdateCredentialParams{ID: cred.ID,
+	// A passkey removed from Settings while this sign-in ran is gone: refuse it as one
+	// never registered rather than fail on the session's foreign key.
+	if n, err := s.q.UpdateCredential(ctx, db.UpdateCredentialParams{ID: cred.ID,
 		DataEncrypted: s.keys.Seal(atrest.CredentialsData, atrest.RowOf(cred.ID), raw)}); err != nil {
 		return Session{}, err
+	} else if n == 0 {
+		return Session{}, invalid("the passkey was not accepted")
 	}
 	id, err := uuidFromBytes(user.WebAuthnID())
 	if err != nil {

@@ -10,7 +10,7 @@ INSERT INTO credentials (id, user_id, data_encrypted) VALUES ($1, $2, $3);
 -- name: ListCredentials :many
 SELECT * FROM credentials WHERE user_id = $1 ORDER BY created_at;
 
--- name: UpdateCredential :exec
+-- name: UpdateCredential :execrows
 UPDATE credentials SET data_encrypted = $2, last_used_at = now() WHERE id = $1;
 
 -- name: PurgeExpiredWebauthnSessions :execrows
