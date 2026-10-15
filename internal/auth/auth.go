@@ -101,8 +101,12 @@ func (s *Service) SessionDevice(ctx context.Context, token string) (*uuid.UUID, 
 }
 
 // RevokeOthers ends every session of the user but this one ("sign out everywhere
-// else"), reporting how many.
+// else"), reporting how many. Their phones stop receiving this account's nudges, as
+// a phone that signs out does.
 func (s *Service) RevokeOthers(ctx context.Context, userID uuid.UUID, token string) (int64, error) {
+	if err := s.q.DropOtherSessionsPushTokens(ctx, db.DropOtherSessionsPushTokensParams{UserID: userID, TokenHash: hashToken(token)}); err != nil {
+		return 0, err
+	}
 	return s.q.DeleteOtherSessions(ctx, db.DeleteOtherSessionsParams{UserID: userID, TokenHash: hashToken(token)})
 }
 

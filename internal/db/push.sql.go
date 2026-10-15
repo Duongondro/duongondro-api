@@ -50,6 +50,39 @@ func (q *Queries) DoneTodayRecipients(ctx context.Context, friendID uuid.UUID) (
 	return items, nil
 }
 
+const dropCredentialPushTokens = `-- name: DropCredentialPushTokens :exec
+DELETE FROM push_tokens WHERE device_id IN (
+    SELECT s.device_id FROM sessions s WHERE s.credential_id = $1 AND s.user_id = $2 AND s.device_id IS NOT NULL)
+`
+
+type DropCredentialPushTokensParams struct {
+	CredentialID []byte    `json:"credentialId"`
+	UserID       uuid.UUID `json:"userId"`
+}
+
+// Removing a passkey signs its phones out: they stop receiving this account's nudges.
+func (q *Queries) DropCredentialPushTokens(ctx context.Context, arg DropCredentialPushTokensParams) error {
+	_, err := q.db.Exec(ctx, dropCredentialPushTokens, arg.CredentialID, arg.UserID)
+	return err
+}
+
+const dropOtherSessionsPushTokens = `-- name: DropOtherSessionsPushTokens :exec
+DELETE FROM push_tokens WHERE device_id IN (
+    SELECT s.device_id FROM sessions s WHERE s.user_id = $1 AND s.token_hash <> $2 AND s.device_id IS NOT NULL)
+AND push_tokens.device_id IS DISTINCT FROM (SELECT c.device_id FROM sessions c WHERE c.token_hash = $2)
+`
+
+type DropOtherSessionsPushTokensParams struct {
+	UserID    uuid.UUID `json:"userId"`
+	TokenHash []byte    `json:"tokenHash"`
+}
+
+// "Sign out everywhere else" silences the other phones, not this one.
+func (q *Queries) DropOtherSessionsPushTokens(ctx context.Context, arg DropOtherSessionsPushTokensParams) error {
+	_, err := q.db.Exec(ctx, dropOtherSessionsPushTokens, arg.UserID, arg.TokenHash)
+	return err
+}
+
 const dropPushToken = `-- name: DropPushToken :exec
 DELETE FROM push_tokens WHERE platform = $1 AND token_hash = $2
 `
