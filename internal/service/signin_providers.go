@@ -28,9 +28,11 @@ type TokenVerifier interface {
 }
 
 // Mailer sends the magic-link mail (SMTP through Brevo in production): the link, and
-// the code to type instead, grouped as XXXX XXXX.
+// the code to type instead, grouped as XXXX XXXX; and, in the same format, the mail
+// that confirms an address added to an existing account.
 type Mailer interface {
 	SendMagicLink(ctx context.Context, to, link, code string) error
+	SendEmailConfirmation(ctx context.Context, to, link, code string) error
 }
 
 // AppleRevoker turns Sign in with Apple's authorization code into a refresh token,

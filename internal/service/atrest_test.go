@@ -151,13 +151,13 @@ func TestDumpRevealsNoSealedPlaintext(t *testing.T) {
 		secrets["subject "+i.Provider] = []byte(i.Subject)
 	}
 	for _, m := range export.MagicLinks {
-		secrets["magic link"] = []byte(m.Email)
+		secrets["magic link to "+m.Email] = []byte(m.Email)
 	}
 	for _, fr := range export.Friendships {
 		secrets["friend's key"] = fr.IdentityPublicKey
 	}
 	if len(export.Devices) == 0 || len(export.Invites) == 0 || len(export.Streaks) == 0 || len(export.AuthIdentities) < 2 ||
-		len(export.MagicLinks) == 0 || len(export.Friendships) == 0 {
+		len(export.MagicLinks) < 2 || len(export.Friendships) == 0 {
 		t.Fatal("fillEveryTable no longer fills what this test checks")
 	}
 

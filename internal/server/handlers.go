@@ -32,6 +32,9 @@ func (s *Server) GetMe(ctx context.Context, req api.GetMeRequestObject) (api.Get
 	if user.IdentityPublicKey != nil {
 		me.IdentityPublicKey = &user.IdentityPublicKey
 	}
+	if me.Email, err = s.signIn.Email(ctx, user.ID); err != nil {
+		return nil, err
+	}
 	return me, nil
 }
 

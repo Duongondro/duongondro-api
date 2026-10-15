@@ -1,4 +1,4 @@
-// Package mail sends the magic-link mail over SMTP with STARTTLS, through Brevo's
+// Package mail sends the magic-link and address-confirmation mails over SMTP with STARTTLS, through Brevo's
 // relay in production (as homeosapiens-go does). The message is plain text and
 // carries the link and its code, and nothing else about the account.
 package mail
@@ -56,7 +56,23 @@ did not ask for this one, ignore it; nobody can sign in without the link or the
 code.
 `
 
-func (s *SMTP) message(to, link, code string) (*gomail.Msg, error) {
+const confirmSubject = "Confirm your e-mail for Duongöndro"
+
+const confirmBody = `Tap the link on your phone to confirm this address for your Duongöndro account,
+so you can sign in with it:
+
+%s
+
+Or type this code in the app:
+
+    %s
+
+They work once, for 15 minutes, and only until you ask for another mail. If you
+did not ask for this one, ignore it; nobody can add this address to an account
+without the link or the code.
+`
+
+func (s *SMTP) message(to, subject, body, link, code string) (*gomail.Msg, error) {
 	m := gomail.NewMsg(gomail.WithEncoding(gomail.EncodingQP), gomail.WithCharset(gomail.CharsetUTF8))
 	if err := m.From(s.From); err != nil {
 		return nil, fmt.Errorf("mail from: %w", err)
@@ -70,7 +86,17 @@ func (s *SMTP) message(to, link, code string) (*gomail.Msg, error) {
 }
 
 func (s *SMTP) SendMagicLink(ctx context.Context, to, link, code string) error {
-	m, err := s.message(to, link, code)
+	return s.deliver(ctx, to, subject, body, link, code)
+}
+
+// SendEmailConfirmation mails the link and code that add the address to an
+// existing account (POST /api/me/email), in the sign-in mail's format.
+func (s *SMTP) SendEmailConfirmation(ctx context.Context, to, link, code string) error {
+	return s.deliver(ctx, to, confirmSubject, confirmBody, link, code)
+}
+
+func (s *SMTP) deliver(ctx context.Context, to, subject, body, link, code string) error {
+	m, err := s.message(to, subject, body, link, code)
 	if err != nil {
 		return err
 	}

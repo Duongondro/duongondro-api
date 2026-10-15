@@ -329,6 +329,9 @@ type MagicLink struct {
 	WrongCodes  int16
 	CodeDeadAt  *time.Time
 	CreatedAt   time.Time
+	// UserID is the account a confirmation mail adds the address to; nil for a
+	// sign-in or sign-up link.
+	UserID *uuid.UUID
 }
 
 func (k *Keys) MagicLink(r db.MagicLink, err error) (MagicLink, error) {
@@ -337,7 +340,7 @@ func (k *Keys) MagicLink(r db.MagicLink, err error) (MagicLink, error) {
 	}
 	email, err := k.OpenString(MagicLinksEmail, RowOf(r.TokenHash), r.EmailEncrypted)
 	return MagicLink{TokenHash: r.TokenHash, Email: email, InviteID: r.InviteID, AdmissionID: r.AdmissionID, SignUp: r.SignUp,
-		CodeHash: r.CodeHash, WrongCodes: r.WrongCodes, CodeDeadAt: r.CodeDeadAt, CreatedAt: r.CreatedAt}, err
+		CodeHash: r.CodeHash, WrongCodes: r.WrongCodes, CodeDeadAt: r.CodeDeadAt, CreatedAt: r.CreatedAt, UserID: r.UserID}, err
 }
 
 // ExportMagicLink is an unused link as the export shows it: no hashes.

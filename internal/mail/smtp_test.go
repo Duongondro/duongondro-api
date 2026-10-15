@@ -39,6 +39,28 @@ func TestSendMagicLink(t *testing.T) {
 	}
 }
 
+func TestSendEmailConfirmation(t *testing.T) {
+	var sent *gomail.Msg
+	s := &SMTP{From: "sign-in@duongondro.app", send: func(_ context.Context, m *gomail.Msg) error {
+		sent = m
+		return nil
+	}}
+	link := "https://duongondro.app/m/e#TOKEN"
+	if err := s.SendEmailConfirmation(t.Context(), "bo@example.com", link, "7K2M Q9XA"); err != nil {
+		t.Fatal(err)
+	}
+	var raw bytes.Buffer
+	if _, err := sent.WriteTo(&raw); err != nil {
+		t.Fatal(err)
+	}
+	_, encoded, _ := strings.Cut(raw.String(), "\r\n\r\n")
+	text, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encoded)))
+	if err != nil || !strings.Contains(string(text), link) || !strings.Contains(string(text), "7K2M Q9XA") ||
+		!strings.Contains(string(text), "confirm this address for your Duongöndro account") {
+		t.Fatalf("body lacks the link, code or wording (%v):\n%s", err, text)
+	}
+}
+
 func TestBadAddressIsRefused(t *testing.T) {
 	s := &SMTP{From: "sign-in@duongondro.app", send: func(context.Context, *gomail.Msg) error {
 		t.Fatal("sent")
