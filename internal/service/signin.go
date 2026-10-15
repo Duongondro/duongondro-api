@@ -48,6 +48,9 @@ type SignIn struct {
 	// (OPEN_SIGNUP); openLimit counts them per client address.
 	openSignUp bool
 	openLimit  *addressLimiter
+	// openMailLimit counts open sign-up requests for a magic link per client
+	// address, mailed or not.
+	openMailLimit *addressLimiter
 }
 
 // SignInConfig configures the sign-in methods. RPID is the passkey relying party
@@ -81,7 +84,8 @@ func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *S
 	}
 	s := &SignIn{pool: pool, q: db.New(pool), keys: keys, auth: a, social: social, web: web, oidc: cfg.Verifiers,
 		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey,
-		openSignUp: cfg.OpenSignUp, openLimit: newAddressLimiter(OpenSignUpLimit, OpenSignUpWindow)}
+		openSignUp: cfg.OpenSignUp, openLimit: newAddressLimiter(OpenSignUpLimit, OpenSignUpWindow),
+		openMailLimit: newAddressLimiter(OpenSignUpMailLimit, OpenSignUpWindow)}
 	if s.oidc == nil {
 		s.oidc = map[string]TokenVerifier{}
 	}

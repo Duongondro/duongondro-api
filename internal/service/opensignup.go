@@ -13,15 +13,25 @@ import (
 // Open sign-up (design: Social › Open sign-up, decision 20): with OPEN_SIGNUP=true a
 // sign-up that marks itself as one (signUp: true) needs no invitation or admission
 // code. The account is a root of the invite tree and makes no friendship. Such
-// sign-ups by passkey, Apple or Google are limited per client address; e-mail ones
-// keep the magic link's own limits.
+// sign-ups by passkey, Apple or Google are limited per client address when they make
+// the account; e-mail ones, whose link may go to any address, when they ask for the
+// mail, under a limit of their own beside the magic link's per-address one.
 
 // OpenSignUpLimit and OpenSignUpWindow: at most five accounts without an invitation
 // an hour from one client address.
+// OpenSignUpMailLimit: at most ten magic-link requests an hour marked as an open
+// sign-up from one client address, each counted whether or not it is mailed, so
+// that mail volume (the relay's quota, the sender's reputation) and catch-all
+// domains stay bounded.
 const (
-	OpenSignUpLimit  = 5
-	OpenSignUpWindow = time.Hour
+	OpenSignUpLimit     = 5
+	OpenSignUpMailLimit = 10
+	OpenSignUpWindow    = time.Hour
 )
+
+// ErrSignUpMailRateLimited answers an open magic-link request beyond the client
+// address's limit (429).
+var ErrSignUpMailRateLimited = errors.New("too many sign-up mails requested from this network; try again later, or use an invitation")
 
 // ErrInvitationRequired answers a sign-up with neither an invitation nor an admission
 // code when the server does not allow open sign-up (403, as ErrNoAccount).
@@ -121,7 +131,9 @@ func (l *addressLimiter) take(addr string) bool {
 }
 
 // SetOpenSignUpClock replaces the clock of the open sign-up limit (for tests).
-func (s *SignIn) SetOpenSignUpClock(now func() time.Time) { s.openLimit.now = now }
+func (s *SignIn) SetOpenSignUpClock(now func() time.Time) {
+	s.openLimit.now, s.openMailLimit.now = now, now
+}
 
 // admitOpen lets an open sign-up (g.open) make its account: refused when the server
 // no longer allows open sign-up, and, when counted, beyond the client address's limit.

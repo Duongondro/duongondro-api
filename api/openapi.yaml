@@ -16,8 +16,8 @@ info:
     can invite), or, when the server runs with OPEN_SIGNUP=true, neither: a request
     that sets `signUp: true` (with `consent: true`) and carries no invitation or code
     makes an account that is a root of the invite tree and has no friends. Such
-    sign-ups are limited to five an hour per client address (passkey and Apple or
-    Google; e-mail ones keep the magic link's own limits), answered 429. With
+    sign-ups are limited per client address, answered 429: five accounts an hour by
+    passkey, Apple or Google, and ten magic-link requests an hour. With
     OPEN_SIGNUP off they are answered 403, as is any sign-up that needs an
     invitation. A request without `signUp` but with an invitation or code is still a
     sign-up, as before; signing in never grants keys. The DEV build's POST /api/dev/session is
@@ -665,9 +665,10 @@ paths:
         out to an address without an account too, and the link makes the account;
         without any of them, only to an address with one. 403: `signUp: true` without
         an invitation or code, and the server does not allow open sign-up (whatever
-        the address). E-mail sign-ups do not count towards the open sign-up limit per
-        client address; the mail's own limit (three per address per 15 minutes) and
-        the sign-in routes' limit apply (429).
+        the address). 429: three mails per address per 15 minutes; or, for a request
+        with `signUp: true` and no invitation or code, ten such requests an hour from
+        this client address, each counted whether or not the address has an account
+        (so the answer reveals nothing about it); or the sign-in routes' limit.
       requestBody:
         required: true
         content:

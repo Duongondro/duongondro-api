@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -125,6 +126,21 @@ func TestOpenSignUpOverHTTP(t *testing.T) {
 			t.Fatalf("another client address: %d %s", other.Code, other.Body)
 		}
 	})
+}
+
+// Open magic-link requests are limited per client address, mailed or not.
+func TestOpenSignUpMailLimitOverHTTP(t *testing.T) {
+	e := newSignUpServer(t, "server_open_mail_tests", true)
+	for i := range service.OpenSignUpMailLimit {
+		body := map[string]any{"email": fmt.Sprintf("m%d@example.com", i), "signUp": true, "consent": true}
+		if rec := serve(t, e, http.MethodPost, "/api/auth/magic-links", "", body); rec.Code != http.StatusNoContent {
+			t.Fatalf("request %d: %d %s", i+1, rec.Code, rec.Body)
+		}
+	}
+	rec := serve(t, e, http.MethodPost, "/api/auth/magic-links", "", map[string]any{"email": "over@example.com", "signUp": true, "consent": true})
+	if msg := errorOf(t, rec.Body.Bytes()); rec.Code != http.StatusTooManyRequests || msg != service.ErrSignUpMailRateLimited.Error() {
+		t.Fatalf("over the limit: %d %s", rec.Code, rec.Body)
+	}
 }
 
 // google signs in with Google as subject, with extra fields in the body.

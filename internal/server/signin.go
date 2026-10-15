@@ -205,7 +205,7 @@ func (s *Server) RequestMagicLink(ctx context.Context, req api.RequestMagicLinkR
 	if errors.Is(err, service.ErrInvitationRequired) {
 		return api.RequestMagicLink403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(errorBody(err))}, nil
 	}
-	if errors.Is(err, service.ErrMailRateLimited) {
+	if errors.Is(err, service.ErrMailRateLimited) || errors.Is(err, service.ErrSignUpMailRateLimited) {
 		return api.RequestMagicLink429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
 	}
 	if err != nil {

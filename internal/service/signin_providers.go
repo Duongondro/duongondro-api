@@ -294,8 +294,8 @@ func normalizeEmail(email string) (string, error) {
 // account: the per-address limit applies to all of them, a link is recorded either
 // way, and the mail goes out in the background, but only to an address with an
 // account or with an invite or admission code, which is checked now and spent only
-// when the link makes the account, or as an open sign-up (which the address limit
-// alone limits, not the client address's). A magic link proves control of an inbox, not
+// when the link makes the account, or as an open sign-up (whose requests are also
+// limited per client address, OpenSignUpMailLimit). A magic link proves control of an inbox, not
 // ownership of the practice data, which still needs an enrolled device or the
 // recovery code.
 func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *SignUpProof, linkBase string) error {
@@ -311,6 +311,11 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		if g, err = s.checkProof(ctx, *proof); err != nil {
 			return err
 		}
+	}
+	// Every open request counts, whether or not the address has an account, so the
+	// answer reveals nothing about it.
+	if g.open && !s.openMailLimit.take(clientAddress(ctx)) {
+		return ErrSignUpMailRateLimited
 	}
 	token, err := auth.RandomToken()
 	if err != nil {

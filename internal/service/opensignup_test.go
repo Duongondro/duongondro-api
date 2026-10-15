@@ -323,3 +323,50 @@ func TestAddressLimiterForgets(t *testing.T) {
 		t.Fatalf("%d addresses kept past the window", len(l.seen))
 	}
 }
+
+// Open magic-link requests count per client address when asked for, mailed or not:
+// the 429 says nothing about the address.
+func TestOpenSignUpMailLimit(t *testing.T) {
+	f := setup(t)
+	s, _, _, mailer := f.signInWith(true)
+	ctx := from(t.Context(), "198.51.100.20")
+	const base = "https://duongondro.app/m#"
+
+	// One address already has an account; its requests count like any other.
+	if err := s.RequestMagicLink(ctx, "known@example.com", &openProof, base); err != nil {
+		t.Fatal(err)
+	}
+	_, token := mailOf(t, mailer)
+	if _, err := s.RedeemMagicLink(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < OpenSignUpMailLimit; i++ {
+		if err := s.RequestMagicLink(ctx, "user"+string(rune('a'+i))+"@example.com", &openProof, base); err != nil {
+			t.Fatalf("request %d: %v", i+1, err)
+		}
+		mailOf(t, mailer)
+	}
+	for _, addr := range []string{"new@example.com", "known@example.com"} {
+		if err := s.RequestMagicLink(ctx, addr, &openProof, base); !errors.Is(err, ErrSignUpMailRateLimited) {
+			t.Fatalf("%s over the limit: %v", addr, err)
+		}
+	}
+	// Not counted, nor refused: a plain sign-in request, one with a code, another address.
+	if err := s.RequestMagicLink(ctx, "known@example.com", nil, base); err != nil {
+		t.Fatalf("sign-in link over the open limit: %v", err)
+	}
+	mailOf(t, mailer)
+	code, _ := f.admissionCode(time.Hour)
+	if err := s.RequestMagicLink(ctx, "coded@example.com", &SignUpProof{AdmissionCode: code, SignUp: true, Consent: true}, base); err != nil {
+		t.Fatalf("admission code over the open limit: %v", err)
+	}
+	mailOf(t, mailer)
+	if err := s.RequestMagicLink(from(t.Context(), "198.51.100.21"), "elsewhere@example.com", &openProof, base); err != nil {
+		t.Fatalf("another address: %v", err)
+	}
+	mailOf(t, mailer)
+	// Consent and the closed switch are answered before a slot is taken.
+	if err := s.RequestMagicLink(from(t.Context(), "198.51.100.22"), "x@example.com", &SignUpProof{SignUp: true}, base); !isValidation(err) {
+		t.Fatal(err)
+	}
+}
