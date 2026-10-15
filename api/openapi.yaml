@@ -11,9 +11,16 @@ info:
     Contract first: edit this file, then `make gen`. The Android client is generated
     from it too.
 
-    Every sign-in ends in a bearer token. An account is created only with a valid
-    invitation or an unused admission code (`duongondro-api admit`, for the first
-    members, whom nobody can invite); signing in never grants keys. The DEV build's POST /api/dev/session is
+    Every sign-in ends in a bearer token. An account is created with a valid
+    invitation, an unused admission code (`duongondro-api admit`, for members nobody
+    can invite), or, when the server runs with OPEN_SIGNUP=true, neither: a request
+    that sets `signUp: true` (with `consent: true`) and carries no invitation or code
+    makes an account that is a root of the invite tree and has no friends. Such
+    sign-ups are limited per client address, answered 429: five accounts an hour by
+    passkey, Apple or Google, and ten magic-link requests an hour. With
+    OPEN_SIGNUP off they are answered 403, as is any sign-up that needs an
+    invitation. A request without `signUp` but with an invitation or code is still a
+    sign-up, as before; signing in never grants keys. The DEV build's POST /api/dev/session is
     registered outside this file, so a release build has no trace of it.
 servers:
   - url: https://api.duongondro.app
@@ -548,7 +555,11 @@ paths:
       description: |
         Starts creating an account with a passkey; the invitation or admission code is
         checked now and when it finishes. 404: no such live invitation, or the code is
-        wrong, spent or expired. The optional profile (as PATCH /api/me takes it) is
+        wrong, spent or expired. With `signUp: true` and neither, an open sign-up: 403
+        when the server does not allow one (an invitation is needed), 429 when this
+        address has made five such accounts within the hour (checked now, counted
+        when the ceremony finishes). Without `signUp` and without an invitation or
+        code: 400, as before. The optional profile (as PATCH /api/me takes it) is
         set on the account when it is made and names the passkey; 409: the username is
         taken, now or by the time the ceremony finishes.
       requestBody:
@@ -563,6 +574,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Ceremony"}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -580,7 +592,10 @@ paths:
   /api/auth/passkeys/{sessionId}:
     post:
       operationId: finishPasskey
-      description: Completes a passkey sign-up or sign-in with the authenticator's response.
+      description: |
+        Completes a passkey sign-up or sign-in with the authenticator's response. For
+        an open sign-up: 403 if the server stopped allowing them since it began, 429
+        if this address made five accounts without an invitation within the hour.
       parameters: [{$ref: "#/components/parameters/CeremonyId"}]
       requestBody:
         required: true
@@ -594,6 +609,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/SignInResult"}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -615,8 +631,11 @@ paths:
       operationId: providerSignIn
       description: |
         Signs in with a Sign in with Apple or Google ID token; with an invitation or
-        admission code and no account for that provider account, creates one. 403
-        means no account uses it and an invitation is needed.
+        admission code, or `signUp: true`, and no account for that provider account,
+        creates one (an existing account is signed in, `created: false`). 403 means no
+        account uses it and an invitation is needed: none was sent, or `signUp` was
+        sent without one to a server that does not allow open sign-up. 429 also when
+        this address made five accounts without an invitation within the hour.
       parameters: [{$ref: "#/components/parameters/Provider"}]
       requestBody:
         required: true
@@ -642,7 +661,14 @@ paths:
         for the address makes the older codes unusable; older links still work until
         used or expired. The answer is the
         same whether or not an account uses the address, which therefore is never
-        revealed.
+        revealed. With an invitation or code, or with `signUp: true`, the mail goes
+        out to an address without an account too, and the link makes the account;
+        without any of them, only to an address with one. 403: `signUp: true` without
+        an invitation or code, and the server does not allow open sign-up (whatever
+        the address). 429: three mails per address per 15 minutes; or, for a request
+        with `signUp: true` and no invitation or code, ten such requests an hour from
+        this client address, each counted whether or not the address has an account
+        (so the answer reveals nothing about it); or the sign-in routes' limit.
       requestBody:
         required: true
         content:
@@ -651,6 +677,7 @@ paths:
       responses:
         "204": {description: Sent, or nothing to send.}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/auth/magic-links/redeem:
@@ -857,7 +884,7 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: No account uses this sign-in; an invitation (or admission code) is needed to create one.
+      description: No account uses this sign-in, or a sign-up has neither invitation nor admission code and the server does not allow open sign-up; an invitation (or admission code) is needed to create one.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -1179,10 +1206,27 @@ components:
         A bootstrap admission code, 16 Crockford base32 characters, single use. Read
         leniently: case, spaces and hyphens are ignored, O is read as 0 and I and L as 1.
         The account it makes has no inviter.
+    SignUp:
+      type: boolean
+      description: |
+        This request starts a sign-up: create an account if none uses this sign-in.
+        Needed for a sign-up without an invitation or admission code (OPEN_SIGNUP);
+        optional with one, which still makes a request a sign-up on its own (older
+        apps send no flag). false is the same as absent. Requires `consent: true`.
+    Consent:
+      type: boolean
+      description: |
+        The person ticked the onboarding consent to processing data that reveals
+        religious belief (GDPR Art. 9). Required, and must be true, with
+        `signUp: true` (400 otherwise); nothing is created without it. Not stored.
     PasskeySignUp:
       type: object
-      description: Exactly one of invite and admissionCode, and optionally the profile.
+      description: |
+        At most one of invite and admissionCode; neither only with signUp (an open
+        sign-up). Optionally the profile.
       properties:
+        signUp: {$ref: "#/components/schemas/SignUp"}
+        consent: {$ref: "#/components/schemas/Consent"}
         invite: {$ref: "#/components/schemas/InviteProof"}
         admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
         username:
@@ -1215,7 +1259,7 @@ components:
       properties:
         token: {type: string, description: "Bearer token; send as Authorization: Bearer <token>"}
         userId: {$ref: "#/components/schemas/UUID"}
-        created: {type: boolean, description: A new account was made with the invitation or admission code}
+        created: {type: boolean, description: A new account was made (with the invitation, the admission code, or by open sign-up)}
     ProviderSignIn:
       type: object
       required: [idToken, nonce]
@@ -1225,6 +1269,8 @@ components:
         authorizationCode: {type: string, maxLength: 1024, description: "Apple only: kept to revoke the authorisation when the account is deleted"}
         invite: {$ref: "#/components/schemas/InviteProof"}
         admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
+        signUp: {$ref: "#/components/schemas/SignUp"}
+        consent: {$ref: "#/components/schemas/Consent"}
     ProviderLink:
       type: object
       required: [idToken, nonce]
@@ -1239,6 +1285,8 @@ components:
         email: {type: string, maxLength: 320}
         invite: {$ref: "#/components/schemas/InviteProof"}
         admissionCode: {$ref: "#/components/schemas/AdmissionCode"}
+        signUp: {$ref: "#/components/schemas/SignUp"}
+        consent: {$ref: "#/components/schemas/Consent"}
     MagicLinkRedemption:
       type: object
       description: Either token alone (from the link), or email and code (typed).

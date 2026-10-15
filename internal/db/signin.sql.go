@@ -15,7 +15,7 @@ import (
 const consumeMagicLink = `-- name: ConsumeMagicLink :one
 DELETE FROM magic_links
 WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash
+RETURNING token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up
 `
 
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
@@ -31,6 +31,7 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 		&i.CodeDeadAt,
 		&i.EmailEncrypted,
 		&i.EmailHash,
+		&i.SignUp,
 	)
 	return i, err
 }
@@ -49,7 +50,7 @@ func (q *Queries) ConsumeNonce(ctx context.Context, nonceHash []byte) (int64, er
 
 const consumeWebauthnSession = `-- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
-RETURNING id, data, user_id, invite_id, created_at, admission_id, username_encrypted, display_name_encrypted, gender_encrypted
+RETURNING id, data, user_id, invite_id, created_at, admission_id, username_encrypted, display_name_encrypted, gender_encrypted, sign_up
 `
 
 func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (WebauthnSession, error) {
@@ -65,6 +66,7 @@ func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (Web
 		&i.UsernameEncrypted,
 		&i.DisplayNameEncrypted,
 		&i.GenderEncrypted,
+		&i.SignUp,
 	)
 	return i, err
 }
@@ -124,7 +126,7 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 }
 
 const createMagicLink = `-- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash, sign_up) VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type CreateMagicLinkParams struct {
@@ -134,6 +136,7 @@ type CreateMagicLinkParams struct {
 	InviteID       *string    `json:"inviteId"`
 	AdmissionID    *uuid.UUID `json:"admissionId"`
 	CodeHash       []byte     `json:"codeHash"`
+	SignUp         bool       `json:"signUp"`
 }
 
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
@@ -144,6 +147,7 @@ func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams
 		arg.InviteID,
 		arg.AdmissionID,
 		arg.CodeHash,
+		arg.SignUp,
 	)
 	return err
 }
@@ -178,8 +182,8 @@ func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, err
 }
 
 const createWebauthnSession = `-- name: CreateWebauthnSession :exec
-INSERT INTO webauthn_sessions (id, data, user_id, invite_id, admission_id, username_encrypted, display_name_encrypted, gender_encrypted)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO webauthn_sessions (id, data, user_id, invite_id, admission_id, username_encrypted, display_name_encrypted, gender_encrypted, sign_up)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type CreateWebauthnSessionParams struct {
@@ -191,6 +195,7 @@ type CreateWebauthnSessionParams struct {
 	UsernameEncrypted    []byte     `json:"usernameEncrypted"`
 	DisplayNameEncrypted []byte     `json:"displayNameEncrypted"`
 	GenderEncrypted      []byte     `json:"genderEncrypted"`
+	SignUp               bool       `json:"signUp"`
 }
 
 // The id is drawn by the caller: the sealed profile is bound to it. data holds the
@@ -205,6 +210,7 @@ func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnS
 		arg.UsernameEncrypted,
 		arg.DisplayNameEncrypted,
 		arg.GenderEncrypted,
+		arg.SignUp,
 	)
 	return err
 }
@@ -461,7 +467,7 @@ func (q *Queries) LockEmail(ctx context.Context, key int64) error {
 }
 
 const lockLiveMagicLinkForEmail = `-- name: LockLiveMagicLinkForEmail :one
-SELECT token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash FROM magic_links
+SELECT token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up FROM magic_links
 WHERE email_hash = $1 AND code_dead_at IS NULL AND code_hash IS NOT NULL
     AND created_at > now() - interval '15 minutes'
 ORDER BY created_at DESC LIMIT 1
@@ -482,6 +488,7 @@ func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, emailHash []byt
 		&i.CodeDeadAt,
 		&i.EmailEncrypted,
 		&i.EmailHash,
+		&i.SignUp,
 	)
 	return i, err
 }

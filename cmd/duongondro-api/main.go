@@ -44,6 +44,9 @@
 //	                   push to Android: the Firebase service account's JSON key
 //	MAIL_FROM, SMTP_HOST, SMTP_PORT, SMTP_LOGIN, SMTP_TOKEN
 //	                   magic links by SMTP with STARTTLS (Brevo's relay; port default 587)
+//	OPEN_SIGNUP        true: a sign-up marked as one (signUp: true) needs no invitation
+//	                   or admission code; such accounts are roots of the invite
+//	                   tree, five an hour per client address (default false)
 //	APPLE_APP_IDS      <team>.<bundle id> for apple-app-site-association
 //	ANDROID_PACKAGE, ANDROID_CERT_SHA256
 //	                   for assetlinks.json (fingerprints comma-separated)
@@ -58,6 +61,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -283,9 +287,15 @@ func loadConfig() (server.Config, error) {
 	if err != nil {
 		return server.Config{}, err
 	}
+	open := false
+	if v := os.Getenv("OPEN_SIGNUP"); v != "" {
+		if open, err = strconv.ParseBool(v); err != nil {
+			return server.Config{}, fmt.Errorf("OPEN_SIGNUP: %q is not true or false", v)
+		}
+	}
 	return server.Config{
 		SignIn: service.SignInConfig{RPID: rpID, RPOrigins: origins, Verifiers: verifiers, Mailer: mail,
-			Apple: revoker},
+			Apple: revoker, OpenSignUp: open},
 		MagicLinkBase: base,
 		Push:          senders,
 		WellKnown: server.WellKnown{AppleAppIDs: list("APPLE_APP_IDS"), AndroidPackage: os.Getenv("ANDROID_PACKAGE"),

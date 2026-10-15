@@ -102,11 +102,11 @@ func logRequestError(c *echo.Context, err error) {
 // attention are logged at level ERROR by ErrorHandler, once each: the default
 // echo logger would log every returned error at level ERROR, and duplicate each
 // 500. Only the path is logged, never the query string, which can carry sign-in
-// codes, cursors and ids.
+// codes, cursors and ids, nor the client's address (design: Social › Open sign-up;
+// the privacy page says addresses are not kept).
 func requestLogger() echo.MiddlewareFunc {
 	return echomiddleware.RequestLoggerWithConfig(echomiddleware.RequestLoggerConfig{
 		LogLatency:   true,
-		LogRemoteIP:  true,
 		LogHost:      true,
 		LogMethod:    true,
 		LogURIPath:   true,
@@ -122,7 +122,6 @@ func requestLogger() echo.MiddlewareFunc {
 				slog.Duration("latency", v.Latency),
 				slog.String("host", v.Host),
 				slog.String("user_agent", v.UserAgent),
-				slog.String("remote_ip", v.RemoteIP),
 				slog.String("request_id", v.RequestID),
 			}
 			// Server errors are logged in full by ErrorHandler

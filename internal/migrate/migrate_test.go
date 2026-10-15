@@ -273,7 +273,8 @@ func TestRewriteSkipsALockedTable(t *testing.T) {
 	if took := time.Since(start); took > 10*time.Second {
 		t.Fatalf("took %s: the lock was waited on", took)
 	}
-	if v, _ := p.GetDBVersion(ctx); v != 20261014183133 {
+	sources := p.ListSources()
+	if v, _ := p.GetDBVersion(ctx); v != sources[len(sources)-1].Version {
 		t.Fatalf("at version %d", v)
 	}
 }

@@ -87,7 +87,8 @@ func (s *SignIn) NewNonce(ctx context.Context) (string, error) {
 }
 
 // ProviderSignIn signs in with an Apple or Google ID token, or, with an invite or
-// admission code and no account for that provider subject, creates one.
+// admission code (or as an open sign-up) and no account for that provider subject,
+// creates one.
 func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, authCode string, proof *SignUpProof) (Session, error) {
 	claims, err := s.verify(ctx, provider, idToken, nonce)
 	if err != nil {
@@ -105,6 +106,9 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 	}
 	g, err := s.checkProof(ctx, *proof)
 	if err != nil {
+		return Session{}, err
+	}
+	if err := s.admitOpen(ctx, g, true); err != nil {
 		return Session{}, err
 	}
 	var user db.User
@@ -290,7 +294,8 @@ func normalizeEmail(email string) (string, error) {
 // account: the per-address limit applies to all of them, a link is recorded either
 // way, and the mail goes out in the background, but only to an address with an
 // account or with an invite or admission code, which is checked now and spent only
-// when the link makes the account. A magic link proves control of an inbox, not
+// when the link makes the account, or as an open sign-up (whose requests are also
+// limited per client address, OpenSignUpMailLimit). A magic link proves control of an inbox, not
 // ownership of the practice data, which still needs an enrolled device or the
 // recovery code.
 func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *SignUpProof, linkBase string) error {
@@ -306,6 +311,11 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		if g, err = s.checkProof(ctx, *proof); err != nil {
 			return err
 		}
+	}
+	// Every open request counts, whether or not the address has an account, so the
+	// answer reveals nothing about it.
+	if g.open && !s.openMailLimit.take(clientAddress(ctx)) {
+		return ErrSignUpMailRateLimited
 	}
 	token, err := auth.RandomToken()
 	if err != nil {
@@ -343,7 +353,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		sum := sha256.Sum256([]byte(token))
 		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:],
 			EmailEncrypted: s.keys.SealString(atrest.MagicLinksEmail, atrest.RowOf(sum[:]), email), EmailHash: hash,
-			InviteID: g.inviteID, AdmissionID: g.admissionID, CodeHash: s.linkCodeHash(sum[:], code)})
+			InviteID: g.inviteID, AdmissionID: g.admissionID, SignUp: g != (gate{}), CodeHash: s.linkCodeHash(sum[:], code)})
 	})
 	if err != nil || !send {
 		return err
@@ -413,7 +423,8 @@ func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (S
 }
 
 // signInWithLink signs in the account of a consumed link's address, or creates it
-// when the link was requested with an invite or admission code.
+// when the link was requested with an invite or admission code, or as an open
+// sign-up while the server still allows them.
 func (s *SignIn) signInWithLink(ctx context.Context, link atrest.MagicLink) (Session, error) {
 	identity, err := s.identity(ctx, s.q, "email", link.Email)
 	if err == nil {
@@ -421,9 +432,13 @@ func (s *SignIn) signInWithLink(ctx context.Context, link atrest.MagicLink) (Ses
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, err
 	}
-	g := gate{inviteID: link.InviteID, admissionID: link.AdmissionID}
+	g := gate{inviteID: link.InviteID, admissionID: link.AdmissionID,
+		open: link.SignUp && link.InviteID == nil && link.AdmissionID == nil}
 	if g == (gate{}) {
 		return Session{}, ErrNoAccount
+	}
+	if err := s.admitOpen(ctx, g, false); err != nil {
+		return Session{}, err
 	}
 	var user db.User
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {

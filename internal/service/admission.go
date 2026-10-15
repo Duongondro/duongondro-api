@@ -115,24 +115,37 @@ func (a *Admissions) Issue(ctx context.Context, n int, lifetime time.Duration) (
 	return codes, nil
 }
 
-// SignUpProof is what a sign-up presents: an invitation or an admission code, exactly
-// one of them.
+// SignUpProof is what a sign-up presents: an invitation or an admission code, at most
+// one of them, and whether it marked itself as a sign-up (signUp: true), which an
+// open sign-up, with neither, needs. An invitation or code alone still makes a
+// sign-up, as older apps send no flag.
 type SignUpProof struct {
 	Invite        *InviteProof
 	AdmissionCode string
+	SignUp        bool
+	// Consent is the GDPR Art. 9 consent the app collected; a request that sets
+	// SignUp must carry it.
+	Consent bool
 }
 
 // gate is a checked SignUpProof, stored with a ceremony or link until the account is
-// made.
+// made: an invite, an admission code, or open (neither, OPEN_SIGNUP). The zero gate
+// is no sign-up.
 type gate struct {
 	inviteID    *string
 	admissionID *uuid.UUID
+	open        bool
 }
 
-// checkProof is the sign-up gate: a live invite with its auth, or a live, unused
-// admission code. A wrong, spent or expired one answers ErrNotFound, like an unknown
-// invite.
+// checkProof is the sign-up gate: a live invite with its auth, a live, unused
+// admission code, or, for a request marked as a sign-up, neither when the server
+// allows open sign-up (ErrInvitationRequired when it does not). A wrong, spent or
+// expired invite or code answers ErrNotFound, like an unknown invite. A request
+// marked as a sign-up needs the Art. 9 consent, before anything else is checked.
 func (s *SignIn) checkProof(ctx context.Context, p SignUpProof) (gate, error) {
+	if p.SignUp && !p.Consent {
+		return gate{}, invalid("consent to processing data that reveals religious belief (GDPR Art. 9) is required to create an account")
+	}
 	switch {
 	case p.Invite != nil && p.AdmissionCode != "":
 		return gate{}, invalid("present an invitation or an admission code, not both")
@@ -154,6 +167,10 @@ func (s *SignIn) checkProof(ctx context.Context, p SignUpProof) (gate, error) {
 			return gate{}, err
 		}
 		return gate{admissionID: &row.ID}, nil
+	case p.SignUp && s.openSignUp:
+		return gate{open: true}, nil
+	case p.SignUp:
+		return gate{}, ErrInvitationRequired
 	}
 	return gate{}, invalid("an invitation or an admission code is needed to create an account")
 }
