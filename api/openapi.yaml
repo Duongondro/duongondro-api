@@ -786,12 +786,15 @@ paths:
         Removes this account's e-mail address; it no longer signs in. 409 when it is
         the account's only way to sign in (no passkey, Apple or Google): add one
         first. Removing an address the account does not have is a no-op. It ends no
-        session, not even those signed in with the address.
+        session, not even those signed in with the address. 429 on this and
+        verify: more than 20 requests a minute to /api/me/email from this client
+        address.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       responses:
         "204": {description: Removed.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
   /api/me/email/verify:
     post:
       operationId: confirmEmail
@@ -816,6 +819,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
 
   /api/devices/{deviceId}/push-token:
     put:
