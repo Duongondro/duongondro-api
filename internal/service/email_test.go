@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -360,6 +361,40 @@ func TestConfirmationAccountLimit(t *testing.T) {
 	if err := s.RequestEmailConfirmation(ctx, ana.ID, "not an address", confirmBase); !isValidation(err) {
 		t.Fatalf("a bad address: %v", err)
 	}
+}
+
+// Ten mails an hour from one network (an IPv6 address by its /64), confirmations
+// and open magic-link sign-ups together, whichever accounts ask.
+func TestConfirmationNetworkLimit(t *testing.T) {
+	f := setup(t)
+	s, _, _, mailer := f.signInWith()
+	ctx := t.Context()
+	// Open sign-up mail and confirmations share the count.
+	if err := s.RequestMagicLink(from(ctx, "2001:db8:1:2::1"), "new@example.com", &openProof, signInBase); err != nil {
+		t.Fatal(err)
+	}
+	mailOf(t, mailer)
+	for i := 1; i < OpenSignUpMailLimit; i++ {
+		u := f.user()
+		addr := fmt.Sprintf("n%d@example.com", i)
+		// Walking through the /64 gains nothing.
+		if err := s.RequestEmailConfirmation(from(ctx, fmt.Sprintf("2001:db8:1:2::%x", i+1)), u.ID, addr, confirmBase); err != nil {
+			t.Fatalf("confirmation %d: %v", i, err)
+		}
+		confirmMail(t, mailer, addr)
+	}
+	u := f.user()
+	if err := s.RequestEmailConfirmation(from(ctx, "2001:db8:1:2:ffff::9"), u.ID, "over@example.com", confirmBase); !errors.Is(err, ErrEmailConfirmationNetworkLimited) {
+		t.Fatalf("the eleventh mail from one network: %v", err)
+	}
+	if err := s.RequestMagicLink(from(ctx, "2001:db8:1:2::abc"), "new2@example.com", &openProof, signInBase); !errors.Is(err, ErrSignUpMailRateLimited) {
+		t.Fatalf("an open sign-up mail after ten: %v", err)
+	}
+	noMail(t, mailer)
+	if err := s.RequestEmailConfirmation(from(ctx, "198.51.100.7"), u.ID, "over@example.com", confirmBase); err != nil {
+		t.Fatalf("another network: %v", err)
+	}
+	confirmMail(t, mailer, "over@example.com")
 }
 
 // Removing the address: refused while it is the only way to sign in.

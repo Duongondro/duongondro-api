@@ -17,7 +17,8 @@ func (s *Server) RequestEmailConfirmation(ctx context.Context, req api.RequestEm
 		return api.RequestEmailConfirmation401Response{}, nil
 	}
 	err = s.signIn.RequestEmailConfirmation(ctx, user.ID, req.Body.Email, service.ConfirmLinkBase(s.magicLinkBase))
-	if errors.Is(err, service.ErrMailRateLimited) || errors.Is(err, service.ErrEmailConfirmationRateLimited) {
+	if errors.Is(err, service.ErrMailRateLimited) || errors.Is(err, service.ErrEmailConfirmationRateLimited) ||
+		errors.Is(err, service.ErrEmailConfirmationNetworkLimited) {
 		return api.RequestEmailConfirmation429JSONResponse{TooManyRequestsJSONResponse: api.TooManyRequestsJSONResponse(errorBody(err))}, nil
 	}
 	if err != nil {

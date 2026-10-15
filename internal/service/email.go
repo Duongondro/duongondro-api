@@ -29,7 +29,10 @@ import (
 // EmailConfirmationLimit and EmailConfirmationWindow: at most five confirmation
 // mails asked for by one account an hour, counted in memory per account (a restart
 // forgets them), beside the per-address limit, so one account cannot mail many
-// addresses.
+// addresses. Since accounts are free to make, confirmations also count against the
+// client address's open sign-up mail limit (OpenSignUpMailLimit, ten an hour, an
+// IPv6 address by its /64), shared with open magic-link sign-ups: together they
+// bound the unsolicited mail one network can make the server send.
 const (
 	EmailConfirmationLimit  = 5
 	EmailConfirmationWindow = time.Hour
@@ -38,6 +41,10 @@ const (
 // ErrEmailConfirmationRateLimited answers a sixth confirmation request from one
 // account within the hour (429).
 var ErrEmailConfirmationRateLimited = errors.New("too many confirmation mails for this account; try again later")
+
+// ErrEmailConfirmationNetworkLimited answers a confirmation request beyond the
+// client address's mail limit (429).
+var ErrEmailConfirmationNetworkLimited = errors.New("too many mails requested from this network; try again later")
 
 // errWrongConfirmationCode answers a typed confirmation code that is wrong, or whose
 // mail expired, was used or was replaced, or that took too many wrong guesses: all
@@ -81,6 +88,9 @@ func (s *SignIn) RequestEmailConfirmation(ctx context.Context, userID uuid.UUID,
 	}
 	if !s.confirmLimit.take(userID.String()) {
 		return ErrEmailConfirmationRateLimited
+	}
+	if !s.openMailLimit.take(clientAddress(ctx)) {
+		return ErrEmailConfirmationNetworkLimited
 	}
 	token, err := auth.RandomToken()
 	if err != nil {

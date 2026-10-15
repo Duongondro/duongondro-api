@@ -764,8 +764,9 @@ paths:
         The answer is the same whether or not another account uses the address,
         which therefore is not revealed here (verifying tells, with 409). An address
         this account already has is answered 204 without a mail. 429: three mails
-        per address per 15 minutes (sign-in mails included), or five confirmation
-        requests per account an hour.
+        per address per 15 minutes (sign-in mails included), five confirmation
+        requests per account an hour, or ten mails an hour from this client address
+        (confirmations and open magic-link sign-ups together).
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true
