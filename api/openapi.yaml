@@ -563,7 +563,9 @@ paths:
         code: 400, as before. The optional profile (as PATCH /api/me takes it) is
         set on the account when it is made and names the passkey; an account made
         without a display name, by any sign-up, gets a random English name ("Adjective
-        Animal", e.g. "Tidy Otter"). 409: the username is
+        Animal", e.g. "Tidy Otter"); for a passkey it is drawn now, so it is also the
+        name in the options' `user` (`name` too, unless a username is given) and
+        labels the passkey in the password manager. 409: the username is
         taken, now or by the time the ceremony finishes.
       requestBody:
         required: true
@@ -1242,7 +1244,8 @@ components:
           maxLength: 64
           description: |
             Optional; absent or blank gives the account a random English name
-            ("Adjective Animal", e.g. "Tidy Otter"), as every sign-up without one gets.
+            ("Adjective Animal", e.g. "Tidy Otter"), as every sign-up without one gets,
+            drawn when the ceremony begins so that it names the passkey too.
         gender: {$ref: "#/components/schemas/Gender"}
     Ceremony:
       type: object
