@@ -147,59 +147,71 @@ func (s *SignIn) ConfirmEmailCode(ctx context.Context, userID uuid.UUID, code st
 	if len(code) != MagicLinkCodeLength || strings.Trim(code, crockford) != "" {
 		return invalid("a confirmation code is %d characters of Crockford base32", MagicLinkCodeLength)
 	}
-	var link atrest.MagicLink
-	matched := false
-	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		q := s.q.WithTx(tx)
+	found, err := s.confirm(ctx, userID, func(q *db.Queries) (string, bool, error) {
 		row, err := s.keys.MagicLink(q.LockLiveEmailConfirmation(ctx, userID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			return "", false, nil
 		} else if err != nil {
-			return err
+			return "", false, err
 		}
 		if subtle.ConstantTimeCompare(row.CodeHash, s.linkCodeHash(row.TokenHash, code)) != 1 {
 			// Committed, so the count holds however the caller retries.
-			return q.RecordWrongMagicLinkCode(ctx, db.RecordWrongMagicLinkCodeParams{TokenHash: row.TokenHash, MaxWrong: maxWrongCodes})
+			return "", false, q.RecordWrongMagicLinkCode(ctx, db.RecordWrongMagicLinkCodeParams{TokenHash: row.TokenHash, MaxWrong: maxWrongCodes})
 		}
-		matched, link = true, row
-		return q.DeleteMagicLink(ctx, row.TokenHash)
+		return row.Email, true, q.DeleteMagicLink(ctx, row.TokenHash)
 	})
-	if err != nil {
-		return err
-	}
-	if !matched {
+	if err == nil && !found {
 		return errWrongConfirmationCode
 	}
-	return s.attachEmail(ctx, userID, link.Email)
+	return err
 }
 
 // ConfirmEmailLink adds the address with the confirmation link's token; only the
 // account that asked for it can use it.
 func (s *SignIn) ConfirmEmailLink(ctx context.Context, userID uuid.UUID, token string) error {
 	sum := sha256.Sum256([]byte(token))
-	link, err := s.keys.MagicLink(s.q.ConsumeEmailConfirmation(ctx, db.ConsumeEmailConfirmationParams{TokenHash: sum[:], UserID: userID}))
-	if errors.Is(err, pgx.ErrNoRows) {
+	found, err := s.confirm(ctx, userID, func(q *db.Queries) (string, bool, error) {
+		link, err := s.keys.MagicLink(q.ConsumeEmailConfirmation(ctx, db.ConsumeEmailConfirmationParams{TokenHash: sum[:], UserID: userID}))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return link.Email, err == nil, err
+	})
+	if err == nil && !found {
 		return errConfirmationLinkGone
-	} else if err != nil {
-		return err
 	}
-	return s.attachEmail(ctx, userID, link.Email)
+	return err
 }
 
-// attachEmail makes the confirmed address the account's e-mail sign-in, sealed and
-// keyed by its blind index as a magic-link sign-up stores it, in place of the
-// account's previous address, if any.
+// attachEmail makes a confirmed address the account's e-mail sign-in.
 func (s *SignIn) attachEmail(ctx context.Context, userID uuid.UUID, email string) error {
-	hash := s.keys.HashString(email)
+	_, err := s.confirm(ctx, userID, func(*db.Queries) (string, bool, error) { return email, true, nil })
+	return err
+}
+
+// confirm spends a confirmation (take returns its address, or found false when
+// there is none to spend, committing whatever take wrote) and, in the same
+// transaction, makes the address the account's e-mail sign-in, sealed and keyed by
+// its blind index as a magic-link sign-up stores it, in place of the account's
+// previous address, if any. A failure, a 409 included, leaves the confirmation
+// unspent.
+func (s *SignIn) confirm(ctx context.Context, userID uuid.UUID, take func(*db.Queries) (email string, found bool, err error)) (bool, error) {
+	found := false
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		// Serialises with RemoveEmail, whose check of the other ways to sign in
-		// would otherwise race this.
+		// would otherwise race this, and with other confirmations of the account.
 		if _, err := q.LockUser(ctx, userID); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
 		}
+		email, ok, err := take(q)
+		if err != nil || !ok {
+			return err
+		}
+		found = true
+		hash := s.keys.HashString(email)
 		existing, err := q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", SubjectHash: hash})
 		if err == nil {
 			if existing.UserID == userID {
@@ -216,9 +228,9 @@ func (s *SignIn) attachEmail(ctx context.Context, userID uuid.UUID, email string
 	})
 	if repository.IsUniqueViolation(err, "") {
 		// Another account took the address at the same moment.
-		return errEmailTaken
+		return found, errEmailTaken
 	}
-	return err
+	return found, err
 }
 
 // RemoveEmail removes the account's e-mail sign-in, unless it is the only way the

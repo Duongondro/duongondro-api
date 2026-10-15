@@ -802,7 +802,8 @@ paths:
         link. A wrong, expired, used or replaced code or token is 400, as is one
         mailed before a server restart (ask for a new mail). 409: another account
         signs in with this address (the mail proved this person controls it, so
-        saying so reveals nothing to them).
+        saying so reveals nothing to them). A 409 or a server error leaves the code
+        or link unspent.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true

@@ -212,6 +212,35 @@ func TestAddEmailOfAnotherAccount(t *testing.T) {
 	}
 }
 
+// Spending the code and attaching the address are one transaction: when the
+// attach fails (here a 409, as a transient error would), the code stays usable.
+func TestFailedAttachKeepsTheCode(t *testing.T) {
+	f := setup(t)
+	s, _, _, mailer := f.signInWith()
+	ctx := t.Context()
+	ana, bo := f.user(), f.user()
+	if err := s.attachEmail(ctx, bo.ID, "shared@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RequestEmailConfirmation(ctx, ana.ID, "shared@example.com", confirmBase); err != nil {
+		t.Fatal(err)
+	}
+	code, token := confirmMail(t, mailer, "shared@example.com")
+	if err := s.ConfirmEmailCode(ctx, ana.ID, code); !isConflict(err) {
+		t.Fatalf("by code: %v", err)
+	}
+	if err := s.ConfirmEmailLink(ctx, ana.ID, token); !isConflict(err) {
+		t.Fatalf("by link: %v", err)
+	}
+	f.passkey(bo.ID)
+	if err := s.RemoveEmail(ctx, bo.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmEmailCode(ctx, ana.ID, code); err != nil || emailOf(t, s, ana.ID) != "shared@example.com" {
+		t.Fatalf("the code after a failed attach: %v", err)
+	}
+}
+
 // A second confirmed address replaces the first, which no longer signs in.
 func TestReplaceEmail(t *testing.T) {
 	f := setup(t)
