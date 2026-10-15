@@ -58,21 +58,21 @@ code.
 
 const confirmSubject = "Confirm your e-mail for Duongöndro"
 
-const confirmBody = `Tap the link on your phone to confirm this address for your Duongöndro account,
-so you can sign in with it:
-
-%s
-
-Or type this code in the app:
+// confirmBody carries only the code: the 0.4 apps do not open the confirmation
+// link (/m/e#<token>; iOS ignores it, Android takes it for a sign-in link and
+// fails), so the mail leaves it out until they do. The server still accepts the
+// token (POST /api/me/email/verify).
+const confirmBody = `To confirm this address for your Duongöndro account, so you can sign in with
+it, type this code in the app:
 
     %s
 
-They work once, for 15 minutes, and only until you ask for another mail. If you
+It works once, for 15 minutes, and only until you ask for another mail. If you
 did not ask for this one, ignore it; nobody can add this address to an account
-without the link or the code.
+without the code.
 `
 
-func (s *SMTP) message(to, subject, body, link, code string) (*gomail.Msg, error) {
+func (s *SMTP) message(to, subject, text string) (*gomail.Msg, error) {
 	m := gomail.NewMsg(gomail.WithEncoding(gomail.EncodingQP), gomail.WithCharset(gomail.CharsetUTF8))
 	if err := m.From(s.From); err != nil {
 		return nil, fmt.Errorf("mail from: %w", err)
@@ -81,22 +81,22 @@ func (s *SMTP) message(to, subject, body, link, code string) (*gomail.Msg, error
 		return nil, fmt.Errorf("mail to: %w", err)
 	}
 	m.Subject(subject)
-	m.SetBodyString(gomail.TypeTextPlain, fmt.Sprintf(body, link, code))
+	m.SetBodyString(gomail.TypeTextPlain, text)
 	return m, nil
 }
 
 func (s *SMTP) SendMagicLink(ctx context.Context, to, link, code string) error {
-	return s.deliver(ctx, to, subject, body, link, code)
+	return s.deliver(ctx, to, subject, fmt.Sprintf(body, link, code))
 }
 
-// SendEmailConfirmation mails the link and code that add the address to an
-// existing account (POST /api/me/email), in the sign-in mail's format.
+// SendEmailConfirmation mails the code that adds the address to an existing
+// account (POST /api/me/email); the link is left out for now (confirmBody).
 func (s *SMTP) SendEmailConfirmation(ctx context.Context, to, link, code string) error {
-	return s.deliver(ctx, to, confirmSubject, confirmBody, link, code)
+	return s.deliver(ctx, to, confirmSubject, fmt.Sprintf(confirmBody, code))
 }
 
-func (s *SMTP) deliver(ctx context.Context, to, subject, body, link, code string) error {
-	m, err := s.message(to, subject, body, link, code)
+func (s *SMTP) deliver(ctx context.Context, to, subject, text string) error {
+	m, err := s.message(to, subject, text)
 	if err != nil {
 		return err
 	}

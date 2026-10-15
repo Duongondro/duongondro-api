@@ -55,9 +55,14 @@ func TestSendEmailConfirmation(t *testing.T) {
 	}
 	_, encoded, _ := strings.Cut(raw.String(), "\r\n\r\n")
 	text, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(encoded)))
-	if err != nil || !strings.Contains(string(text), link) || !strings.Contains(string(text), "7K2M Q9XA") ||
-		!strings.Contains(string(text), "confirm this address for your Duongöndro account") {
-		t.Fatalf("body lacks the link, code or wording (%v):\n%s", err, text)
+	body := strings.ReplaceAll(string(text), "\r\n", "\n")
+	if err != nil || !strings.Contains(body, "confirm this address for your Duongöndro account") ||
+		!strings.Contains(body, "type this code in the app:\n\n    7K2M Q9XA\n") {
+		t.Fatalf("body lacks the code or wording (%v):\n%s", err, body)
+	}
+	// No 0.4 app opens the link, so the mail does not offer it yet.
+	if strings.Contains(body, link) || strings.Contains(body, "#TOKEN") || strings.Contains(body, "http") {
+		t.Fatalf("the confirmation mail offers a link:\n%s", body)
 	}
 }
 

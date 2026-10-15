@@ -754,11 +754,13 @@ paths:
       operationId: requestEmailConfirmation
       description: |
         Starts adding an e-mail address to this account, as a second way to sign in
-        (by magic link). Mails the address a single-use confirmation link (15
-        minutes) and an 8-character code, shown as XXXX XXXX, that does the same when
-        typed into the app (POST /api/me/email/verify). The link is
+        (by magic link). Mails the address a single-use 8-character code (15
+        minutes), shown as XXXX XXXX, for typing into the app (POST
+        /api/me/email/verify). A confirmation link,
         `https://duongondro.app/m/e#<token>` (the sign-in link's base, with `/e`
-        before the fragment); the app opens it with this account's session.
+        before the fragment), for the app to open with this account's session, is
+        defined and accepted by verify, but the mail leaves it out until the apps
+        handle it.
         A newer mail for this account makes its older codes unusable, as does any
         newer mail to the address; older links still work until used or expired.
         The answer is the same whether or not another account uses the address,
