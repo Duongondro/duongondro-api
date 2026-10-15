@@ -240,6 +240,7 @@ type Ceremony struct {
 	UserID      *uuid.UUID
 	InviteID    *string
 	AdmissionID *uuid.UUID
+	SignUp      bool // a sign-up ceremony; false in rows from before open sign-up
 	CreatedAt   time.Time
 	Username    *string
 	DisplayName *string
@@ -251,7 +252,7 @@ func (k *Keys) Ceremony(r db.WebauthnSession, err error) (Ceremony, error) {
 		return Ceremony{}, err
 	}
 	row := IDRow(r.ID)
-	c := Ceremony{ID: r.ID, Data: r.Data, UserID: r.UserID, InviteID: r.InviteID, AdmissionID: r.AdmissionID, CreatedAt: r.CreatedAt}
+	c := Ceremony{ID: r.ID, Data: r.Data, UserID: r.UserID, InviteID: r.InviteID, AdmissionID: r.AdmissionID, SignUp: r.SignUp, CreatedAt: r.CreatedAt}
 	if c.Username, err = k.OpenOptional(WebauthnSessionsUsername, row, r.UsernameEncrypted); err != nil {
 		return Ceremony{}, err
 	}
@@ -323,6 +324,7 @@ type MagicLink struct {
 	Email       string
 	InviteID    *string
 	AdmissionID *uuid.UUID
+	SignUp      bool // requested as a sign-up; false in rows from before open sign-up
 	CodeHash    []byte
 	WrongCodes  int16
 	CodeDeadAt  *time.Time
@@ -334,7 +336,7 @@ func (k *Keys) MagicLink(r db.MagicLink, err error) (MagicLink, error) {
 		return MagicLink{}, err
 	}
 	email, err := k.OpenString(MagicLinksEmail, RowOf(r.TokenHash), r.EmailEncrypted)
-	return MagicLink{TokenHash: r.TokenHash, Email: email, InviteID: r.InviteID, AdmissionID: r.AdmissionID,
+	return MagicLink{TokenHash: r.TokenHash, Email: email, InviteID: r.InviteID, AdmissionID: r.AdmissionID, SignUp: r.SignUp,
 		CodeHash: r.CodeHash, WrongCodes: r.WrongCodes, CodeDeadAt: r.CodeDeadAt, CreatedAt: r.CreatedAt}, err
 }
 

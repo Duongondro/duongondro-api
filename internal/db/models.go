@@ -132,6 +132,7 @@ type MagicLink struct {
 	CodeDeadAt     *time.Time `json:"codeDeadAt"`
 	EmailEncrypted []byte     `json:"emailEncrypted"`
 	EmailHash      []byte     `json:"emailHash"`
+	SignUp         bool       `json:"signUp"`
 }
 
 type Nudge struct {
@@ -222,4 +223,5 @@ type WebauthnSession struct {
 	UsernameEncrypted    []byte     `json:"usernameEncrypted"`
 	DisplayNameEncrypted []byte     `json:"displayNameEncrypted"`
 	GenderEncrypted      []byte     `json:"genderEncrypted"`
+	SignUp               bool       `json:"signUp"`
 }

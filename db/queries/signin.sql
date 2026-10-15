@@ -19,8 +19,8 @@ DELETE FROM webauthn_sessions WHERE created_at <= now() - interval '5 minutes';
 -- name: CreateWebauthnSession :exec
 -- The id is drawn by the caller: the sealed profile is bound to it. data holds the
 -- challenge, relying party and account id only (no personal data), so it stays plain.
-INSERT INTO webauthn_sessions (id, data, user_id, invite_id, admission_id, username_encrypted, display_name_encrypted, gender_encrypted)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO webauthn_sessions (id, data, user_id, invite_id, admission_id, username_encrypted, display_name_encrypted, gender_encrypted, sign_up)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
@@ -50,7 +50,7 @@ DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes';
 SELECT count(*) FROM magic_links WHERE email_hash = $1 AND created_at > now() - interval '15 minutes';
 
 -- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash, sign_up) VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: KillMagicLinkCodes :exec
 -- A newer mail to the address makes the older codes unusable; their links still work.

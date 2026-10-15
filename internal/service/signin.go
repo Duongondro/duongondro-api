@@ -24,8 +24,9 @@ import (
 // SignIn holds the sign-in methods (design: From CodeShare › Sign-in). Three rules
 // hold across them:
 //
-//   - An account is created only with a valid invitation or an unused admission
-//     code: every method can sign in, none can sign up without one.
+//   - An account is created only with a valid invitation, an unused admission code,
+//     or, when the server allows open sign-up, by a request marked as a sign-up
+//     (opensignup.go): every method can sign in, none can sign up otherwise.
 //   - Signing in never grants keys: a new device still enrols from an existing one
 //     or the recovery code.
 //   - Linking is explicit: a method is added to an account only from a signed-in
@@ -43,6 +44,10 @@ type SignIn struct {
 	now    func() time.Time
 	// codeKey keys the hashes of magic-link codes; random per process, never stored.
 	codeKey []byte
+	// openSignUp allows sign-ups with neither invitation nor admission code
+	// (OPEN_SIGNUP); openLimit counts them per client address.
+	openSignUp bool
+	openLimit  *addressLimiter
 }
 
 // SignInConfig configures the sign-in methods. RPID is the passkey relying party
@@ -56,6 +61,9 @@ type SignInConfig struct {
 	Verifiers map[string]TokenVerifier
 	Mailer    Mailer
 	Apple     AppleRevoker
+	// OpenSignUp lets a request marked as a sign-up create an account without an
+	// invitation or admission code (OPEN_SIGNUP=true).
+	OpenSignUp bool
 }
 
 func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *Social, cfg SignInConfig) (*SignIn, error) {
@@ -72,7 +80,8 @@ func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *S
 		return nil, err
 	}
 	s := &SignIn{pool: pool, q: db.New(pool), keys: keys, auth: a, social: social, web: web, oidc: cfg.Verifiers,
-		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey}
+		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey,
+		openSignUp: cfg.OpenSignUp, openLimit: newAddressLimiter(OpenSignUpLimit, OpenSignUpWindow)}
 	if s.oidc == nil {
 		s.oidc = map[string]TokenVerifier{}
 	}
@@ -83,7 +92,7 @@ func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *S
 type Session struct {
 	Token   string
 	UserID  uuid.UUID
-	Created bool // a new account, made with an invitation or admission code
+	Created bool // a new account, made with an invitation, an admission code or by open sign-up
 }
 
 // InviteProof is the invitation a sign-up presents: its id and auth.
@@ -98,7 +107,8 @@ var ErrNoAccount = errors.New("no account uses this sign-in; an invitation is ne
 
 // createAccount makes a user (with id, when given) inside the caller's transaction:
 // a child of the inviter in the invite tree when g is an invite, a root (no inviter,
-// no friendship) when it is an admission code, which it spends. It locks the invite
+// no friendship) when it is an admission code, which it spends, or open (the caller
+// has let it through admitOpen). It locks the invite
 // or code and checks it is still live, so a revocation, the inviter's purge or
 // another sign-up with the same code since the first check stops the sign-up
 // (ErrNotFound) rather than slipping through.
@@ -120,6 +130,7 @@ func createAccount(ctx context.Context, q *db.Queries, g gate, id *uuid.UUID) (d
 		if err := spendAdmission(ctx, q, *g.admissionID); err != nil {
 			return db.User{}, err
 		}
+	case g.open:
 	default:
 		return db.User{}, ErrNoAccount
 	}
@@ -201,7 +212,7 @@ func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, u
 	id := uuid.NewV7()
 	row := atrest.IDRow(id)
 	return id, s.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{ID: id, Data: raw, UserID: userID,
-		InviteID: g.inviteID, AdmissionID: g.admissionID,
+		InviteID: g.inviteID, AdmissionID: g.admissionID, SignUp: g != (gate{}),
 		UsernameEncrypted:    s.keys.SealOptional(atrest.WebauthnSessionsUsername, row, profile.Username),
 		DisplayNameEncrypted: s.keys.SealOptional(atrest.WebauthnSessionsDisplayName, row, profile.DisplayName),
 		GenderEncrypted:      s.keys.SealOptional(atrest.WebauthnSessionsGender, row, profile.Gender)})
@@ -252,7 +263,8 @@ func (p SignUpProfile) clean() (SignUpProfile, error) {
 
 // BeginPasskeySignUp starts creating an account with a passkey; the invitation or
 // admission code is checked now and again when the ceremony finishes, and so is the
-// username, if the profile has one.
+// username, if the profile has one. An open sign-up checks the client address's
+// limit now and counts against it when it finishes.
 func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof, profile SignUpProfile) (Ceremony, error) {
 	profile, err := profile.clean()
 	if err != nil {
@@ -261,6 +273,9 @@ func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof, prof
 	g, err := s.checkProof(ctx, proof)
 	if err != nil {
 		return Ceremony{}, err
+	}
+	if g.open && !s.openLimit.allowed(clientAddress(ctx)) {
+		return Ceremony{}, ErrSignUpRateLimited
 	}
 	if profile.Username != nil {
 		if taken, err := s.q.UsernameTaken(ctx, s.keys.HashOptional(profile.Username)); err != nil {
@@ -360,6 +375,9 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 	if err != nil {
 		return Session{}, err
 	}
+	if err := s.admitOpen(ctx, g, true); err != nil {
+		return Session{}, err
+	}
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		if signUp {
@@ -391,10 +409,11 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 	return s.session(ctx, *row.UserID, true)
 }
 
-// ceremonyGate is the invite or admission code a sign-up ceremony began with; zero
-// for a sign-in or for adding a passkey.
+// ceremonyGate is the invite or admission code a sign-up ceremony began with, or
+// open for one with neither; zero for a sign-in or for adding a passkey.
 func ceremonyGate(row atrest.Ceremony) gate {
-	return gate{inviteID: row.InviteID, admissionID: row.AdmissionID}
+	return gate{inviteID: row.InviteID, admissionID: row.AdmissionID,
+		open: row.SignUp && row.InviteID == nil && row.AdmissionID == nil}
 }
 
 // BeginPasskeySignIn starts a discoverable sign-in: the phone offers its passkeys.

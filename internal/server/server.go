@@ -119,8 +119,18 @@ func New(pool *pgxpool.Pool, cfg Config) (*echo.Echo, *service.Nudges, error) {
 	serveWebsite(e, cfg.WebHosts, db.New(pool))
 	// Sign-in without any method; only in DEV builds.
 	registerDevSession(e, s.auth)
-	api.RegisterHandlers(e, api.NewStrictHandler(s, nil))
+	api.RegisterHandlers(e, api.NewStrictHandler(s, []api.StrictMiddlewareFunc{withClientAddress}))
 	return e, s.nudges, nil
+}
+
+// withClientAddress hands the service the client's address, as the IPExtractor above
+// reads it, for the open sign-up limit; it is never logged or stored.
+func withClientAddress(f api.StrictHandlerFunc, _ string) api.StrictHandlerFunc {
+	return func(c *echo.Context, request any) (any, error) {
+		r := c.Request()
+		c.SetRequest(r.WithContext(service.WithClientAddress(r.Context(), c.RealIP())))
+		return f(c, request)
+	}
 }
 
 // authenticate resolves the Authorization header to its user. ok is false for a
