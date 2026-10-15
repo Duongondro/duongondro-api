@@ -749,6 +749,77 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "409": {$ref: "#/components/responses/Conflict"}
+  /api/me/email:
+    post:
+      operationId: requestEmailConfirmation
+      description: |
+        Starts adding an e-mail address to this account, as a second way to sign in
+        (by magic link). Mails the address a single-use 8-character code (15
+        minutes), shown as XXXX XXXX, for typing into the app (POST
+        /api/me/email/verify). A confirmation link,
+        `https://duongondro.app/m/e#<token>` (the sign-in link's base, with `/e`
+        before the fragment), for the app to open with this account's session, is
+        defined and accepted by verify, but the mail leaves it out until the apps
+        handle it.
+        A newer mail for this account makes its older codes unusable, as does any
+        newer mail to the address; older links still work until used or expired.
+        The answer is the same whether or not another account uses the address,
+        which therefore is not revealed here (verifying tells, with 409). An address
+        this account already has is answered 204 without a mail. 429: three mails
+        per address per 15 minutes (sign-in mails included), five confirmation
+        requests per account an hour, or ten mails an hour from this client address
+        (confirmations and open magic-link sign-ups together).
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailRequest"}
+      responses:
+        "204": {description: Sent, or the account already has the address.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+    delete:
+      operationId: removeEmail
+      description: |
+        Removes this account's e-mail address; it no longer signs in. 409 when it is
+        the account's only way to sign in (no passkey, Apple or Google): add one
+        first. Removing an address the account does not have is a no-op. It ends no
+        session, not even those signed in with the address. 429 on this and
+        verify: more than 20 requests a minute to /api/me/email from this client
+        address.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /api/me/email/verify:
+    post:
+      operationId: confirmEmail
+      description: |
+        Confirms the address with the code from the mail, typed, or the link's token,
+        by the account that asked for it, and makes it this account's e-mail sign-in,
+        replacing the previous address, if any. A wrong code counts against the
+        newest confirmation mail's code; the fifth kills that code, though not its
+        link. A wrong, expired, used or replaced code or token is 400, as is one
+        mailed before a server restart (ask for a new mail). 409: another account
+        signs in with this address (the mail proved this person controls it, so
+        saying so reveals nothing to them). A 409 or a server error leaves the code
+        or link unspent. Replacing the address ends no session.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EmailConfirmation"}
+      responses:
+        "204": {description: The address now signs in to this account.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
 
   /api/devices/{deviceId}/push-token:
     put:
@@ -934,6 +1005,7 @@ components:
             random names were given one too. Empty only if the person cleared it.
         username: {type: string, description: "Absent until set; lowercase"}
         gender: {$ref: "#/components/schemas/Gender"}
+        email: {type: string, description: "The address that signs in by magic link; absent if none. Normalised (lower case)."}
         devices:
           type: array
           items: {$ref: "#/components/schemas/Device"}
@@ -1310,6 +1382,21 @@ components:
           description: |
             The 8 Crockford base32 characters from the mail. Read leniently: case,
             spaces and hyphens are ignored, O is read as 0 and I and L as 1.
+    EmailRequest:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, maxLength: 320}
+    EmailConfirmation:
+      type: object
+      description: Either code (typed) or token (from the link), not both.
+      properties:
+        code:
+          type: string
+          maxLength: 32
+          description: |
+            The 8 Crockford base32 characters from the mail, read as a sign-in code is.
+        token: {type: string, maxLength: 128}
     PushTokenInput:
       type: object
       required: [platform, token]

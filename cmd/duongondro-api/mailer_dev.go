@@ -20,3 +20,8 @@ func (stderrMailer) SendMagicLink(_ context.Context, to, link, code string) erro
 	_, err := fmt.Fprintf(os.Stderr, "DEV magic link for %s: %s (code %s)\n", to, link, code)
 	return err
 }
+
+func (stderrMailer) SendEmailConfirmation(_ context.Context, to, link, code string) error {
+	_, err := fmt.Fprintf(os.Stderr, "DEV e-mail confirmation for %s: %s (code %s)\n", to, link, code)
+	return err
+}

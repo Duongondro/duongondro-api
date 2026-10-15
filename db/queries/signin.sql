@@ -50,21 +50,26 @@ DELETE FROM magic_links WHERE created_at <= now() - interval '15 minutes';
 SELECT count(*) FROM magic_links WHERE email_hash = $1 AND created_at > now() - interval '15 minutes';
 
 -- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash, sign_up) VALUES ($1, $2, $3, $4, $5, $6, $7);
+-- With user_id, the mail confirms an address for that account (POST /api/me/email)
+-- and never signs in; without it, a sign-in or sign-up link.
+INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash, sign_up, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: KillMagicLinkCodes :exec
 -- A newer mail to the address makes the older codes unusable; their links still work.
 UPDATE magic_links SET code_dead_at = now() WHERE email_hash = $1 AND code_dead_at IS NULL;
 
 -- name: ConsumeMagicLink :one
+-- A sign-in link only: a confirmation (user_id set) never signs in.
 DELETE FROM magic_links
-WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
+WHERE token_hash = $1 AND user_id IS NULL AND created_at > now() - interval '15 minutes'
 RETURNING *;
 
 -- name: LockLiveMagicLinkForEmail :one
 -- The one live code to an address (a newer mail kills the older), for a typed code.
+-- Sign-in codes only: a confirmation's code is typed by its account instead.
 SELECT * FROM magic_links
-WHERE email_hash = $1 AND code_dead_at IS NULL AND code_hash IS NOT NULL
+WHERE email_hash = $1 AND user_id IS NULL AND code_dead_at IS NULL AND code_hash IS NOT NULL
     AND created_at > now() - interval '15 minutes'
 ORDER BY created_at DESC LIMIT 1
 FOR UPDATE;
@@ -91,10 +96,12 @@ SELECT id, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY
 SELECT provider, subject_hash, subject_encrypted, email_encrypted, created_at FROM auth_identities WHERE user_id = $1 ORDER BY created_at;
 
 -- name: ExportMagicLinks :many
+-- Unused links to the user's addresses, and the user's pending confirmations.
 SELECT magic_links.token_hash, magic_links.email_encrypted, magic_links.created_at FROM magic_links
-WHERE magic_links.email_hash IN (
+WHERE magic_links.user_id = sqlc.arg(user_id)::uuid OR magic_links.email_hash IN (
     SELECT auth_identities.email_hash FROM auth_identities
-    WHERE auth_identities.user_id = $1 AND auth_identities.email_hash IS NOT NULL);
+    WHERE auth_identities.user_id = sqlc.arg(user_id)::uuid AND auth_identities.email_hash IS NOT NULL)
+ORDER BY magic_links.created_at;
 
 -- name: DeleteWebauthnSessionsForUser :exec
 DELETE FROM webauthn_sessions WHERE user_id = $1;
@@ -112,3 +119,27 @@ DELETE FROM auth_nonces WHERE created_at <= now() - interval '10 minutes';
 -- Serialises magic-link requests for one address, so the per-address limit holds:
 -- the key is the first 8 bytes of the address's hash (atrest.LockKey).
 SELECT pg_advisory_xact_lock(sqlc.arg(key)::bigint);
+
+-- name: KillEmailConfirmationCodes :exec
+-- A newer confirmation mail for the account makes its older codes unusable.
+UPDATE magic_links SET code_dead_at = now() WHERE user_id = sqlc.arg(user_id)::uuid AND code_dead_at IS NULL;
+
+-- name: LockLiveEmailConfirmation :one
+-- The account's one live confirmation code, for a typed code.
+SELECT * FROM magic_links
+WHERE user_id = sqlc.arg(user_id)::uuid AND code_dead_at IS NULL AND code_hash IS NOT NULL
+    AND created_at > now() - interval '15 minutes'
+ORDER BY created_at DESC LIMIT 1
+FOR UPDATE;
+
+-- name: ConsumeEmailConfirmation :one
+-- A confirmation link, only by the account it was asked for.
+DELETE FROM magic_links
+WHERE token_hash = sqlc.arg(token_hash) AND user_id = sqlc.arg(user_id)::uuid AND created_at > now() - interval '15 minutes'
+RETURNING *;
+
+-- name: DeleteEmailIdentities :execrows
+DELETE FROM auth_identities WHERE user_id = $1 AND provider = 'email';
+
+-- name: CountCredentials :one
+SELECT count(*) FROM credentials WHERE user_id = $1;

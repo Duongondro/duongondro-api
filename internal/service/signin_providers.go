@@ -28,9 +28,24 @@ type TokenVerifier interface {
 }
 
 // Mailer sends the magic-link mail (SMTP through Brevo in production): the link, and
-// the code to type instead, grouped as XXXX XXXX.
+// the code to type instead, grouped as XXXX XXXX; and, in the same format, the mail
+// that confirms an address added to an existing account.
 type Mailer interface {
 	SendMagicLink(ctx context.Context, to, link, code string) error
+	SendEmailConfirmation(ctx context.Context, to, link, code string) error
+}
+
+// mailFailure is what a failed mail may log: the mailer's status (internal/mail's
+// Error.MailStatus), never the error's text, which can quote the address (a relay
+// rejecting RCPT TO does).
+func mailFailure(err error) string {
+	if s, ok := errors.AsType[interface {
+		error
+		MailStatus() string
+	}](err); ok {
+		return s.MailStatus()
+	}
+	return "unclassified"
 }
 
 // AppleRevoker turns Sign in with Apple's authorization code into a refresh token,
@@ -362,7 +377,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := s.mailer.SendMagicLink(ctx, email, linkBase+token, FormatCode(code)); err != nil {
-			slog.WarnContext(ctx, "Sending a magic link failed", "error", err.Error())
+			slog.WarnContext(ctx, "Sending a magic link failed", "status", mailFailure(err))
 		}
 	}()
 	return nil

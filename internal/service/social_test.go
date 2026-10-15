@@ -271,6 +271,13 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		EmailEncrypted: f.keys.SealString(atrest.MagicLinksEmail, atrest.RowOf(linkHash), email), EmailHash: hash}); err != nil {
 		f.t.Fatal(err)
 	}
+	// A pending confirmation of another address for ana (POST /api/me/email).
+	pending, confirmHash := "ana.next@example.com", random(32)
+	if err := f.q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: confirmHash,
+		EmailEncrypted: f.keys.SealString(atrest.MagicLinksEmail, atrest.RowOf(confirmHash), pending),
+		EmailHash:      f.keys.HashString(pending), CodeHash: random(32), UserID: &ana.ID}); err != nil {
+		f.t.Fatal(err)
+	}
 	ceremony := uuid.NewV7()
 	if err := f.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{ID: ceremony, Data: []byte(`{}`), UserID: &ana.ID,
 		DisplayNameEncrypted: f.keys.SealString(atrest.WebauthnSessionsDisplayName, atrest.IDRow(ceremony), "Ana mid-ceremony")}); err != nil {
@@ -370,9 +377,9 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 		}
 	}
 	var links int
-	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links WHERE email_hash = $1`, f.keys.HashString("ana@example.com")).Scan(&links)
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links`).Scan(&links)
 	if links != 0 {
-		t.Errorf("%d unused magic links to the purged address remain", links)
+		t.Errorf("%d unused magic links or confirmations remain", links)
 	}
 	var named int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username_hash = $1`, f.keys.HashString("ana")).Scan(&named)

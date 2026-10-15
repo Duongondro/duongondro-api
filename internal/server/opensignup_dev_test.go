@@ -33,7 +33,8 @@ func (echoVerifier) Verify(_ context.Context, raw string) (oidc.Claims, error) {
 
 type nullMailer struct{}
 
-func (nullMailer) SendMagicLink(context.Context, string, string, string) error { return nil }
+func (nullMailer) SendMagicLink(context.Context, string, string, string) error         { return nil }
+func (nullMailer) SendEmailConfirmation(context.Context, string, string, string) error { return nil }
 
 func newSignUpServer(t *testing.T, schema string) *echo.Echo {
 	t.Helper()

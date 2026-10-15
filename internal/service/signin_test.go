@@ -118,6 +118,13 @@ func (m *fakeMailer) SendMagicLink(_ context.Context, to, link, code string) err
 	return nil
 }
 
+// SendEmailConfirmation records a confirmation like a sign-in mail; its link's
+// /m/e# tells them apart.
+func (m *fakeMailer) SendEmailConfirmation(_ context.Context, to, link, code string) error {
+	m.sent <- to + " " + code + " " + link
+	return nil
+}
+
 type fakeApple struct{ revoked []string }
 
 func (a *fakeApple) Exchange(_ context.Context, code string) (string, error) {

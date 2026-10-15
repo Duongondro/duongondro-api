@@ -25,6 +25,10 @@ var authRateLimit = RateLimit{Requests: 20, Per: time.Minute}
 // otherwise let an account probe which usernames exist.
 var profileRateLimit = RateLimit{Requests: 10, Per: time.Minute}
 
+// emailRateLimit covers adding and removing an e-mail address, beside the
+// service's per-account and per-address mail limits and the code's five guesses.
+var emailRateLimit = RateLimit{Requests: 20, Per: time.Minute}
+
 // downloadRateLimit covers the website's download count beacon: a person clicks
 // the button a few times at most.
 var downloadRateLimit = RateLimit{Requests: 10, Per: time.Minute}

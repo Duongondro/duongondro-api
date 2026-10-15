@@ -133,6 +133,7 @@ type MagicLink struct {
 	EmailEncrypted []byte     `json:"emailEncrypted"`
 	EmailHash      []byte     `json:"emailHash"`
 	SignUp         bool       `json:"signUp"`
+	UserID         *uuid.UUID `json:"userId"`
 }
 
 type Nudge struct {

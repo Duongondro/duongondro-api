@@ -12,12 +12,44 @@ import (
 	"uuid"
 )
 
-const consumeMagicLink = `-- name: ConsumeMagicLink :one
+const consumeEmailConfirmation = `-- name: ConsumeEmailConfirmation :one
 DELETE FROM magic_links
-WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up
+WHERE token_hash = $1 AND user_id = $2::uuid AND created_at > now() - interval '15 minutes'
+RETURNING token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up, user_id
 `
 
+type ConsumeEmailConfirmationParams struct {
+	TokenHash []byte    `json:"tokenHash"`
+	UserID    uuid.UUID `json:"userId"`
+}
+
+// A confirmation link, only by the account it was asked for.
+func (q *Queries) ConsumeEmailConfirmation(ctx context.Context, arg ConsumeEmailConfirmationParams) (MagicLink, error) {
+	row := q.db.QueryRow(ctx, consumeEmailConfirmation, arg.TokenHash, arg.UserID)
+	var i MagicLink
+	err := row.Scan(
+		&i.TokenHash,
+		&i.InviteID,
+		&i.CreatedAt,
+		&i.AdmissionID,
+		&i.CodeHash,
+		&i.WrongCodes,
+		&i.CodeDeadAt,
+		&i.EmailEncrypted,
+		&i.EmailHash,
+		&i.SignUp,
+		&i.UserID,
+	)
+	return i, err
+}
+
+const consumeMagicLink = `-- name: ConsumeMagicLink :one
+DELETE FROM magic_links
+WHERE token_hash = $1 AND user_id IS NULL AND created_at > now() - interval '15 minutes'
+RETURNING token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up, user_id
+`
+
+// A sign-in link only: a confirmation (user_id set) never signs in.
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
 	row := q.db.QueryRow(ctx, consumeMagicLink, tokenHash)
 	var i MagicLink
@@ -32,6 +64,7 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 		&i.EmailEncrypted,
 		&i.EmailHash,
 		&i.SignUp,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -69,6 +102,17 @@ func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (Web
 		&i.SignUp,
 	)
 	return i, err
+}
+
+const countCredentials = `-- name: CountCredentials :one
+SELECT count(*) FROM credentials WHERE user_id = $1
+`
+
+func (q *Queries) CountCredentials(ctx context.Context, userID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countCredentials, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countRecentMagicLinks = `-- name: CountRecentMagicLinks :one
@@ -126,7 +170,8 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 }
 
 const createMagicLink = `-- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash, sign_up) VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash, sign_up, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateMagicLinkParams struct {
@@ -137,8 +182,11 @@ type CreateMagicLinkParams struct {
 	AdmissionID    *uuid.UUID `json:"admissionId"`
 	CodeHash       []byte     `json:"codeHash"`
 	SignUp         bool       `json:"signUp"`
+	UserID         *uuid.UUID `json:"userId"`
 }
 
+// With user_id, the mail confirms an address for that account (POST /api/me/email)
+// and never signs in; without it, a sign-in or sign-up link.
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
 	_, err := q.db.Exec(ctx, createMagicLink,
 		arg.TokenHash,
@@ -148,6 +196,7 @@ func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams
 		arg.AdmissionID,
 		arg.CodeHash,
 		arg.SignUp,
+		arg.UserID,
 	)
 	return err
 }
@@ -213,6 +262,18 @@ func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnS
 		arg.SignUp,
 	)
 	return err
+}
+
+const deleteEmailIdentities = `-- name: DeleteEmailIdentities :execrows
+DELETE FROM auth_identities WHERE user_id = $1 AND provider = 'email'
+`
+
+func (q *Queries) DeleteEmailIdentities(ctx context.Context, userID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteEmailIdentities, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteMagicLink = `-- name: DeleteMagicLink :exec
@@ -315,9 +376,10 @@ func (q *Queries) ExportIdentities(ctx context.Context, userID uuid.UUID) ([]Exp
 
 const exportMagicLinks = `-- name: ExportMagicLinks :many
 SELECT magic_links.token_hash, magic_links.email_encrypted, magic_links.created_at FROM magic_links
-WHERE magic_links.email_hash IN (
+WHERE magic_links.user_id = $1::uuid OR magic_links.email_hash IN (
     SELECT auth_identities.email_hash FROM auth_identities
-    WHERE auth_identities.user_id = $1 AND auth_identities.email_hash IS NOT NULL)
+    WHERE auth_identities.user_id = $1::uuid AND auth_identities.email_hash IS NOT NULL)
+ORDER BY magic_links.created_at
 `
 
 type ExportMagicLinksRow struct {
@@ -326,6 +388,7 @@ type ExportMagicLinksRow struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
+// Unused links to the user's addresses, and the user's pending confirmations.
 func (q *Queries) ExportMagicLinks(ctx context.Context, userID uuid.UUID) ([]ExportMagicLinksRow, error) {
 	rows, err := q.db.Query(ctx, exportMagicLinks, userID)
 	if err != nil {
@@ -380,6 +443,16 @@ func (q *Queries) InviterOf(ctx context.Context, id string) (uuid.UUID, error) {
 	var inviter_id uuid.UUID
 	err := row.Scan(&inviter_id)
 	return inviter_id, err
+}
+
+const killEmailConfirmationCodes = `-- name: KillEmailConfirmationCodes :exec
+UPDATE magic_links SET code_dead_at = now() WHERE user_id = $1::uuid AND code_dead_at IS NULL
+`
+
+// A newer confirmation mail for the account makes its older codes unusable.
+func (q *Queries) KillEmailConfirmationCodes(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, killEmailConfirmationCodes, userID)
+	return err
 }
 
 const killMagicLinkCodes = `-- name: KillMagicLinkCodes :exec
@@ -466,15 +539,44 @@ func (q *Queries) LockEmail(ctx context.Context, key int64) error {
 	return err
 }
 
+const lockLiveEmailConfirmation = `-- name: LockLiveEmailConfirmation :one
+SELECT token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up, user_id FROM magic_links
+WHERE user_id = $1::uuid AND code_dead_at IS NULL AND code_hash IS NOT NULL
+    AND created_at > now() - interval '15 minutes'
+ORDER BY created_at DESC LIMIT 1
+FOR UPDATE
+`
+
+// The account's one live confirmation code, for a typed code.
+func (q *Queries) LockLiveEmailConfirmation(ctx context.Context, userID uuid.UUID) (MagicLink, error) {
+	row := q.db.QueryRow(ctx, lockLiveEmailConfirmation, userID)
+	var i MagicLink
+	err := row.Scan(
+		&i.TokenHash,
+		&i.InviteID,
+		&i.CreatedAt,
+		&i.AdmissionID,
+		&i.CodeHash,
+		&i.WrongCodes,
+		&i.CodeDeadAt,
+		&i.EmailEncrypted,
+		&i.EmailHash,
+		&i.SignUp,
+		&i.UserID,
+	)
+	return i, err
+}
+
 const lockLiveMagicLinkForEmail = `-- name: LockLiveMagicLinkForEmail :one
-SELECT token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up FROM magic_links
-WHERE email_hash = $1 AND code_dead_at IS NULL AND code_hash IS NOT NULL
+SELECT token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash, sign_up, user_id FROM magic_links
+WHERE email_hash = $1 AND user_id IS NULL AND code_dead_at IS NULL AND code_hash IS NOT NULL
     AND created_at > now() - interval '15 minutes'
 ORDER BY created_at DESC LIMIT 1
 FOR UPDATE
 `
 
 // The one live code to an address (a newer mail kills the older), for a typed code.
+// Sign-in codes only: a confirmation's code is typed by its account instead.
 func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, emailHash []byte) (MagicLink, error) {
 	row := q.db.QueryRow(ctx, lockLiveMagicLinkForEmail, emailHash)
 	var i MagicLink
@@ -489,6 +591,7 @@ func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, emailHash []byt
 		&i.EmailEncrypted,
 		&i.EmailHash,
 		&i.SignUp,
+		&i.UserID,
 	)
 	return i, err
 }
