@@ -3,6 +3,7 @@ package mail
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime/quotedprintable"
 	"strings"
@@ -73,5 +74,24 @@ func TestBadAddressIsRefused(t *testing.T) {
 	}}
 	if err := s.SendMagicLink(t.Context(), "not an address", "x", "y"); err == nil {
 		t.Fatal("no error")
+	}
+}
+
+// A failure never carries the relay's text or the parser's, which can quote the
+// address; only what MailStatus describes.
+func TestErrorsOmitTheAddress(t *testing.T) {
+	s := &SMTP{From: "sign-in@duongondro.app", send: func(context.Context, *gomail.Msg) error {
+		return errors.New("550 5.1.1 <secret.person@example.com>: Recipient address rejected")
+	}}
+	for _, to := range []string{"secret.person@example.com", "secret.person@example.com <secret.person@"} {
+		err := s.SendEmailConfirmation(t.Context(), to, "x", "7K2M Q9XA")
+		var me *Error
+		if !errors.As(err, &me) || strings.Contains(err.Error(), "secret.person") || strings.Contains(me.MailStatus(), "secret.person") {
+			t.Fatalf("%q: %v", to, err)
+		}
+	}
+	err := s.SendMagicLink(t.Context(), "secret.person@example.com", "x", "y")
+	if err == nil || strings.Contains(err.Error(), "secret.person") {
+		t.Fatalf("magic link: %v", err)
 	}
 }

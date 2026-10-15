@@ -5,7 +5,9 @@ package mail
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	gomail "github.com/wneessen/go-mail"
@@ -95,13 +97,55 @@ func (s *SMTP) SendEmailConfirmation(ctx context.Context, to, link, code string)
 	return s.deliver(ctx, to, confirmSubject, fmt.Sprintf(confirmBody, code))
 }
 
+// Error is a failed delivery reduced to what may be logged. The relay's reply
+// text (a rejected RCPT quotes the recipient) and the parser's errors can carry
+// the address, so neither is kept: only the stage, the SMTP reply code and
+// enhanced status, and go-mail's fixed reason.
+type Error struct {
+	Stage     string // "recipient" (the address did not parse), "network", "timeout" or "send"
+	Reason    string // go-mail's fixed reason, such as "failed to set RCPT TO address"
+	Code      int    // the relay's SMTP reply code; 0 if it gave none
+	Enhanced  string // the relay's enhanced status code (RFC 2034), if any
+	Temporary bool
+}
+
+func (e *Error) Error() string { return "smtp: " + e.MailStatus() }
+
+// MailStatus describes the failure without the relay's text or the address.
+func (e *Error) MailStatus() string {
+	out := e.Stage
+	if e.Reason != "" {
+		out += ": " + e.Reason
+	}
+	if e.Code != 0 {
+		out += fmt.Sprintf(" (%d %s)", e.Code, e.Enhanced)
+	}
+	if e.Temporary {
+		out += ", temporary"
+	}
+	return out
+}
+
+func classify(err error) *Error {
+	if se, ok := errors.AsType[*gomail.SendError](err); ok {
+		return &Error{Stage: "send", Reason: se.Reason.String(), Code: se.ErrorCode(), Enhanced: se.EnhancedStatusCode(), Temporary: se.IsTemp()}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &Error{Stage: "timeout", Temporary: true}
+	}
+	if _, ok := errors.AsType[net.Error](err); ok {
+		return &Error{Stage: "network", Temporary: true}
+	}
+	return &Error{Stage: "send"}
+}
+
 func (s *SMTP) deliver(ctx context.Context, to, subject, text string) error {
 	m, err := s.message(to, subject, text)
 	if err != nil {
-		return err
+		return &Error{Stage: "recipient"}
 	}
 	if err := s.send(ctx, m); err != nil {
-		return fmt.Errorf("smtp: %w", err)
+		return classify(err)
 	}
 	return nil
 }

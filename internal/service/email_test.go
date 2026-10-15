@@ -475,11 +475,15 @@ func TestEmailExportAndPurge(t *testing.T) {
 	}
 }
 
-// failingMailer fails every send, so the warning is logged.
-type failingMailer struct{ fakeMailer }
+// failingMailer fails every send as a relay rejecting the recipient does, quoting
+// the address, so the warning is logged.
+type failingMailer struct{}
 
-func (failingMailer) SendEmailConfirmation(context.Context, string, string, string) error {
-	return errors.New("relay refused")
+func (failingMailer) SendMagicLink(_ context.Context, to, _, _ string) error {
+	return errors.New("550 5.1.1 <" + to + ">: Recipient address rejected")
+}
+func (failingMailer) SendEmailConfirmation(_ context.Context, to, _, _ string) error {
+	return errors.New("550 5.1.1 <" + to + ">: Recipient address rejected")
 }
 
 // The address is never stored or logged in clear: not in any row (as text or hex
@@ -508,6 +512,19 @@ func TestEmailNeverInClear(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(logs.String()), "secret.person") {
 		t.Fatalf("the address was logged: %s", logs.String())
+	}
+	// The sign-in mail's failure, too.
+	if err := s.attachEmail(ctx, ana.ID, "other.person@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RequestMagicLink(ctx, "other.person@example.com", nil, signInBase); err != nil {
+		t.Fatal(err)
+	}
+	for !strings.Contains(logs.String(), "Sending a magic link failed") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(logs.String(), "Sending a magic link failed") || strings.Contains(logs.String(), "other.person") {
+		t.Fatalf("the sign-in mail's failure: %s", logs.String())
 	}
 	// Confirm it, through the row directly, as no code was mailed.
 	if err := s.attachEmail(ctx, ana.ID, addr); err != nil {

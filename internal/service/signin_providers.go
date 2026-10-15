@@ -35,6 +35,19 @@ type Mailer interface {
 	SendEmailConfirmation(ctx context.Context, to, link, code string) error
 }
 
+// mailFailure is what a failed mail may log: the mailer's status (internal/mail's
+// Error.MailStatus), never the error's text, which can quote the address (a relay
+// rejecting RCPT TO does).
+func mailFailure(err error) string {
+	if s, ok := errors.AsType[interface {
+		error
+		MailStatus() string
+	}](err); ok {
+		return s.MailStatus()
+	}
+	return "unclassified"
+}
+
 // AppleRevoker turns Sign in with Apple's authorization code into a refresh token,
 // and revokes it when the account is deleted, as Apple requires.
 type AppleRevoker interface {
@@ -364,7 +377,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := s.mailer.SendMagicLink(ctx, email, linkBase+token, FormatCode(code)); err != nil {
-			slog.WarnContext(ctx, "Sending a magic link failed", "error", err.Error())
+			slog.WarnContext(ctx, "Sending a magic link failed", "status", mailFailure(err))
 		}
 	}()
 	return nil

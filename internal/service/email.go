@@ -133,7 +133,7 @@ func (s *SignIn) RequestEmailConfirmation(ctx context.Context, userID uuid.UUID,
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := s.mailer.SendEmailConfirmation(ctx, email, linkBase+token, FormatCode(code)); err != nil {
-			slog.WarnContext(ctx, "Sending an e-mail confirmation failed", "error", err.Error())
+			slog.WarnContext(ctx, "Sending an e-mail confirmation failed", "status", mailFailure(err))
 		}
 	}()
 	return nil
