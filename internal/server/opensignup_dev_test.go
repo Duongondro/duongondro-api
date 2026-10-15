@@ -3,8 +3,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,4 +140,25 @@ func google(t *testing.T, e *echo.Echo, subject string, extra map[string]any) *h
 		body[k] = v
 	}
 	return serve(t, e, http.MethodPost, "/api/auth/providers/google", "", body)
+}
+
+// No log line carries the client's address, sign-ups included.
+func TestRequestLogHasNoAddress(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	e := newSignUpServer(t, "server_log_tests", true)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkeys/sign-up", strings.NewReader(`{"signUp":true,"consent":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.200")
+	req.RemoteAddr = "127.0.0.1:41000"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(buf.String(), "REQUEST") {
+		t.Fatalf("%d, log %q", rec.Code, buf.String())
+	}
+	if strings.Contains(buf.String(), "203.0.113.200") || strings.Contains(buf.String(), "127.0.0.1") || strings.Contains(buf.String(), "remote_ip") {
+		t.Fatalf("the log carries the address: %s", buf.String())
+	}
 }
