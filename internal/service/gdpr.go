@@ -51,7 +51,7 @@ type Export struct {
 	Blocks             []db.Block                   `json:"blocks"`
 	Reports            []atrest.Report              `json:"reports"`
 	Streaks            []atrest.Streak              `json:"streaks"`
-	Credentials        []db.ExportCredentialsRow    `json:"credentials"`
+	Credentials        []atrest.ExportCredential    `json:"credentials"`
 	AuthIdentities     []atrest.ExportIdentity      `json:"auth_identities"`
 	MagicLinks         []atrest.ExportMagicLink     `json:"magic_links"`
 	WebauthnSessions   []string                     `json:"webauthn_sessions"`
@@ -140,7 +140,7 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		if out.Streaks, err = sortStreaks(k.Streaks(q.OwnStreaks(ctx, userID))); err != nil {
 			return err
 		}
-		if out.Credentials, err = q.ExportCredentials(ctx, userID); err != nil {
+		if out.Credentials, err = k.ExportCredentials(q.ExportCredentials(ctx, userID)); err != nil {
 			return err
 		}
 		if out.AuthIdentities, err = k.ExportIdentities(q.ExportIdentities(ctx, userID)); err != nil {

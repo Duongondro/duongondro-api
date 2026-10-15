@@ -705,6 +705,53 @@ paths:
         "204": {description: Added.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/credentials:
+    get:
+      operationId: listPasskeys
+      description: |
+        The account's passkeys, oldest first, for Settings › Passkeys (design decision
+        25). No key material: a name if the person gave one, the authenticator's AAGUID
+        (the app names the passkey after its password manager), when it was added and
+        last used, and whether this session signed in with it.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Passkeys.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PasskeyList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/credentials/{credentialId}:
+    patch:
+      operationId: renamePasskey
+      description: Names a passkey, or clears its name (null or blank). The name is encrypted at rest.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasskeyRename"}
+      responses:
+        "204": {description: Renamed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      operationId: deletePasskey
+      description: |
+        Removes a passkey and ends every session it signed in with, this one included
+        if it did. 409 when it is the account's last way to sign in (no other passkey
+        and no e-mail). The passkey stays in the password manager.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /api/me/identities/{provider}:
     post:
       operationId: linkProvider
@@ -815,6 +862,12 @@ components:
       in: path
       required: true
       schema: {$ref: "#/components/schemas/UUID"}
+    CredentialId:
+      name: credentialId
+      in: path
+      required: true
+      description: The passkey's credential id, base64url without padding.
+      schema: {type: string, minLength: 1, maxLength: 1400}
     Provider:
       name: provider
       in: path
@@ -1192,6 +1245,28 @@ components:
           description: "3 to 32 of a-z, 0-9, dot and underscore; stored lowercased, unique regardless of case"
         displayName: {type: string, maxLength: 64}
         gender: {$ref: "#/components/schemas/Gender"}
+    Passkey:
+      type: object
+      required: [id, createdAt, current]
+      properties:
+        id: {type: string, description: "Credential id, base64url without padding"}
+        name: {type: string, description: Absent when the person has not named it}
+        aaguid: {type: string, description: "The authenticator's AAGUID, absent when it gave none (all zeros)"}
+        createdAt: {type: string, format: date-time}
+        lastUsedAt: {type: string, format: date-time}
+        current: {type: boolean, description: This session signed in with this passkey, so removing it signs this phone out}
+    PasskeyList:
+      type: object
+      required: [passkeys]
+      properties:
+        passkeys:
+          type: array
+          items: {$ref: "#/components/schemas/Passkey"}
+    PasskeyRename:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, nullable: true, maxLength: 256}
     Ceremony:
       type: object
       required: [sessionId, options]

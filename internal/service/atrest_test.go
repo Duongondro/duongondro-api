@@ -26,6 +26,7 @@ var plainColumns = map[string]string{
 	"auth_identities.provider":     "enum: apple, google, email",
 	"auth_nonces.nonce_hash":       "SHA-256 of a sign-in nonce",
 	"credentials.id":               "a passkey's credential id: random, from the authenticator, and the lookup key",
+	"sessions.credential_id":       "the passkey a session signed in with: a link to a random credential id",
 	"device_lists.signature":       "Ed25519 signature; reveals nothing without the sealed payload",
 	"devices.tier":                 "enum: hardware, tee, software",
 	"downloads.platform":           "enum: android",

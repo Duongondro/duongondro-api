@@ -27,16 +27,17 @@ func (q *Queries) BindSessionDevice(ctx context.Context, arg BindSessionDevicePa
 }
 
 const createSession = `-- name: CreateSession :exec
-INSERT INTO sessions (token_hash, user_id) VALUES ($1, $2)
+INSERT INTO sessions (token_hash, user_id, credential_id) VALUES ($1, $2, $3)
 `
 
 type CreateSessionParams struct {
-	TokenHash []byte    `json:"tokenHash"`
-	UserID    uuid.UUID `json:"userId"`
+	TokenHash    []byte    `json:"tokenHash"`
+	UserID       uuid.UUID `json:"userId"`
+	CredentialID []byte    `json:"credentialId"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
-	_, err := q.db.Exec(ctx, createSession, arg.TokenHash, arg.UserID)
+	_, err := q.db.Exec(ctx, createSession, arg.TokenHash, arg.UserID, arg.CredentialID)
 	return err
 }
 
@@ -102,7 +103,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
 }
 
 const getSession = `-- name: GetSession :one
-SELECT token_hash, user_id, created_at, device_id FROM sessions WHERE token_hash = $1
+SELECT token_hash, user_id, created_at, device_id, credential_id FROM sessions WHERE token_hash = $1
 `
 
 func (q *Queries) GetSession(ctx context.Context, tokenHash []byte) (Session, error) {
@@ -113,6 +114,7 @@ func (q *Queries) GetSession(ctx context.Context, tokenHash []byte) (Session, er
 		&i.UserID,
 		&i.CreatedAt,
 		&i.DeviceID,
+		&i.CredentialID,
 	)
 	return i, err
 }
@@ -212,6 +214,18 @@ INSERT INTO purge_log (user_hash) VALUES ($1) ON CONFLICT DO NOTHING
 func (q *Queries) RecordPurge(ctx context.Context, userHash []byte) error {
 	_, err := q.db.Exec(ctx, recordPurge, userHash)
 	return err
+}
+
+const sessionCredential = `-- name: SessionCredential :one
+SELECT credential_id FROM sessions WHERE token_hash = $1
+`
+
+// The passkey a session signed in with; NULL for a magic link.
+func (q *Queries) SessionCredential(ctx context.Context, tokenHash []byte) ([]byte, error) {
+	row := q.db.QueryRow(ctx, sessionCredential, tokenHash)
+	var credential_id []byte
+	err := row.Scan(&credential_id)
+	return credential_id, err
 }
 
 const setIdentityKey = `-- name: SetIdentityKey :execrows

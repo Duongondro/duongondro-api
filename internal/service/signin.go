@@ -149,6 +149,12 @@ func (s *SignIn) session(ctx context.Context, userID uuid.UUID, created bool) (S
 	return Session{Token: token, UserID: userID, Created: created}, err
 }
 
+// passkeySession is a session a passkey signed in with; removing the passkey ends it.
+func (s *SignIn) passkeySession(ctx context.Context, userID uuid.UUID, credentialID []byte, created bool) (Session, error) {
+	token, err := s.auth.NewPasskeySession(ctx, userID, credentialID)
+	return Session{Token: token, UserID: userID, Created: created}, err
+}
+
 // --- Passkeys ------------------------------------------------------------------
 
 // passkeyUser adapts an account (or one about to be created) to webauthn.User. The
@@ -388,7 +394,7 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 	if !signUp {
 		return Session{UserID: *row.UserID}, nil
 	}
-	return s.session(ctx, *row.UserID, true)
+	return s.passkeySession(ctx, *row.UserID, cred.ID, true)
 }
 
 // ceremonyGate is the invite or admission code a sign-up ceremony began with; zero
@@ -446,7 +452,7 @@ func (s *SignIn) finishSignIn(ctx context.Context, row atrest.Ceremony, data web
 	if err != nil {
 		return Session{}, err
 	}
-	return s.session(ctx, id, false)
+	return s.passkeySession(ctx, id, cred.ID, false)
 }
 
 // uuidFromBytes reads a 16-byte user handle back into an account id.
