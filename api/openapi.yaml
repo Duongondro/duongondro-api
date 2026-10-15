@@ -742,8 +742,8 @@ paths:
       operationId: deletePasskey
       description: |
         Removes a passkey and ends every session it signed in with, this one included
-        if it did. 409 when it is the account's last way to sign in (no other passkey
-        and no e-mail). The passkey stays in the password manager.
+        if it did. 409 when it is the account's last way to sign in (no other passkey,
+        e-mail, Apple or Google identity). The passkey stays in the password manager.
       parameters:
         - {$ref: "#/components/parameters/Authorization"}
         - {$ref: "#/components/parameters/CredentialId"}
@@ -1254,7 +1254,7 @@ components:
         aaguid: {type: string, description: "The authenticator's AAGUID, absent when it gave none (all zeros)"}
         createdAt: {type: string, format: date-time}
         lastUsedAt: {type: string, format: date-time}
-        current: {type: boolean, description: This session signed in with this passkey, so removing it signs this phone out}
+        current: {type: boolean, description: "This session signed in with this passkey, so removing it signs this phone out"}
     PasskeyList:
       type: object
       required: [passkeys]
@@ -1266,7 +1266,7 @@ components:
       type: object
       required: [name]
       properties:
-        name: {type: string, nullable: true, maxLength: 256}
+        name: {type: string, nullable: true, maxLength: 64, description: "Characters, trimmed; null or blank clears the name"}
     Ceremony:
       type: object
       required: [sessionId, options]
