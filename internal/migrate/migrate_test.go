@@ -3,6 +3,7 @@ package migrate_test
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/dbtest"
 	"github.com/Duongondro/duongondro-api/internal/migrate"
+	"github.com/Duongondro/duongondro-api/internal/service/names"
 )
 
 // beforeAtRest is the last migration before encryption at rest: production's schema
@@ -86,7 +88,8 @@ func TestMigrationSealsExistingRows(t *testing.T) {
 	if taken, _ := q.UsernameTaken(ctx, keys.HashString("ana")); !taken {
 		t.Error("the username's blind index does not find it")
 	}
-	if u, err := keys.User(q.GetUser(ctx, bo)); err != nil || u.DisplayName != "" || u.Username != nil || u.Gender != nil || u.IdentityPublicKey != nil {
+	// An empty profile: sealed as NULLs, then named by NameUnnamedAccounts.
+	if u, err := keys.User(q.GetUser(ctx, bo)); err != nil || !isRandomName(u.DisplayName) || u.Username != nil || u.Gender != nil || u.IdentityPublicKey != nil {
 		t.Errorf("an empty profile: %+v %v", u, err)
 	}
 	if d, err := keys.Device(q.GetDeviceByKey(ctx, db.GetDeviceByKeyParams{UserID: ana, PublicKeyHash: keys.Hash(deviceKey)})); err != nil ||
@@ -276,5 +279,61 @@ func TestRewriteSkipsALockedTable(t *testing.T) {
 	sources := p.ListSources()
 	if v, _ := p.GetDBVersion(ctx); v != sources[len(sources)-1].Version {
 		t.Fatalf("at version %d", v)
+	}
+}
+
+// isRandomName reports whether name is an adjective and an animal from the lists.
+func isRandomName(name string) bool {
+	adj, animal, ok := strings.Cut(name, " ")
+	return ok && slices.Contains(names.Adjectives, adj) && slices.Contains(names.Animals, animal)
+}
+
+// Accounts made before sign-up named them get a random name, sealed, at the next
+// migrate: those without one, or with one that shows as blank. Named accounts keep
+// theirs, and migrating again changes nothing.
+func TestMigrationNamesUnnamedAccounts(t *testing.T) {
+	pool := dbtest.Empty(t, "migrate_names_tests")
+	keys := dbtest.Keys()
+	ctx := t.Context()
+	upTo(t, pool, keys, 20261015204739)
+	ana, none, blank := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	for id, name := range map[uuid.UUID]string{ana: "Ana", none: "", blank: "\u200b \u200e"} {
+		if _, err := pool.Exec(ctx, `INSERT INTO users (id, display_name_encrypted) VALUES ($1, $2)`, id, keys.SealDisplayName(id, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrate.Up(ctx, pool, keys); err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(pool)
+	nameOf := func(id uuid.UUID) string {
+		t.Helper()
+		u, err := keys.User(q.GetUser(ctx, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.DisplayName
+	}
+	if nameOf(ana) != "Ana" {
+		t.Fatalf("a named account was renamed: %q", nameOf(ana))
+	}
+	first := map[uuid.UUID]string{}
+	for _, id := range []uuid.UUID{none, blank} {
+		if first[id] = nameOf(id); !isRandomName(first[id]) {
+			t.Fatalf("%s: %q", id, first[id])
+		}
+	}
+	var sealed []byte
+	if err := pool.QueryRow(ctx, `SELECT display_name_encrypted FROM users WHERE id = $1`, none).Scan(&sealed); err != nil ||
+		bytes.Contains(sealed, []byte(first[none])) {
+		t.Fatalf("the name is not sealed: %v", err)
+	}
+	if err := migrate.Up(ctx, pool, keys); err != nil {
+		t.Fatal(err)
+	}
+	for id, name := range first {
+		if nameOf(id) != name {
+			t.Fatalf("migrating again renamed %s", id)
+		}
 	}
 }
