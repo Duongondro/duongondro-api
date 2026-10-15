@@ -370,3 +370,26 @@ func TestOpenSignUpMailLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// IPv4 counts per address, IPv6 per /64.
+func TestLimitKey(t *testing.T) {
+	for addr, want := range map[string]string{
+		"198.51.100.7":                     "198.51.100.7",
+		"::ffff:198.51.100.7":              "198.51.100.7",
+		"2001:db8:1:2:aaaa:bbbb:cccc:dddd": "2001:db8:1:2::/64",
+		"2001:db8:1:2::1":                  "2001:db8:1:2::/64",
+		"fe80::1%en0":                      "fe80::/64",
+		"not an address":                   "not an address",
+	} {
+		if got := limitKey(addr); got != want {
+			t.Errorf("%s: %s, want %s", addr, got, want)
+		}
+	}
+	l := newAddressLimiter(1, time.Hour)
+	if !l.take("2001:db8:1:2::1") || l.allowed("2001:db8:1:2:ffff::9") {
+		t.Fatal("two addresses in one /64 counted apart")
+	}
+	if !l.allowed("2001:db8:1:3::1") || !l.allowed("198.51.100.8") {
+		t.Fatal("another /64 or IPv4 address shares the count")
+	}
+}

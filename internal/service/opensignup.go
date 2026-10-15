@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -76,9 +77,24 @@ func newAddressLimiter(limit int, window time.Duration) *addressLimiter {
 	return &addressLimiter{limit: limit, window: window, now: time.Now, key: key, seen: map[[16]byte][]time.Time{}}
 }
 
+// limitKey is what an address is counted under: an IPv4 address whole, an IPv6
+// address by its /64, the block one subscriber usually holds whole, so that walking
+// through it gains nothing. Anything unparsable counts as itself.
+func limitKey(addr string) string {
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return addr
+	}
+	ip = ip.Unmap()
+	if ip.Is4() {
+		return ip.String()
+	}
+	return netip.PrefixFrom(ip.WithZone(""), 64).Masked().String()
+}
+
 func (l *addressLimiter) id(addr string) [16]byte {
 	mac := hmac.New(sha256.New, l.key)
-	mac.Write([]byte(addr))
+	mac.Write([]byte(limitKey(addr)))
 	var id [16]byte
 	copy(id[:], mac.Sum(nil))
 	return id
