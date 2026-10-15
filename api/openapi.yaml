@@ -927,8 +927,9 @@ components:
         displayName:
           type: string
           description: |
-            A random English name ("Adjective Animal", e.g. "Tidy Otter") when none
-            was given at sign-up; empty only if the person cleared it later.
+            Set for every account: a random English name ("Adjective Animal", e.g.
+            "Tidy Otter") when none was given at sign-up, and accounts from before
+            random names were given one too. Empty only if the person cleared it.
         username: {type: string, description: "Absent until set; lowercase"}
         gender: {$ref: "#/components/schemas/Gender"}
         devices:
