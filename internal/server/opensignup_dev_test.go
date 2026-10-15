@@ -143,6 +143,49 @@ func TestOpenSignUpMailLimitOverHTTP(t *testing.T) {
 	}
 }
 
+// The open sign-up limits count the address Caddy saw: an X-Forwarded-For the client
+// wrote itself is ignored, whether Caddy appends the real address after it or the
+// client connects directly.
+func TestOpenSignUpLimitIgnoresSpoofedAddresses(t *testing.T) {
+	e := newSignUpServer(t, "server_open_spoof_tests", true)
+	ask := func(i int, remote, xff string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/magic-links",
+			strings.NewReader(fmt.Sprintf(`{"email":"s%d@example.com","signUp":true,"consent":true}`, i)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", xff)
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	n := 0
+	// Behind Caddy: the client's own header first, the real address appended last.
+	for i := range service.OpenSignUpMailLimit {
+		if code := ask(n, "127.0.0.1:41000", fmt.Sprintf("1.2.3.%d, 203.0.113.50", i)); code != http.StatusNoContent {
+			t.Fatalf("behind Caddy, request %d: %d", i+1, code)
+		}
+		n++
+	}
+	if code := ask(n, "127.0.0.1:41000", "1.2.3.200, 203.0.113.50"); code != http.StatusTooManyRequests {
+		t.Fatalf("a spoofed X-Forwarded-For got a fresh count: %d", code)
+	}
+	n++
+	if code := ask(n, "127.0.0.1:41000", "1.2.3.4, 203.0.113.51"); code != http.StatusNoContent {
+		t.Fatalf("another real client: %d", code)
+	}
+	n++
+	// Directly, not through Caddy: the header is not trusted at all.
+	for i := range service.OpenSignUpMailLimit {
+		if code := ask(n, "198.51.100.99:5000", fmt.Sprintf("1.2.3.%d", i)); code != http.StatusNoContent {
+			t.Fatalf("direct, request %d: %d", i+1, code)
+		}
+		n++
+	}
+	if code := ask(n, "198.51.100.99:5000", "203.0.113.50"); code != http.StatusTooManyRequests {
+		t.Fatalf("a direct client escaped its count with X-Forwarded-For: %d", code)
+	}
+}
+
 // google signs in with Google as subject, with extra fields in the body.
 func google(t *testing.T, e *echo.Echo, subject string, extra map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
