@@ -30,6 +30,9 @@ const (
 	LabelInvitePin   = "duongondro/v1/invite-pin"
 	LabelRecovery    = "duongondro/v1/recovery"
 	LabelRecoverySig = "duongondro/v1/recovery-sig"
+	LabelPRF         = "duongondro/v1/prf" // the PRF input (eval.first), fixed by the phones
+	LabelPRFWrap     = "duongondro/v1/prf-wrap"
+	LabelPRFSig      = "duongondro/v1/prf-sig"
 	statementPrefix  = "duongondro/v1/"
 	keySize          = 32
 	padBlock         = 256
@@ -47,6 +50,7 @@ const (
 	KindPracticeKey  WrapKind = 1
 	KindIdentitySeed WrapKind = 2
 	KindShareKey     WrapKind = 3
+	KindUserKey      WrapKind = 4 // U's private scalar, carried between phones
 )
 
 // UUID is the raw 16 bytes of a UUID.
@@ -305,4 +309,49 @@ func VerifyRecoveryBox(identity ed25519.PublicKey, user UUID, kind WrapKind, box
 // OpenRecovery opens a recovery box.
 func OpenRecovery(recoveryKey []byte, user UUID, kind WrapKind, box []byte) ([]byte, error) {
 	return open(recoveryKey, box, RecoveryAAD(user, kind))
+}
+
+// PRFKey derives the key that seals U's scalar from a passkey's PRF output.
+func PRFKey(prf []byte, user UUID) []byte {
+	return Derive(prf, user[:], LabelPRFWrap)
+}
+
+// PasskeyBoxAAD binds a passkey's box to the user, the user key and the passkey; the
+// credential id comes last, so its length needs no prefix.
+func PasskeyBoxAAD(user, userKey UUID, credentialID []byte) []byte {
+	aad := make([]byte, 0, 32+len(credentialID))
+	aad = append(aad, user[:]...)
+	aad = append(aad, userKey[:]...)
+	return append(aad, credentialID...)
+}
+
+// SealPasskeyBox seals U's 32-byte scalar under a passkey's PRF key.
+func SealPasskeyBox(prfKey []byte, aad, scalar, nonce []byte) ([]byte, error) {
+	if len(scalar) != keySize {
+		return nil, ErrSize
+	}
+	return seal(prfKey, nonce, scalar, aad)
+}
+
+// OpenPasskeyBox opens a passkey's box. Check the scalar against U's signed public
+// key before using it.
+func OpenPasskeyBox(prfKey []byte, aad, box []byte) ([]byte, error) {
+	if len(box) != WrappedBoxSize {
+		return nil, ErrSize
+	}
+	return open(prfKey, box, aad)
+}
+
+// PasskeyBoxMessage is what the identity key signs for a passkey's box, so the server
+// can refuse a box from a session that holds no key.
+func PasskeyBoxMessage(aad, box []byte) []byte {
+	return append(append([]byte(LabelPRFSig), aad...), box...)
+}
+
+func SignPasskeyBox(identity ed25519.PrivateKey, aad, box []byte) []byte {
+	return ed25519.Sign(identity, PasskeyBoxMessage(aad, box))
+}
+
+func VerifyPasskeyBox(identity ed25519.PublicKey, aad, box, sig []byte) bool {
+	return len(identity) == ed25519.PublicKeySize && ed25519.Verify(identity, PasskeyBoxMessage(aad, box), sig)
 }
