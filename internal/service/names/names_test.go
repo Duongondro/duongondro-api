@@ -41,3 +41,23 @@ func TestRandom(t *testing.T) {
 		t.Fatalf("only %d distinct names in 200 draws", len(seen))
 	}
 }
+
+func TestClean(t *testing.T) {
+	for in, want := range map[string]string{
+		"Ana":                 "Ana",
+		"  Ana Maria \t":      "Ana Maria",
+		"\u200bAna\u200e":     "Ana",
+		"\u200b \u200e\u2060": "",
+		" \u00a0\u3000":       "",
+		"...":                 "",
+		"-_-":                 "",
+		"\u200b7":             "7",
+		"\u263a":              "\u263a",
+		"Tomasz \u200d\u200b": "Tomasz",
+		"\ufeff":              "",
+	} {
+		if got := Clean(in); got != want {
+			t.Errorf("Clean(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

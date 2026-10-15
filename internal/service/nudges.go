@@ -16,6 +16,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/push"
+	"github.com/Duongondro/duongondro-api/internal/service/names"
 )
 
 // Push loc-keys, rendered by the phones (design: Social › Nudges). A sender without a
@@ -49,7 +50,7 @@ func fromSender(user atrest.User, named, unnamed string, args ...string) push.Me
 	if args == nil {
 		args = []string{} // "loc-args": [], never null, which FCM refuses
 	}
-	name := strings.TrimSpace(user.DisplayName)
+	name := names.Clean(user.DisplayName)
 	if name == "" {
 		return push.Message{LocKey: genderedKey(unnamed, user.Gender), LocArgs: args, ThreadID: user.ID.String()}
 	}

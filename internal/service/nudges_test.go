@@ -160,6 +160,7 @@ func TestFromSender(t *testing.T) {
 		{"Ana", &female, "POKE_FEMALE", []string{"Ana"}},
 		{"", nil, "POKE_UNNAMED", []string{}},
 		{" \t", &female, "POKE_UNNAMED_FEMALE", []string{}},
+		{"\u200b\u200e", nil, "POKE_UNNAMED", []string{}},
 		{"", &male, "POKE_UNNAMED_MALE", []string{}},
 	} {
 		m := fromSender(atrest.User{DisplayName: c.name, Gender: c.gender}, LocPoke, LocPokeUnnamed)

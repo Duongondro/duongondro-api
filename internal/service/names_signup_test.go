@@ -41,7 +41,7 @@ func TestSignUpNamesAnAccount(t *testing.T) {
 		return u.DisplayName
 	}
 
-	for _, given := range []*string{nil, new(""), new("  ")} {
+	for _, given := range []*string{nil, new(""), new("  "), new("\u200b \u200e"), new("...")} {
 		c, err := s.BeginPasskeySignUp(ctx, code(), SignUpProfile{DisplayName: given})
 		if err != nil {
 			t.Fatal(err)

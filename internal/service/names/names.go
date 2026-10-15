@@ -14,6 +14,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"math/big"
+	"strings"
+	"unicode"
 )
 
 var (
@@ -54,4 +56,18 @@ func pick(words []string) (string, error) {
 		return "", err
 	}
 	return words[i.Int64()], nil
+}
+
+// Clean trims a display name of white space and invisible format characters (Cf,
+// such as zero-width spaces and direction marks) at both ends, and returns "" for a
+// name with no letter, number or symbol left in it: such a name shows as blank, so
+// it counts as none (a random name at sign-up, the unnamed keys in pushes).
+func Clean(name string) string {
+	name = strings.TrimFunc(name, func(r rune) bool { return unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) })
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsSymbol(r) {
+			return name
+		}
+	}
+	return ""
 }
