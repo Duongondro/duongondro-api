@@ -592,7 +592,7 @@ func (q *Queries) RenameCredential(ctx context.Context, arg RenameCredentialPara
 	return result.RowsAffected(), nil
 }
 
-const updateCredential = `-- name: UpdateCredential :exec
+const updateCredential = `-- name: UpdateCredential :execrows
 UPDATE credentials SET data_encrypted = $2, last_used_at = now() WHERE id = $1
 `
 
@@ -601,9 +601,12 @@ type UpdateCredentialParams struct {
 	DataEncrypted []byte `json:"dataEncrypted"`
 }
 
-func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialParams) error {
-	_, err := q.db.Exec(ctx, updateCredential, arg.ID, arg.DataEncrypted)
-	return err
+func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateCredential, arg.ID, arg.DataEncrypted)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateIdentity = `-- name: UpdateIdentity :exec
