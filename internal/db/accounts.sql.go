@@ -77,7 +77,10 @@ type DeleteOtherSessionsParams struct {
 // The other phones stop receiving this account's pushes as well: every push token
 // of the user's devices but the one this session is bound to goes, in the same
 // statement (one snapshot). A phone signed out this way may never call again to
-// drop its own (the lost-phone case). An unbound session keeps no token.
+// drop its own (the lost-phone case). An unbound session keeps no token: its app
+// sends it again within a day. A PUT of a token racing this statement (passed
+// authentication just before it commits) can keep that phone's token; accepted,
+// as the phone's next request finds its session gone and drops it itself.
 func (q *Queries) DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteOtherSessions, arg.UserID, arg.TokenHash)
 	if err != nil {

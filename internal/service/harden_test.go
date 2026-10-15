@@ -137,6 +137,19 @@ func TestSigningOutOthersDropsTheirPushTokens(t *testing.T) {
 	if !tokens(other.ID)[theirs.ID] {
 		t.Fatal("another account's push token was dropped")
 	}
+
+	// From a session bound to no device, every one of the account's tokens goes:
+	// which phone it is on is unknown, and that app sends its token again.
+	if err := n.PutToken(ctx, u.ID, lost.ID, "fcm", "lost-token"); err != nil {
+		t.Fatal(err)
+	}
+	unbound, _ := a.NewSession(ctx, u.ID)
+	if _, err := a.RevokeOthers(ctx, u.ID, unbound); err != nil {
+		t.Fatal(err)
+	}
+	if left := tokens(u.ID); len(left) != 0 {
+		t.Fatalf("an unbound session's sign out everywhere else left %d tokens", len(left))
+	}
 }
 
 func TestPushTokenReachesOneDevice(t *testing.T) {
