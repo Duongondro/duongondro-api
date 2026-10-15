@@ -46,3 +46,8 @@ JOIN devices ON devices.id = push_tokens.device_id WHERE devices.user_id = $1;
 
 -- name: ExportNudges :many
 SELECT * FROM nudges WHERE sender_id = $1 OR recipient_id = $1 ORDER BY created_at;
+
+-- name: DropCredentialPushTokens :exec
+-- Removing a passkey signs its phones out: they stop receiving this account's nudges.
+DELETE FROM push_tokens WHERE device_id IN (
+    SELECT s.device_id FROM sessions s WHERE s.credential_id = $1 AND s.user_id = $2 AND s.device_id IS NOT NULL);

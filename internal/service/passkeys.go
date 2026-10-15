@@ -92,6 +92,10 @@ func (s *SignIn) RemovePasskey(ctx context.Context, userID uuid.UUID, id []byte)
 		if _, err := q.LockUser(ctx, userID); err != nil {
 			return err
 		}
+		// Its phones are signed out as a removed device is: no more nudges.
+		if err := q.DropCredentialPushTokens(ctx, db.DropCredentialPushTokensParams{CredentialID: id, UserID: userID}); err != nil {
+			return err
+		}
 		n, err := q.DeleteCredential(ctx, db.DeleteCredentialParams{ID: id, UserID: userID})
 		if err != nil {
 			return err
