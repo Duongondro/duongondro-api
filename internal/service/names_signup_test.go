@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/oidc"
 	"github.com/Duongondro/duongondro-api/internal/service/names"
 )
@@ -87,5 +88,29 @@ func TestSignUpNamesAnAccount(t *testing.T) {
 	}
 	if len(sealed) == 0 || bytes.Contains(sealed, []byte(nameOf(viaGoogle.UserID))) {
 		t.Fatalf("the name is not sealed: %x", sealed)
+	}
+}
+
+// A ceremony row whose sealed display name opens to "" (none given) does not clear
+// the random name at finish.
+func TestSignUpCeremonyWithEmptyName(t *testing.T) {
+	f := setup(t)
+	s, _ := f.signIn(nil, nil, nil)
+	ctx := t.Context()
+	typed, _ := f.admissionCode(time.Hour)
+	c, err := s.BeginPasskeySignUp(ctx, SignUpProof{AdmissionCode: typed}, SignUpProfile{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE webauthn_sessions SET display_name_encrypted = $2 WHERE id = $1`, c.SessionID,
+		f.keys.SealString(atrest.WebauthnSessionsDisplayName, atrest.IDRow(c.SessionID), "")); err != nil {
+		t.Fatal(err)
+	}
+	session, err := s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, err := f.keys.User(f.q.GetUser(ctx, session.UserID)); err != nil || !isRandomName(u.DisplayName) {
+		t.Fatalf("an empty ceremony name cleared the random one: %q %v", u.DisplayName, err)
 	}
 }

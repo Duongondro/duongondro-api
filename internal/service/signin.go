@@ -398,8 +398,13 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 			if _, err := createAccount(ctx, q, s.keys, g, row.UserID); err != nil {
 				return err
 			}
-			if row.Username != nil || row.DisplayName != nil || row.Gender != nil {
-				p := profileParams(s.keys, *row.UserID, ProfileUpdate{DisplayName: row.DisplayName,
+			// A blank name from the ceremony is none given: the random name stays.
+			name := row.DisplayName
+			if name != nil && names.Clean(*name) == "" {
+				name = nil
+			}
+			if row.Username != nil || name != nil || row.Gender != nil {
+				p := profileParams(s.keys, *row.UserID, ProfileUpdate{DisplayName: name,
 					SetUsername: row.Username != nil, Username: row.Username, SetGender: row.Gender != nil, Gender: row.Gender})
 				// The username may have been taken since the ceremony began.
 				if err := usernameConflict(q.UpdateProfile(ctx, p)); err != nil {
