@@ -21,6 +21,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 	"github.com/Duongondro/duongondro-api/internal/repository"
+	"github.com/Duongondro/duongondro-api/internal/service/names"
 	"github.com/Duongondro/duongondro-api/internal/streak"
 )
 
@@ -216,8 +217,13 @@ func (s *Social) SetDisplayName(ctx context.Context, userID uuid.UUID, name stri
 	return s.q.SetDisplayName(ctx, db.SetDisplayNameParams{ID: userID, DisplayNameEncrypted: s.keys.SealDisplayName(userID, name)})
 }
 
+// cleanDisplayName checks a display name and trims it with names.Clean: one with no
+// letter, number or symbol is empty.
 func cleanDisplayName(name string) (string, error) {
-	name = strings.TrimSpace(name)
+	if !validText(name) {
+		return "", invalid("displayName must be valid text of at most 64 characters")
+	}
+	name = names.Clean(name)
 	if !validText(name) || len([]rune(name)) > 64 {
 		return "", invalid("displayName must be valid text of at most 64 characters")
 	}

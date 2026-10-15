@@ -13,7 +13,7 @@ import (
 
 // Message is one notification, before it is shaped for a platform.
 type Message struct {
-	LocKey  string   // e.g. FRIEND_DONE, POKE, STREAK_AT_RISK
+	LocKey  string   // e.g. FRIEND_DONE, POKE, STREAK_AT_RISK (internal/service/nudges.go)
 	LocArgs []string // in the order the phone's format string takes them
 	// ThreadID groups notifications on the lock screen (one thread per friend).
 	ThreadID string

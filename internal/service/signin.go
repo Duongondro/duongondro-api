@@ -19,6 +19,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/repository"
+	"github.com/Duongondro/duongondro-api/internal/service/names"
 )
 
 // SignIn holds the sign-in methods (design: From CodeShare › Sign-in). Three rules
@@ -111,8 +112,10 @@ var ErrNoAccount = errors.New("no account uses this sign-in; sign up to create o
 // has counted it with countOpen, if it counts). It locks the invite
 // or code and checks it is still live, so a revocation, the inviter's purge or
 // another sign-up with the same code since the first check stops the sign-up
-// (ErrNotFound) rather than slipping through.
-func createAccount(ctx context.Context, q *db.Queries, g gate, id *uuid.UUID) (db.User, error) {
+// (ErrNotFound) rather than slipping through. Every account starts with a random
+// English display name (names.Random, sealed like any display name); a sign-up that
+// gives one sets it over this in the same transaction.
+func createAccount(ctx context.Context, q *db.Queries, keys *atrest.Keys, g gate, id *uuid.UUID) (db.User, error) {
 	var inviter *uuid.UUID
 	switch {
 	case g.inviteID != nil:
@@ -142,6 +145,13 @@ func createAccount(ctx context.Context, q *db.Queries, g gate, id *uuid.UUID) (d
 		user, err = q.CreateUser(ctx)
 	}
 	if err != nil {
+		return db.User{}, err
+	}
+	name, err := names.Random()
+	if err != nil {
+		return db.User{}, err
+	}
+	if err := q.SetDisplayName(ctx, db.SetDisplayNameParams{ID: user.ID, DisplayNameEncrypted: keys.SealDisplayName(user.ID, name)}); err != nil {
 		return db.User{}, err
 	}
 	if g.admissionID != nil {
@@ -250,7 +260,9 @@ func (p SignUpProfile) clean() (SignUpProfile, error) {
 		if err != nil {
 			return out, err
 		}
-		out.DisplayName = &name
+		if name != "" { // an empty one is none given: the random name stays
+			out.DisplayName = &name
+		}
 	}
 	if p.Gender != nil {
 		if err := checkGender(*p.Gender); err != nil {
@@ -383,11 +395,16 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 		if signUp {
 			// The invite may have been revoked or expired, or the admission code spent,
 			// since the ceremony began.
-			if _, err := createAccount(ctx, q, g, row.UserID); err != nil {
+			if _, err := createAccount(ctx, q, s.keys, g, row.UserID); err != nil {
 				return err
 			}
-			if row.Username != nil || row.DisplayName != nil || row.Gender != nil {
-				p := profileParams(s.keys, *row.UserID, ProfileUpdate{DisplayName: row.DisplayName,
+			// A blank name from the ceremony is none given: the random name stays.
+			name := row.DisplayName
+			if name != nil && names.Clean(*name) == "" {
+				name = nil
+			}
+			if row.Username != nil || name != nil || row.Gender != nil {
+				p := profileParams(s.keys, *row.UserID, ProfileUpdate{DisplayName: name,
 					SetUsername: row.Username != nil, Username: row.Username, SetGender: row.Gender != nil, Gender: row.Gender})
 				// The username may have been taken since the ceremony began.
 				if err := usernameConflict(q.UpdateProfile(ctx, p)); err != nil {
