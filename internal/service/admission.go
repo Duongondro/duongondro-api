@@ -129,8 +129,8 @@ type SignUpProof struct {
 }
 
 // gate is a checked SignUpProof, stored with a ceremony or link until the account is
-// made: an invite, an admission code, or open (neither, OPEN_SIGNUP). The zero gate
-// is no sign-up.
+// made: an invite, an admission code, or open (neither). The zero gate is no
+// sign-up.
 type gate struct {
 	inviteID    *string
 	admissionID *uuid.UUID
@@ -138,9 +138,9 @@ type gate struct {
 }
 
 // checkProof is the sign-up gate: a live invite with its auth, a live, unused
-// admission code, or, for a request marked as a sign-up, neither when the server
-// allows open sign-up (ErrInvitationRequired when it does not). A wrong, spent or
-// expired invite or code answers ErrNotFound, like an unknown invite. A request
+// admission code, or, for a request marked as a sign-up, neither (an open sign-up).
+// A wrong, spent or expired invite or code answers ErrNotFound, like an unknown
+// invite; neither, without the flag, is no sign-up (400, as before). A request
 // marked as a sign-up needs the Art. 9 consent, before anything else is checked.
 func (s *SignIn) checkProof(ctx context.Context, p SignUpProof) (gate, error) {
 	if p.SignUp && !p.Consent {
@@ -167,10 +167,8 @@ func (s *SignIn) checkProof(ctx context.Context, p SignUpProof) (gate, error) {
 			return gate{}, err
 		}
 		return gate{admissionID: &row.ID}, nil
-	case p.SignUp && s.openSignUp:
-		return gate{open: true}, nil
 	case p.SignUp:
-		return gate{}, ErrInvitationRequired
+		return gate{open: true}, nil
 	}
 	return gate{}, invalid("an invitation or an admission code is needed to create an account")
 }

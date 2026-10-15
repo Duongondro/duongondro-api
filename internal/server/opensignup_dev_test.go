@@ -35,11 +35,11 @@ type nullMailer struct{}
 
 func (nullMailer) SendMagicLink(context.Context, string, string, string) error { return nil }
 
-func newSignUpServer(t *testing.T, schema string, open bool) *echo.Echo {
+func newSignUpServer(t *testing.T, schema string) *echo.Echo {
 	t.Helper()
 	e, _, err := New(dbtest.Fresh(t, schema), Config{Keys: dbtest.Keys(),
 		SignIn: service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"},
-			Verifiers: map[string]service.TokenVerifier{"google": echoVerifier{}}, Mailer: nullMailer{}, OpenSignUp: open},
+			Verifiers: map[string]service.TokenVerifier{"google": echoVerifier{}}, Mailer: nullMailer{}},
 		MagicLinkBase: "https://duongondro.app/m#",
 	})
 	if err != nil {
@@ -61,29 +61,19 @@ func errorOf(t *testing.T, body []byte) string {
 func TestOpenSignUpOverHTTP(t *testing.T) {
 	signUp := map[string]any{"signUp": true, "consent": true}
 
-	t.Run("off", func(t *testing.T) {
-		e := newSignUpServer(t, "server_open_off_tests", false)
-		rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", signUp)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("open passkey sign-up while off: %d %s", rec.Code, rec.Body)
+	t.Run("no configuration", func(t *testing.T) {
+		// The plain test server, configured as before open sign-up existed.
+		e := newTestServer(t, "server_open_default_tests")
+		if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", signUp); rec.Code != http.StatusOK {
+			t.Fatalf("passkey sign-up without a code: %d %s", rec.Code, rec.Body)
 		}
-		errorOf(t, rec.Body.Bytes())
 		if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{}); rec.Code != http.StatusBadRequest {
 			t.Fatalf("no proof, no flag: %d %s", rec.Code, rec.Body)
 		}
-		if rec := serve(t, e, http.MethodPost, "/api/auth/magic-links", "", map[string]any{"email": "a@example.com", "signUp": true, "consent": true}); rec.Code != http.StatusForbidden {
-			t.Fatalf("open magic link while off: %d %s", rec.Code, rec.Body)
-		}
-		if rec := serve(t, e, http.MethodPost, "/api/auth/magic-links", "", map[string]any{"email": "a@example.com"}); rec.Code != http.StatusNoContent {
-			t.Fatalf("plain magic link: %d %s", rec.Code, rec.Body)
-		}
-		if rec := google(t, e, "g-off", signUp); rec.Code != http.StatusForbidden {
-			t.Fatalf("open Google sign-up while off: %d %s", rec.Code, rec.Body)
-		}
 	})
 
-	t.Run("on", func(t *testing.T) {
-		e := newSignUpServer(t, "server_open_on_tests", true)
+	t.Run("limits", func(t *testing.T) {
+		e := newSignUpServer(t, "server_open_limit_tests")
 		// Android 0.3's request, unchanged: an admission code, no flag.
 		if rec := serve(t, e, http.MethodPost, "/api/auth/passkeys/sign-up", "", map[string]any{"admissionCode": "zzzz-zzzz-zzzz-zzzz"}); rec.Code != http.StatusNotFound {
 			t.Fatalf("unknown admission code: %d %s", rec.Code, rec.Body)
@@ -130,7 +120,7 @@ func TestOpenSignUpOverHTTP(t *testing.T) {
 
 // Open magic-link requests are limited per client address, mailed or not.
 func TestOpenSignUpMailLimitOverHTTP(t *testing.T) {
-	e := newSignUpServer(t, "server_open_mail_tests", true)
+	e := newSignUpServer(t, "server_open_mail_tests")
 	for i := range service.OpenSignUpMailLimit {
 		body := map[string]any{"email": fmt.Sprintf("m%d@example.com", i), "signUp": true, "consent": true}
 		if rec := serve(t, e, http.MethodPost, "/api/auth/magic-links", "", body); rec.Code != http.StatusNoContent {
@@ -147,7 +137,7 @@ func TestOpenSignUpMailLimitOverHTTP(t *testing.T) {
 // wrote itself is ignored, whether Caddy appends the real address after it or the
 // client connects directly.
 func TestOpenSignUpLimitIgnoresSpoofedAddresses(t *testing.T) {
-	e := newSignUpServer(t, "server_open_spoof_tests", true)
+	e := newSignUpServer(t, "server_open_spoof_tests")
 	ask := func(i int, remote, xff string) int {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/magic-links",
 			strings.NewReader(fmt.Sprintf(`{"email":"s%d@example.com","signUp":true,"consent":true}`, i)))
@@ -207,7 +197,7 @@ func TestRequestLogHasNoAddress(t *testing.T) {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
-	e := newSignUpServer(t, "server_log_tests", true)
+	e := newSignUpServer(t, "server_log_tests")
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkeys/sign-up", strings.NewReader(`{"signUp":true,"consent":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-For", "203.0.113.200")
