@@ -50,10 +50,10 @@ func TestWrapsASessionCannotBreak(t *testing.T) {
 	rotation := []RotationWrap{{DeviceID: phone.ID, WrapInput: signedWrap(u, identity, phone, e2ee.KindPracticeKey, 2)}}
 	forged := []RotationWrap{{DeviceID: phone.ID, WrapInput: signedWrap(u, identity, phone, e2ee.KindPracticeKey, 2)}}
 	forged[0].AuthType, forged[0].Authenticator = "self", random(32)
-	if err := f.wraps.Rotate(ctx, u, 2, forged); !isValidation(err) {
+	if err := f.wraps.Rotate(ctx, u, 2, forged, nil); !isValidation(err) {
 		t.Fatalf("a rotation with unsigned wraps: %v", err)
 	}
-	if err := f.wraps.Rotate(ctx, u, 2, rotation); err != nil {
+	if err := f.wraps.Rotate(ctx, u, 2, rotation, nil); err != nil {
 		t.Fatalf("rotation, with a planted holder outside the list: %v", err)
 	}
 }

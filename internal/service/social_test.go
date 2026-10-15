@@ -258,6 +258,13 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		DataEncrypted: f.keys.Seal(atrest.CredentialsData, atrest.RowOf(credID), []byte(`{"publicKey":"ana's passkey"}`))}); err != nil {
 		f.t.Fatal(err)
 	}
+	// The user key, a wrap to it, and the passkey's box of it.
+	unlock := NewUnlock(f.pool, f.keys)
+	uk := f.publishUserKey(unlock, ana, 1)
+	ukBox, ukSig := passkeyBox(ana, uk, credID)
+	if err := unlock.PutPasskeyBox(ctx, ana.User, credID, uk.id, ukBox, ukSig); err != nil {
+		f.t.Fatal(err)
+	}
 	passkeyName := "Ana's phone"
 	if _, err := f.q.RenameCredential(ctx, db.RenameCredentialParams{ID: credID, UserID: ana.ID,
 		NameEncrypted: f.keys.SealString(atrest.CredentialsName, atrest.RowOf(credID), passkeyName)}); err != nil {

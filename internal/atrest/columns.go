@@ -11,6 +11,7 @@ var (
 	DevicesPublicKey = Column{"devices", "public_key_encrypted"}
 
 	DeviceListsPayload       = Column{"device_lists", "payload_encrypted"}
+	UserKeysPayload          = Column{"user_keys", "payload_encrypted"}
 	InvitesPayload           = Column{"invites", "payload_encrypted"}
 	InviteRedemptionsPayload = Column{"invite_redemptions", "payload_encrypted"}
 
@@ -63,6 +64,7 @@ var Tables = []Table{
 		Sealed:  []Column{DevicesPublicKey},
 		Indexes: []Index{{Column{"devices", "public_key_hash"}, DevicesPublicKey}}},
 	{Name: "device_lists", Key: []string{"user_id"}, Sealed: []Column{DeviceListsPayload}},
+	{Name: "user_keys", Key: []string{"user_id"}, Sealed: []Column{UserKeysPayload}},
 	{Name: "invites", Key: []string{"id"}, Sealed: []Column{InvitesPayload}},
 	{Name: "invite_redemptions", Key: []string{"invite_id", "invitee_id"}, Sealed: []Column{InviteRedemptionsPayload}},
 	{Name: "reports", Key: []string{"id"}, Sealed: []Column{ReportsReason}},

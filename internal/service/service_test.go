@@ -235,13 +235,13 @@ func TestRotation(t *testing.T) {
 	rw := func(d atrest.Device) RotationWrap {
 		return RotationWrap{DeviceID: d.ID, WrapInput: signedWrap(u, identity, d, e2ee.KindPracticeKey, 2)}
 	}
-	if err := f.wraps.Rotate(t.Context(), u, 2, []RotationWrap{rw(a)}); !isValidation(err) {
+	if err := f.wraps.Rotate(t.Context(), u, 2, []RotationWrap{rw(a)}, nil); !isValidation(err) {
 		t.Fatalf("leaving a device out: %v", err)
 	}
-	if err := f.wraps.Rotate(t.Context(), u, 3, []RotationWrap{rw(a), rw(b)}); !isConflict(err) {
+	if err := f.wraps.Rotate(t.Context(), u, 3, []RotationWrap{rw(a), rw(b)}, nil); !isConflict(err) {
 		t.Fatalf("skipping a version: %v", err)
 	}
-	if err := f.wraps.Rotate(t.Context(), u, 2, []RotationWrap{rw(a), rw(b)}); err != nil {
+	if err := f.wraps.Rotate(t.Context(), u, 2, []RotationWrap{rw(a), rw(b)}, nil); err != nil {
 		t.Fatalf("rotation: %v", err)
 	}
 	u = f.reload(u)

@@ -44,6 +44,9 @@ type Export struct {
 	KeyWraps           []db.KeyWrap                 `json:"key_wraps"`
 	PracticeLogs       []db.PracticeLog             `json:"practice_logs"`
 	RecoveryBoxes      []db.RecoveryBox             `json:"recovery_boxes"`
+	UserKeys           *atrest.UserKey              `json:"user_keys"`
+	UserKeyWraps       []db.UserKeyWrap             `json:"user_key_wraps"`
+	PasskeyBoxes       []db.PasskeyBox              `json:"passkey_boxes"`
 	InviteTree         *db.ExportInviteNodeRow      `json:"invite_tree"`
 	Invites            []atrest.Invite              `json:"invites"`
 	InviteRedemptions  []atrest.InviteRedemption    `json:"invite_redemptions"`
@@ -79,8 +82,8 @@ type Export struct {
 var ExportedTables = []string{
 	"admission_codes", "auth_identities", "auth_nonces", "blocks", "credentials", "database_generation", "device_lists",
 	"devices", "downloads", "friendships", "invite_redemptions", "invite_tree", "invites", "key_wraps",
-	"magic_links", "nudges", "practice_logs", "purge_log", "push_tokens", "recovery_boxes", "reports",
-	"sessions", "streaks", "users", "webauthn_sessions",
+	"magic_links", "nudges", "passkey_boxes", "practice_logs", "purge_log", "push_tokens", "recovery_boxes", "reports",
+	"sessions", "streaks", "user_key_wraps", "user_keys", "users", "webauthn_sessions",
 }
 
 // Export reads everything in one snapshot.
@@ -115,6 +118,17 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 			return err
 		}
 		if out.RecoveryBoxes, err = q.ListRecoveryBoxes(ctx, userID); err != nil {
+			return err
+		}
+		if uk, err := k.UserKey(q.GetUserKey(ctx, userID)); err == nil {
+			out.UserKeys = &uk
+			if out.UserKeyWraps, err = q.ListUserKeyWraps(ctx, uk.ID); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if out.PasskeyBoxes, err = q.ExportPasskeyBoxes(ctx, userID); err != nil {
 			return err
 		}
 		if node, err := q.ExportInviteNode(ctx, &userID); err == nil {
@@ -167,7 +181,8 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 }
 
 // Purge deletes every row belonging to the user in one transaction: account,
-// sessions, devices and wraps, device list, sealed logs, recovery boxes, invites and
+// sessions, devices and wraps, device list, sealed logs, recovery boxes, the user key
+// with its wraps and passkey boxes, invites and
 // redemptions, friendships both ways, blocks both ways, reports filed by and about
 // them, and streak statements, all through ON DELETE CASCADE; an admission code the
 // account used stays spent, without the link to it (ON DELETE SET NULL). Their node in the
