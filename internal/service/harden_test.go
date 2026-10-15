@@ -3,9 +3,11 @@ package service
 import (
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/auth"
+	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 )
 
@@ -81,6 +83,72 @@ func TestSessionsEndWithTheirDevice(t *testing.T) {
 	}
 	if _, err := a.SessionUser(ctx, third); err != nil {
 		t.Fatal("the current session was signed out too")
+	}
+}
+
+func TestSigningOutOthersDropsTheirPushTokens(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	a := auth.New(f.pool, f.keys)
+	n := NewNudges(f.pool, f.keys, nil)
+	u, other := f.user(), f.user()
+	here, _ := f.device(u, "hardware")
+	lost, _ := f.device(u, "hardware")
+	theirs, _ := f.device(other, "hardware")
+	onHere, _ := a.NewSession(ctx, u.ID)
+	onLost, _ := a.NewSession(ctx, u.ID)
+	if err := a.BindDevice(ctx, onHere, here.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.BindDevice(ctx, onLost, lost.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []struct {
+		user, device uuid.UUID
+		token        string
+	}{
+		{u.ID, here.ID, "here-token"}, {u.ID, lost.ID, "lost-token"}, {other.ID, theirs.ID, "their-token"},
+	} {
+		if err := n.PutToken(ctx, d.user, d.device, "fcm", d.token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.RevokeOthers(ctx, u.ID, onHere); err != nil {
+		t.Fatal(err)
+	}
+	tokens := func(user uuid.UUID) map[uuid.UUID]bool {
+		rows, err := db.New(f.pool).PushTokensOf(ctx, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[uuid.UUID]bool{}
+		for _, r := range rows {
+			m[r.DeviceID] = true
+		}
+		return m
+	}
+	mine := tokens(u.ID)
+	if mine[lost.ID] {
+		t.Fatal("the phone signed out by sign out everywhere else still has its push token")
+	}
+	if !mine[here.ID] {
+		t.Fatal("this phone's own push token was dropped")
+	}
+	if !tokens(other.ID)[theirs.ID] {
+		t.Fatal("another account's push token was dropped")
+	}
+
+	// From a session bound to no device, every one of the account's tokens goes:
+	// which phone it is on is unknown, and that app sends its token again.
+	if err := n.PutToken(ctx, u.ID, lost.ID, "fcm", "lost-token"); err != nil {
+		t.Fatal(err)
+	}
+	unbound, _ := a.NewSession(ctx, u.ID)
+	if _, err := a.RevokeOthers(ctx, u.ID, unbound); err != nil {
+		t.Fatal(err)
+	}
+	if left := tokens(u.ID); len(left) != 0 {
+		t.Fatalf("an unbound session's sign out everywhere else left %d tokens", len(left))
 	}
 }
 

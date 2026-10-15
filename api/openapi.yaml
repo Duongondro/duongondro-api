@@ -115,7 +115,11 @@ paths:
   /api/me/sessions:
     delete:
       operationId: signOutOthers
-      description: Signs out every other session of this account ("sign out everywhere else").
+      description: >-
+        Signs out every other session of this account ("sign out everywhere else"), and
+        drops the push tokens of every device but the one this session is bound to, so the
+        phones signed out stop receiving pushes. A session bound to no device keeps no token;
+        the app sends it again.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       responses:
         "204": {description: Signed out.}
