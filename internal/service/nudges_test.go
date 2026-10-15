@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 	"github.com/Duongondro/duongondro-api/internal/push"
 )
@@ -100,6 +102,21 @@ func TestNudges(t *testing.T) {
 		}
 	}
 
+	// A sender without a display name gets the unnamed keys, without the name.
+	_ = social.SetDisplayName(ctx, ana.ID, "  ")
+	for _, c := range []struct{ gender, key string }{{"female", "FRIEND_DONE_UNNAMED_FEMALE"}, {"male", "FRIEND_DONE_UNNAMED_MALE"}, {"nonbinary", LocFriendDoneUnnamed}} {
+		if err := social.UpdateProfile(ctx, ana.ID, ProfileUpdate{SetGender: true, Gender: &c.gender}); err != nil {
+			t.Fatal(err)
+		}
+		n.DoneToday(ctx, f.reload(ana.User), "dorje-sempa", 42)
+		n.drain(ctx)
+		if got := sender.take(); len(got) != 1 || got[0].msg.LocKey != c.key || len(got[0].msg.LocArgs) != 2 ||
+			got[0].msg.LocArgs[0] != "dorje-sempa" || got[0].msg.LocArgs[1] != "42" {
+			t.Fatalf("done today, unnamed, %s: %+v", c.gender, got)
+		}
+	}
+	_ = social.SetDisplayName(ctx, ana.ID, "Ana")
+
 	// One poke per friend per day; strangers cannot be poked.
 	if err := n.Poke(ctx, bo.User, ana.ID); err != nil {
 		t.Fatal(err)
@@ -127,5 +144,31 @@ func TestNudges(t *testing.T) {
 	got = sender.take()
 	if len(got) != 1 || got[0].msg.LocKey != LocStreakAtRisk || got[0].msg.LocArgs[1] != "7" {
 		t.Fatalf("streak at risk: %+v", got)
+	}
+}
+
+// Pokes, and any push from a sender, name the sender only when there is a name.
+func TestFromSender(t *testing.T) {
+	female, male := "female", "male"
+	for _, c := range []struct {
+		name   string
+		gender *string
+		key    string
+		args   []string
+	}{
+		{"Ana", nil, "POKE", []string{"Ana"}},
+		{"Ana", &female, "POKE_FEMALE", []string{"Ana"}},
+		{"", nil, "POKE_UNNAMED", []string{}},
+		{" \t", &female, "POKE_UNNAMED_FEMALE", []string{}},
+		{"", &male, "POKE_UNNAMED_MALE", []string{}},
+	} {
+		m := fromSender(atrest.User{DisplayName: c.name, Gender: c.gender}, LocPoke, LocPokeUnnamed)
+		if m.LocKey != c.key || m.LocArgs == nil || !slices.Equal(m.LocArgs, c.args) {
+			t.Errorf("%q: %+v", c.name, m)
+		}
+	}
+	m := fromSender(atrest.User{DisplayName: "Tomasz"}, LocFriendDone, LocFriendDoneUnnamed, "dorje-sempa", "42")
+	if m.LocKey != LocFriendDone || !slices.Equal(m.LocArgs, []string{"Tomasz", "dorje-sempa", "42"}) {
+		t.Errorf("named done today: %+v", m)
 	}
 }

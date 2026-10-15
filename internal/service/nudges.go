@@ -18,22 +18,42 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/push"
 )
 
-// Push loc-keys, rendered by the phones (design: Social › Nudges).
+// Push loc-keys, rendered by the phones (design: Social › Nudges). A sender without a
+// display name (it is optional, as are the username and e-mail) gets the _UNNAMED
+// keys, without the name argument, since a phone that draws the notification itself
+// from the key cannot fill in "a friend" (#17). Each key, named or not, also comes
+// in _MALE and _FEMALE (genderedKey).
 const (
-	LocFriendDone   = "FRIEND_DONE"    // args: name, practice, day count
-	LocPoke         = "POKE"           // args: name
-	LocStreakAtRisk = "STREAK_AT_RISK" // args: practice, day count
+	LocFriendDone        = "FRIEND_DONE"         // args: name, practice, day count
+	LocFriendDoneUnnamed = "FRIEND_DONE_UNNAMED" // args: practice, day count
+	LocPoke              = "POKE"                // args: name
+	LocPokeUnnamed       = "POKE_UNNAMED"        // no args
+	LocStreakAtRisk      = "STREAK_AT_RISK"      // args: practice, day count
 )
 
 // genderedKey picks the loc-key variant for the sender's grammatical gender, so the
 // phone can say "Anna ukończyła" rather than "ukończył(a)": FRIEND_DONE_FEMALE,
 // FRIEND_DONE_MALE, or the neutral key for nonbinary and unset (design: Localisation
-// › Grammatical gender). Every variant exists in every language's strings.
+// › Grammatical gender); likewise FRIEND_DONE_UNNAMED_FEMALE and so on. Every variant
+// exists in every language's strings.
 func genderedKey(key string, gender *string) string {
 	if gender != nil && (*gender == "male" || *gender == "female") {
 		return key + "_" + strings.ToUpper(*gender)
 	}
 	return key
+}
+
+// fromSender is the push from user with the loc-key named or unnamed for whether
+// the sender has a display name, gendered, and its arguments after the name.
+func fromSender(user atrest.User, named, unnamed string, args ...string) push.Message {
+	if args == nil {
+		args = []string{} // "loc-args": [], never null, which FCM refuses
+	}
+	name := strings.TrimSpace(user.DisplayName)
+	if name == "" {
+		return push.Message{LocKey: genderedKey(unnamed, user.Gender), LocArgs: args, ThreadID: user.ID.String()}
+	}
+	return push.Message{LocKey: genderedKey(named, user.Gender), LocArgs: append([]string{name}, args...), ThreadID: user.ID.String()}
 }
 
 var platforms = map[string]bool{"apns": true, "apns-sandbox": true, "fcm": true}
@@ -177,8 +197,7 @@ func (n *Nudges) DoneToday(ctx context.Context, user atrest.User, practice strin
 		return
 	}
 	for _, r := range recipients {
-		n.enqueue(r, push.Message{LocKey: genderedKey(LocFriendDone, user.Gender), LocArgs: []string{user.DisplayName, practice, strconv.Itoa(current)},
-			ThreadID: user.ID.String()})
+		n.enqueue(r, fromSender(user, LocFriendDone, LocFriendDoneUnnamed, practice, strconv.Itoa(current)))
 	}
 }
 
@@ -200,7 +219,7 @@ func (n *Nudges) Poke(ctx context.Context, user atrest.User, friendID uuid.UUID)
 	if rows == 0 {
 		return ErrAlreadyPoked
 	}
-	n.enqueue(friendID, push.Message{LocKey: genderedKey(LocPoke, user.Gender), LocArgs: []string{user.DisplayName}, ThreadID: user.ID.String()})
+	n.enqueue(friendID, fromSender(user, LocPoke, LocPokeUnnamed))
 	return nil
 }
 
