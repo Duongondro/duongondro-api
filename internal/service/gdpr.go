@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 )
 
@@ -18,11 +19,16 @@ import (
 type GDPR struct {
 	pool *pgxpool.Pool
 	q    *db.Queries
+	keys *atrest.Keys
 }
 
-func NewGDPR(pool *pgxpool.Pool) *GDPR { return &GDPR{pool: pool, q: db.New(pool)} }
+func NewGDPR(pool *pgxpool.Pool, keys *atrest.Keys) *GDPR {
+	return &GDPR{pool: pool, q: db.New(pool), keys: keys}
+}
 
-// Export is exactly what the server stores about one user, sealed blobs and all.
+// Export is exactly what the server stores about one user, sealed blobs and all;
+// what is encrypted at rest (internal/atrest) appears decrypted, as the user gave it,
+// and blind indexes stay out.
 // The phone decrypts the sealed sessions itself and merges them in, so the ZIP it
 // builds holds counts the server never saw. Every table appears under its own name
 // (TestExportCoversEveryTable keeps it that way); session tokens appear only as
@@ -30,24 +36,24 @@ func NewGDPR(pool *pgxpool.Pool) *GDPR { return &GDPR{pool: pool, q: db.New(pool
 type Export struct {
 	ExportedAt         time.Time                    `json:"exportedAt"`
 	AdmissionCodes     []db.ExportAdmissionCodesRow `json:"admission_codes"`
-	Users              db.User                      `json:"users"`
+	Users              atrest.User                  `json:"users"`
 	Sessions           []time.Time                  `json:"sessions"`
-	Devices            []db.Device                  `json:"devices"`
-	DeviceLists        *db.DeviceList               `json:"device_lists"`
+	Devices            []atrest.Device              `json:"devices"`
+	DeviceLists        *atrest.DeviceList           `json:"device_lists"`
 	Downloads          []string                     `json:"downloads"`
 	KeyWraps           []db.KeyWrap                 `json:"key_wraps"`
 	PracticeLogs       []db.PracticeLog             `json:"practice_logs"`
 	RecoveryBoxes      []db.RecoveryBox             `json:"recovery_boxes"`
 	InviteTree         *db.ExportInviteNodeRow      `json:"invite_tree"`
-	Invites            []db.Invite                  `json:"invites"`
-	InviteRedemptions  []db.InviteRedemption        `json:"invite_redemptions"`
-	Friendships        []db.ListFriendsRow          `json:"friendships"`
+	Invites            []atrest.Invite              `json:"invites"`
+	InviteRedemptions  []atrest.InviteRedemption    `json:"invite_redemptions"`
+	Friendships        []atrest.Friend              `json:"friendships"`
 	Blocks             []db.Block                   `json:"blocks"`
-	Reports            []db.ExportReportsRow        `json:"reports"`
-	Streaks            []db.Streak                  `json:"streaks"`
+	Reports            []atrest.Report              `json:"reports"`
+	Streaks            []atrest.Streak              `json:"streaks"`
 	Credentials        []db.ExportCredentialsRow    `json:"credentials"`
-	AuthIdentities     []db.ExportIdentitiesRow     `json:"auth_identities"`
-	MagicLinks         []db.ExportMagicLinksRow     `json:"magic_links"`
+	AuthIdentities     []atrest.ExportIdentity      `json:"auth_identities"`
+	MagicLinks         []atrest.ExportMagicLink     `json:"magic_links"`
 	WebauthnSessions   []string                     `json:"webauthn_sessions"`
 	PushTokens         []db.ExportPushTokensRow     `json:"push_tokens"`
 	Nudges             []db.Nudge                   `json:"nudges"`
@@ -84,7 +90,8 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		q := g.q.WithTx(tx)
 		var err error
 		out.ExportedAt = time.Now().UTC()
-		if out.Users, err = q.GetUser(ctx, userID); err != nil {
+		k := g.keys
+		if out.Users, err = k.User(q.GetUser(ctx, userID)); err != nil {
 			return err
 		}
 		if out.AdmissionCodes, err = q.ExportAdmissionCodes(ctx, &userID); err != nil {
@@ -93,10 +100,10 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		if out.Sessions, err = q.ExportSessions(ctx, userID); err != nil {
 			return err
 		}
-		if out.Devices, err = q.ListDevices(ctx, userID); err != nil {
+		if out.Devices, err = k.Devices(q.ListDevices(ctx, userID)); err != nil {
 			return err
 		}
-		if list, err := q.GetDeviceList(ctx, userID); err == nil {
+		if list, err := k.DeviceList(q.GetDeviceList(ctx, userID)); err == nil {
 			out.DeviceLists = &list
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -115,31 +122,31 @@ func (g *GDPR) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if out.Invites, err = q.ListInvites(ctx, userID); err != nil {
+		if out.Invites, err = k.Invites(q.ListInvites(ctx, userID)); err != nil {
 			return err
 		}
-		if out.InviteRedemptions, err = q.ExportRedemptions(ctx, userID); err != nil {
+		if out.InviteRedemptions, err = k.InviteRedemptions(q.ExportRedemptions(ctx, userID)); err != nil {
 			return err
 		}
-		if out.Friendships, err = q.ListFriends(ctx, userID); err != nil {
+		if out.Friendships, err = k.Friends(q.ListFriends(ctx, userID)); err != nil {
 			return err
 		}
 		if out.Blocks, err = q.ListBlocks(ctx, userID); err != nil {
 			return err
 		}
-		if out.Reports, err = q.ExportReports(ctx, userID); err != nil {
+		if out.Reports, err = k.Reports(q.ExportReports(ctx, userID)); err != nil {
 			return err
 		}
-		if out.Streaks, err = q.OwnStreaks(ctx, userID); err != nil {
+		if out.Streaks, err = sortStreaks(k.Streaks(q.OwnStreaks(ctx, userID))); err != nil {
 			return err
 		}
 		if out.Credentials, err = q.ExportCredentials(ctx, userID); err != nil {
 			return err
 		}
-		if out.AuthIdentities, err = q.ExportIdentities(ctx, userID); err != nil {
+		if out.AuthIdentities, err = k.ExportIdentities(q.ExportIdentities(ctx, userID)); err != nil {
 			return err
 		}
-		if out.MagicLinks, err = q.ExportMagicLinks(ctx, userID); err != nil {
+		if out.MagicLinks, err = k.ExportMagicLinks(q.ExportMagicLinks(ctx, userID)); err != nil {
 			return err
 		}
 		out.WebauthnSessions, out.AuthNonces, out.PurgeLog, out.Downloads = []string{}, []string{}, []string{}, []string{}

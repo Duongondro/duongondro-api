@@ -2,7 +2,12 @@
 //
 //	duongondro-api [serve]   serve on LISTEN_ADDR, else 127.0.0.1:PORT (the shared
 //	                         server's env file sets PORT), else 127.0.0.1:8080; behind Caddy
-//	duongondro-api migrate   apply the database migrations and exit
+//	duongondro-api migrate   apply the database migrations and exit; with
+//	                         SECRET_KEY_BASE_PREVIOUS set, then reseal every encrypted
+//	                         column under SECRET_KEY_BASE (a key rotation). There is
+//	                         no separate reseal command: run while the server runs
+//	                         with other keys, it would break it. migrate runs with
+//	                         the service stopped, before it starts.
 //	duongondro-api reapply-purges
 //	                         after restoring a backup, delete again every account
 //	                         purged since (only hashes of their ids are kept)
@@ -10,8 +15,13 @@
 //	                         print fresh single-use admission codes, the sign-up
 //	                         gate for members nobody can invite (the first ones)
 //
-// DATABASE_URL is required for all of them. Migrations are not applied by serve: the
-// service script runs migrate first, as in CodeShare.
+// DATABASE_URL is required for all of them, and SECRET_KEY_BASE for all but admit:
+// base64 of 64 random bytes (`openssl rand -base64 64`), from which the keys of the
+// columns encrypted at rest and their blind indexes are derived (internal/atrest).
+// Release builds refuse to start without it; DEV builds fall back to a fixed
+// development key. SECRET_KEY_BASE_PREVIOUS, set only during a rotation, is the key
+// being replaced. Migrations are not applied by serve: the service script runs
+// migrate first, as in CodeShare.
 //
 // serve also reads:
 //
@@ -57,6 +67,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/Duongondro/duongondro-api/internal/apple"
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/buildinfo"
 	"github.com/Duongondro/duongondro-api/internal/migrate"
 	"github.com/Duongondro/duongondro-api/internal/oidc"
@@ -102,22 +113,36 @@ func openPool(ctx context.Context) (*pgxpool.Pool, error) {
 	return pgxpool.New(ctx, dsn)
 }
 
+// loadKeys reads SECRET_KEY_BASE (and SECRET_KEY_BASE_PREVIOUS); only DEV builds
+// have a default.
+func loadKeys() (*atrest.Keys, error) {
+	return atrest.FromEnv(os.Getenv, devSecretKeyBase)
+}
+
 func runMigrate(ctx context.Context) error {
+	keys, err := loadKeys()
+	if err != nil {
+		return err
+	}
 	pool, err := openPool(ctx)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	return migrate.Up(ctx, pool)
+	return migrate.Up(ctx, pool, keys)
 }
 
 func reapplyPurges(ctx context.Context) error {
+	keys, err := loadKeys()
+	if err != nil {
+		return err
+	}
 	pool, err := openPool(ctx)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	n, err := service.NewGDPR(pool).ReapplyPurges(ctx)
+	n, err := service.NewGDPR(pool, keys).ReapplyPurges(ctx)
 	if err == nil {
 		slog.Info("reapplied purges", "accounts", n)
 	}
@@ -170,6 +195,10 @@ func required(names ...string) error {
 }
 
 func serve(ctx context.Context) error {
+	keys, err := loadKeys()
+	if err != nil {
+		return err
+	}
 	pool, err := openPool(ctx)
 	if err != nil {
 		return err
@@ -187,6 +216,7 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	cfg.Keys = keys
 	e, nudges, err := server.New(pool, cfg)
 	if err != nil {
 		return err

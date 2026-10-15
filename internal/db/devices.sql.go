@@ -12,26 +12,36 @@ import (
 )
 
 const createDevice = `-- name: CreateDevice :one
-INSERT INTO devices (user_id, public_key, tier) VALUES ($1, $2, $3)
-ON CONFLICT (user_id, public_key) DO NOTHING
-RETURNING id, user_id, public_key, tier, created_at
+INSERT INTO devices (id, user_id, public_key_encrypted, public_key_hash, tier) VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (user_id, public_key_hash) DO NOTHING
+RETURNING id, user_id, tier, created_at, public_key_encrypted, public_key_hash
 `
 
 type CreateDeviceParams struct {
-	UserID    uuid.UUID `json:"userId"`
-	PublicKey []byte    `json:"publicKey"`
-	Tier      string    `json:"tier"`
+	ID                 uuid.UUID `json:"id"`
+	UserID             uuid.UUID `json:"userId"`
+	PublicKeyEncrypted []byte    `json:"publicKeyEncrypted"`
+	PublicKeyHash      []byte    `json:"publicKeyHash"`
+	Tier               string    `json:"tier"`
 }
 
+// The id is drawn by the caller: the sealed key is bound to it.
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error) {
-	row := q.db.QueryRow(ctx, createDevice, arg.UserID, arg.PublicKey, arg.Tier)
+	row := q.db.QueryRow(ctx, createDevice,
+		arg.ID,
+		arg.UserID,
+		arg.PublicKeyEncrypted,
+		arg.PublicKeyHash,
+		arg.Tier,
+	)
 	var i Device
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
-		&i.PublicKey,
 		&i.Tier,
 		&i.CreatedAt,
+		&i.PublicKeyEncrypted,
+		&i.PublicKeyHash,
 	)
 	return i, err
 }
@@ -54,7 +64,7 @@ func (q *Queries) DeleteDevice(ctx context.Context, arg DeleteDeviceParams) (int
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, user_id, public_key, tier, created_at FROM devices WHERE id = $1
+SELECT id, user_id, tier, created_at, public_key_encrypted, public_key_hash FROM devices WHERE id = $1
 `
 
 func (q *Queries) GetDevice(ctx context.Context, id uuid.UUID) (Device, error) {
@@ -63,37 +73,39 @@ func (q *Queries) GetDevice(ctx context.Context, id uuid.UUID) (Device, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
-		&i.PublicKey,
 		&i.Tier,
 		&i.CreatedAt,
+		&i.PublicKeyEncrypted,
+		&i.PublicKeyHash,
 	)
 	return i, err
 }
 
 const getDeviceByKey = `-- name: GetDeviceByKey :one
-SELECT id, user_id, public_key, tier, created_at FROM devices WHERE user_id = $1 AND public_key = $2
+SELECT id, user_id, tier, created_at, public_key_encrypted, public_key_hash FROM devices WHERE user_id = $1 AND public_key_hash = $2
 `
 
 type GetDeviceByKeyParams struct {
-	UserID    uuid.UUID `json:"userId"`
-	PublicKey []byte    `json:"publicKey"`
+	UserID        uuid.UUID `json:"userId"`
+	PublicKeyHash []byte    `json:"publicKeyHash"`
 }
 
 func (q *Queries) GetDeviceByKey(ctx context.Context, arg GetDeviceByKeyParams) (Device, error) {
-	row := q.db.QueryRow(ctx, getDeviceByKey, arg.UserID, arg.PublicKey)
+	row := q.db.QueryRow(ctx, getDeviceByKey, arg.UserID, arg.PublicKeyHash)
 	var i Device
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
-		&i.PublicKey,
 		&i.Tier,
 		&i.CreatedAt,
+		&i.PublicKeyEncrypted,
+		&i.PublicKeyHash,
 	)
 	return i, err
 }
 
 const getDeviceList = `-- name: GetDeviceList :one
-SELECT user_id, version, payload, signature, updated_at FROM device_lists WHERE user_id = $1
+SELECT user_id, version, signature, updated_at, payload_encrypted FROM device_lists WHERE user_id = $1
 `
 
 func (q *Queries) GetDeviceList(ctx context.Context, userID uuid.UUID) (DeviceList, error) {
@@ -102,15 +114,15 @@ func (q *Queries) GetDeviceList(ctx context.Context, userID uuid.UUID) (DeviceLi
 	err := row.Scan(
 		&i.UserID,
 		&i.Version,
-		&i.Payload,
 		&i.Signature,
 		&i.UpdatedAt,
+		&i.PayloadEncrypted,
 	)
 	return i, err
 }
 
 const listDevices = `-- name: ListDevices :many
-SELECT id, user_id, public_key, tier, created_at FROM devices WHERE user_id = $1 ORDER BY created_at, id
+SELECT id, user_id, tier, created_at, public_key_encrypted, public_key_hash FROM devices WHERE user_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListDevices(ctx context.Context, userID uuid.UUID) ([]Device, error) {
@@ -125,9 +137,10 @@ func (q *Queries) ListDevices(ctx context.Context, userID uuid.UUID) ([]Device, 
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
-			&i.PublicKey,
 			&i.Tier,
 			&i.CreatedAt,
+			&i.PublicKeyEncrypted,
+			&i.PublicKeyHash,
 		); err != nil {
 			return nil, err
 		}
@@ -140,18 +153,18 @@ func (q *Queries) ListDevices(ctx context.Context, userID uuid.UUID) ([]Device, 
 }
 
 const putDeviceList = `-- name: PutDeviceList :execrows
-INSERT INTO device_lists (user_id, version, payload, signature) VALUES ($1, $2, $3, $4)
+INSERT INTO device_lists (user_id, version, payload_encrypted, signature) VALUES ($1, $2, $3, $4)
 ON CONFLICT (user_id) DO UPDATE SET
-    version = EXCLUDED.version, payload = EXCLUDED.payload,
+    version = EXCLUDED.version, payload_encrypted = EXCLUDED.payload_encrypted,
     signature = EXCLUDED.signature, updated_at = now()
 WHERE device_lists.version < EXCLUDED.version
 `
 
 type PutDeviceListParams struct {
-	UserID    uuid.UUID `json:"userId"`
-	Version   int64     `json:"version"`
-	Payload   []byte    `json:"payload"`
-	Signature []byte    `json:"signature"`
+	UserID           uuid.UUID `json:"userId"`
+	Version          int64     `json:"version"`
+	PayloadEncrypted []byte    `json:"payloadEncrypted"`
+	Signature        []byte    `json:"signature"`
 }
 
 // Only a higher version replaces the stored list.
@@ -159,7 +172,7 @@ func (q *Queries) PutDeviceList(ctx context.Context, arg PutDeviceListParams) (i
 	result, err := q.db.Exec(ctx, putDeviceList,
 		arg.UserID,
 		arg.Version,
-		arg.Payload,
+		arg.PayloadEncrypted,
 		arg.Signature,
 	)
 	if err != nil {

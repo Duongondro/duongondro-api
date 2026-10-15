@@ -1,17 +1,18 @@
 -- name: ReleasePushToken :exec
 -- A token reaches one device: drop it from any other before storing it.
-DELETE FROM push_tokens WHERE platform = $1 AND token = $2 AND device_id <> $3;
+DELETE FROM push_tokens WHERE platform = $1 AND token_hash = $2 AND device_id <> $3;
 
 -- name: PutPushToken :exec
-INSERT INTO push_tokens (device_id, platform, token) VALUES ($1, $2, $3)
-ON CONFLICT (device_id) DO UPDATE SET platform = EXCLUDED.platform, token = EXCLUDED.token, updated_at = now();
+INSERT INTO push_tokens (device_id, platform, token_encrypted, token_hash) VALUES ($1, $2, $3, $4)
+ON CONFLICT (device_id) DO UPDATE SET platform = EXCLUDED.platform, token_encrypted = EXCLUDED.token_encrypted,
+    token_hash = EXCLUDED.token_hash, updated_at = now();
 
 -- name: DeletePushToken :execrows
 DELETE FROM push_tokens WHERE device_id = $1;
 
 -- name: DropPushToken :exec
 -- The provider reported the token unregistered.
-DELETE FROM push_tokens WHERE platform = $1 AND token = $2;
+DELETE FROM push_tokens WHERE platform = $1 AND token_hash = $2;
 
 -- name: PushTokensOf :many
 SELECT push_tokens.* FROM push_tokens JOIN devices ON devices.id = push_tokens.device_id
@@ -37,7 +38,7 @@ ORDER BY deadline_at
 LIMIT 500;
 
 -- name: MarkAtRiskSent :exec
-UPDATE streaks SET at_risk_sent_seq = $3 WHERE user_id = $1 AND practice = $2 AND seq = $3;
+UPDATE streaks SET at_risk_sent_seq = $3 WHERE user_id = $1 AND practice_hash = $2 AND seq = $3;
 
 -- name: ExportPushTokens :many
 SELECT push_tokens.device_id, push_tokens.platform, push_tokens.updated_at FROM push_tokens

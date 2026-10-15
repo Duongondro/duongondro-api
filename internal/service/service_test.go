@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/dbtest"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
@@ -20,6 +21,7 @@ type fixture struct {
 	t        *testing.T
 	pool     *pgxpool.Pool
 	q        *db.Queries
+	keys     *atrest.Keys
 	accounts *Accounts
 	devices  *Devices
 	wraps    *Wraps
@@ -29,14 +31,15 @@ type fixture struct {
 
 func setup(t *testing.T) *fixture {
 	pool := dbtest.Fresh(t, "service_tests")
-	devices := NewDevices(pool)
-	return &fixture{t: t, pool: pool, q: db.New(pool), accounts: NewAccounts(pool), devices: devices,
-		wraps: NewWraps(pool, devices), logs: NewLogs(pool), recovery: NewRecovery(pool)}
+	keys := dbtest.Keys()
+	devices := NewDevices(pool, keys)
+	return &fixture{t: t, pool: pool, q: db.New(pool), keys: keys, accounts: NewAccounts(pool, keys), devices: devices,
+		wraps: NewWraps(pool, keys, devices), logs: NewLogs(pool), recovery: NewRecovery(pool)}
 }
 
 // user creates an account with its node in the invite tree, as every account has.
-func (f *fixture) user() db.User {
-	u, err := f.q.CreateUser(f.t.Context())
+func (f *fixture) user() atrest.User {
+	u, err := f.keys.User(f.q.CreateUser(f.t.Context()))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -46,8 +49,8 @@ func (f *fixture) user() db.User {
 	return u
 }
 
-func (f *fixture) reload(u db.User) db.User {
-	u, err := f.q.GetUser(f.t.Context(), u.ID)
+func (f *fixture) reload(u atrest.User) atrest.User {
+	u, err := f.keys.User(f.q.GetUser(f.t.Context(), u.ID))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -55,7 +58,7 @@ func (f *fixture) reload(u db.User) db.User {
 }
 
 // withIdentity gives u an identity key and returns its private half.
-func (f *fixture) withIdentity(u db.User) (db.User, ed25519.PrivateKey) {
+func (f *fixture) withIdentity(u atrest.User) (atrest.User, ed25519.PrivateKey) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	if err := f.accounts.SetIdentity(f.t.Context(), u, pub); err != nil {
 		f.t.Fatal(err)
@@ -63,7 +66,7 @@ func (f *fixture) withIdentity(u db.User) (db.User, ed25519.PrivateKey) {
 	return f.reload(u), priv
 }
 
-func (f *fixture) device(u db.User, tier string) (db.Device, *ecdh.PrivateKey) {
+func (f *fixture) device(u atrest.User, tier string) (atrest.Device, *ecdh.PrivateKey) {
 	key, _ := ecdh.P256().GenerateKey(rand.Reader)
 	dev, created, err := f.devices.Register(f.t.Context(), u.ID, key.PublicKey().Bytes(), tier)
 	if err != nil || !created {
@@ -79,7 +82,7 @@ func random(n int) []byte {
 }
 
 // signedWrap wraps a fresh secret to dev the way a client would, signed by identity.
-func signedWrap(u db.User, identity ed25519.PrivateKey, dev db.Device, kind e2ee.WrapKind, version int) WrapInput {
+func signedWrap(u atrest.User, identity ed25519.PrivateKey, dev atrest.Device, kind e2ee.WrapKind, version int) WrapInput {
 	recipient, _ := e2ee.ParsePublicKey(dev.PublicKey)
 	eph, _ := ecdh.P256().GenerateKey(rand.Reader)
 	aad := e2ee.WrapAAD(e2ee.UUID(u.ID), uint32(version), e2ee.UUID(dev.ID), kind)
@@ -224,12 +227,12 @@ func TestRotation(t *testing.T) {
 	a, _ := f.device(u, "hardware")
 	b, _ := f.device(u, "software")
 	u, identity := f.withIdentity(u)
-	for _, d := range []db.Device{a, b} {
+	for _, d := range []atrest.Device{a, b} {
 		if err := f.wraps.Put(t.Context(), u, d.ID, signedWrap(u, identity, d, e2ee.KindPracticeKey, 1)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	rw := func(d db.Device) RotationWrap {
+	rw := func(d atrest.Device) RotationWrap {
 		return RotationWrap{DeviceID: d.ID, WrapInput: signedWrap(u, identity, d, e2ee.KindPracticeKey, 2)}
 	}
 	if err := f.wraps.Rotate(t.Context(), u, 2, []RotationWrap{rw(a)}); !isValidation(err) {
@@ -324,7 +327,7 @@ func TestLogsAndSync(t *testing.T) {
 	}
 }
 
-func signedBox(u db.User, identity ed25519.PrivateKey, kind int) ([]byte, []byte) {
+func signedBox(u atrest.User, identity ed25519.PrivateKey, kind int) ([]byte, []byte) {
 	box := random(60)
 	return box, e2ee.SignRecoveryBox(identity, e2ee.UUID(u.ID), e2ee.WrapKind(kind), box)
 }

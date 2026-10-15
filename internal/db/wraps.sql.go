@@ -45,7 +45,7 @@ func (q *Queries) ListWraps(ctx context.Context, deviceID uuid.UUID) ([]KeyWrap,
 }
 
 const lockUser = `-- name: LockUser :one
-SELECT id, identity_public_key, key_version, created_at, display_name, username, gender FROM users WHERE id = $1 FOR UPDATE
+SELECT id, key_version, created_at, identity_public_key_encrypted, display_name_encrypted, username_encrypted, username_hash, gender_encrypted FROM users WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -53,18 +53,19 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.IdentityPublicKey,
 		&i.KeyVersion,
 		&i.CreatedAt,
-		&i.DisplayName,
-		&i.Username,
-		&i.Gender,
+		&i.IdentityPublicKeyEncrypted,
+		&i.DisplayNameEncrypted,
+		&i.UsernameEncrypted,
+		&i.UsernameHash,
+		&i.GenderEncrypted,
 	)
 	return i, err
 }
 
 const practiceKeyHolders = `-- name: PracticeKeyHolders :many
-SELECT devices.id, devices.public_key FROM devices
+SELECT devices.id, devices.public_key_encrypted FROM devices
 JOIN key_wraps ON key_wraps.device_id = devices.id
 WHERE devices.user_id = $1 AND key_wraps.kind = 1 AND key_wraps.key_version = $2
 ORDER BY devices.id
@@ -76,8 +77,8 @@ type PracticeKeyHoldersParams struct {
 }
 
 type PracticeKeyHoldersRow struct {
-	ID        uuid.UUID `json:"id"`
-	PublicKey []byte    `json:"publicKey"`
+	ID                 uuid.UUID `json:"id"`
+	PublicKeyEncrypted []byte    `json:"publicKeyEncrypted"`
 }
 
 // Devices holding a wrap of the given practice-key version: a rotation must wrap the
@@ -91,7 +92,7 @@ func (q *Queries) PracticeKeyHolders(ctx context.Context, arg PracticeKeyHolders
 	var items []PracticeKeyHoldersRow
 	for rows.Next() {
 		var i PracticeKeyHoldersRow
-		if err := rows.Scan(&i.ID, &i.PublicKey); err != nil {
+		if err := rows.Scan(&i.ID, &i.PublicKeyEncrypted); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -20,12 +20,14 @@ type AdmissionCode struct {
 }
 
 type AuthIdentity struct {
-	Provider     string    `json:"provider"`
-	Subject      string    `json:"subject"`
-	UserID       uuid.UUID `json:"userId"`
-	Email        *string   `json:"email"`
-	RefreshToken *string   `json:"refreshToken"`
-	CreatedAt    time.Time `json:"createdAt"`
+	Provider              string    `json:"provider"`
+	UserID                uuid.UUID `json:"userId"`
+	CreatedAt             time.Time `json:"createdAt"`
+	SubjectEncrypted      []byte    `json:"subjectEncrypted"`
+	SubjectHash           []byte    `json:"subjectHash"`
+	EmailEncrypted        []byte    `json:"emailEncrypted"`
+	EmailHash             []byte    `json:"emailHash"`
+	RefreshTokenEncrypted []byte    `json:"refreshTokenEncrypted"`
 }
 
 type AuthNonce struct {
@@ -40,11 +42,11 @@ type Block struct {
 }
 
 type Credential struct {
-	ID         []byte     `json:"id"`
-	UserID     uuid.UUID  `json:"userId"`
-	Data       []byte     `json:"data"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
+	ID            []byte     `json:"id"`
+	UserID        uuid.UUID  `json:"userId"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	LastUsedAt    *time.Time `json:"lastUsedAt"`
+	DataEncrypted []byte     `json:"dataEncrypted"`
 }
 
 type DatabaseGeneration struct {
@@ -53,19 +55,20 @@ type DatabaseGeneration struct {
 }
 
 type Device struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"userId"`
-	PublicKey []byte    `json:"publicKey"`
-	Tier      string    `json:"tier"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                 uuid.UUID `json:"id"`
+	UserID             uuid.UUID `json:"userId"`
+	Tier               string    `json:"tier"`
+	CreatedAt          time.Time `json:"createdAt"`
+	PublicKeyEncrypted []byte    `json:"publicKeyEncrypted"`
+	PublicKeyHash      []byte    `json:"publicKeyHash"`
 }
 
 type DeviceList struct {
-	UserID    uuid.UUID `json:"userId"`
-	Version   int64     `json:"version"`
-	Payload   []byte    `json:"payload"`
-	Signature []byte    `json:"signature"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	UserID           uuid.UUID `json:"userId"`
+	Version          int64     `json:"version"`
+	Signature        []byte    `json:"signature"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+	PayloadEncrypted []byte    `json:"payloadEncrypted"`
 }
 
 type Download struct {
@@ -82,23 +85,23 @@ type Friendship struct {
 }
 
 type Invite struct {
-	ID        string     `json:"id"`
-	InviterID uuid.UUID  `json:"inviterId"`
-	AuthHash  []byte     `json:"authHash"`
-	Payload   []byte     `json:"payload"`
-	Signature []byte     `json:"signature"`
-	Mac       []byte     `json:"mac"`
-	ExpiresAt time.Time  `json:"expiresAt"`
-	RevokedAt *time.Time `json:"revokedAt"`
-	CreatedAt time.Time  `json:"createdAt"`
+	ID               string     `json:"id"`
+	InviterID        uuid.UUID  `json:"inviterId"`
+	AuthHash         []byte     `json:"authHash"`
+	Signature        []byte     `json:"signature"`
+	Mac              []byte     `json:"mac"`
+	ExpiresAt        time.Time  `json:"expiresAt"`
+	RevokedAt        *time.Time `json:"revokedAt"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	PayloadEncrypted []byte     `json:"payloadEncrypted"`
 }
 
 type InviteRedemption struct {
-	InviteID  string    `json:"inviteId"`
-	InviteeID uuid.UUID `json:"inviteeId"`
-	Payload   []byte    `json:"payload"`
-	Signature []byte    `json:"signature"`
-	CreatedAt time.Time `json:"createdAt"`
+	InviteID         string    `json:"inviteId"`
+	InviteeID        uuid.UUID `json:"inviteeId"`
+	Signature        []byte    `json:"signature"`
+	CreatedAt        time.Time `json:"createdAt"`
+	PayloadEncrypted []byte    `json:"payloadEncrypted"`
 }
 
 type InviteTree struct {
@@ -120,14 +123,15 @@ type KeyWrap struct {
 }
 
 type MagicLink struct {
-	TokenHash   []byte     `json:"tokenHash"`
-	Email       string     `json:"email"`
-	InviteID    *string    `json:"inviteId"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	AdmissionID *uuid.UUID `json:"admissionId"`
-	CodeHash    []byte     `json:"codeHash"`
-	WrongCodes  int16      `json:"wrongCodes"`
-	CodeDeadAt  *time.Time `json:"codeDeadAt"`
+	TokenHash      []byte     `json:"tokenHash"`
+	InviteID       *string    `json:"inviteId"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	AdmissionID    *uuid.UUID `json:"admissionId"`
+	CodeHash       []byte     `json:"codeHash"`
+	WrongCodes     int16      `json:"wrongCodes"`
+	CodeDeadAt     *time.Time `json:"codeDeadAt"`
+	EmailEncrypted []byte     `json:"emailEncrypted"`
+	EmailHash      []byte     `json:"emailHash"`
 }
 
 type Nudge struct {
@@ -155,10 +159,11 @@ type PurgeLog struct {
 }
 
 type PushToken struct {
-	DeviceID  uuid.UUID `json:"deviceId"`
-	Platform  string    `json:"platform"`
-	Token     string    `json:"token"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	DeviceID       uuid.UUID `json:"deviceId"`
+	Platform       string    `json:"platform"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	TokenEncrypted []byte    `json:"tokenEncrypted"`
+	TokenHash      []byte    `json:"tokenHash"`
 }
 
 type RecoveryBox struct {
@@ -170,11 +175,11 @@ type RecoveryBox struct {
 }
 
 type Report struct {
-	ID         uuid.UUID  `json:"id"`
-	ReporterID uuid.UUID  `json:"reporterId"`
-	ReportedID *uuid.UUID `json:"reportedId"`
-	Reason     string     `json:"reason"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	ID              uuid.UUID  `json:"id"`
+	ReporterID      uuid.UUID  `json:"reporterId"`
+	ReportedID      *uuid.UUID `json:"reportedId"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	ReasonEncrypted []byte     `json:"reasonEncrypted"`
 }
 
 type Session struct {
@@ -185,34 +190,36 @@ type Session struct {
 }
 
 type Streak struct {
-	UserID        uuid.UUID `json:"userId"`
-	Practice      string    `json:"practice"`
-	Seq           int64     `json:"seq"`
-	Payload       []byte    `json:"payload"`
-	Signature     []byte    `json:"signature"`
-	DeadlineAt    time.Time `json:"deadlineAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
-	AtRiskSentSeq int64     `json:"atRiskSentSeq"`
+	UserID            uuid.UUID `json:"userId"`
+	Seq               int64     `json:"seq"`
+	Signature         []byte    `json:"signature"`
+	DeadlineAt        time.Time `json:"deadlineAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	AtRiskSentSeq     int64     `json:"atRiskSentSeq"`
+	PracticeEncrypted []byte    `json:"practiceEncrypted"`
+	PracticeHash      []byte    `json:"practiceHash"`
+	PayloadEncrypted  []byte    `json:"payloadEncrypted"`
 }
 
 type User struct {
-	ID                uuid.UUID `json:"id"`
-	IdentityPublicKey []byte    `json:"identityPublicKey"`
-	KeyVersion        int32     `json:"keyVersion"`
-	CreatedAt         time.Time `json:"createdAt"`
-	DisplayName       string    `json:"displayName"`
-	Username          *string   `json:"username"`
-	Gender            *string   `json:"gender"`
+	ID                         uuid.UUID `json:"id"`
+	KeyVersion                 int32     `json:"keyVersion"`
+	CreatedAt                  time.Time `json:"createdAt"`
+	IdentityPublicKeyEncrypted []byte    `json:"identityPublicKeyEncrypted"`
+	DisplayNameEncrypted       []byte    `json:"displayNameEncrypted"`
+	UsernameEncrypted          []byte    `json:"usernameEncrypted"`
+	UsernameHash               []byte    `json:"usernameHash"`
+	GenderEncrypted            []byte    `json:"genderEncrypted"`
 }
 
 type WebauthnSession struct {
-	ID          uuid.UUID  `json:"id"`
-	Data        []byte     `json:"data"`
-	UserID      *uuid.UUID `json:"userId"`
-	InviteID    *string    `json:"inviteId"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	AdmissionID *uuid.UUID `json:"admissionId"`
-	Username    *string    `json:"username"`
-	DisplayName *string    `json:"displayName"`
-	Gender      *string    `json:"gender"`
+	ID                   uuid.UUID  `json:"id"`
+	Data                 []byte     `json:"data"`
+	UserID               *uuid.UUID `json:"userId"`
+	InviteID             *string    `json:"inviteId"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	AdmissionID          *uuid.UUID `json:"admissionId"`
+	UsernameEncrypted    []byte     `json:"usernameEncrypted"`
+	DisplayNameEncrypted []byte     `json:"displayNameEncrypted"`
+	GenderEncrypted      []byte     `json:"genderEncrypted"`
 }

@@ -58,18 +58,18 @@ func (q *Queries) Block(ctx context.Context, arg BlockParams) error {
 }
 
 const createInvite = `-- name: CreateInvite :exec
-INSERT INTO invites (id, inviter_id, auth_hash, payload, signature, mac, expires_at)
+INSERT INTO invites (id, inviter_id, auth_hash, payload_encrypted, signature, mac, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type CreateInviteParams struct {
-	ID        string    `json:"id"`
-	InviterID uuid.UUID `json:"inviterId"`
-	AuthHash  []byte    `json:"authHash"`
-	Payload   []byte    `json:"payload"`
-	Signature []byte    `json:"signature"`
-	Mac       []byte    `json:"mac"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	ID               string    `json:"id"`
+	InviterID        uuid.UUID `json:"inviterId"`
+	AuthHash         []byte    `json:"authHash"`
+	PayloadEncrypted []byte    `json:"payloadEncrypted"`
+	Signature        []byte    `json:"signature"`
+	Mac              []byte    `json:"mac"`
+	ExpiresAt        time.Time `json:"expiresAt"`
 }
 
 func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) error {
@@ -77,7 +77,7 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) erro
 		arg.ID,
 		arg.InviterID,
 		arg.AuthHash,
-		arg.Payload,
+		arg.PayloadEncrypted,
 		arg.Signature,
 		arg.Mac,
 		arg.ExpiresAt,
@@ -102,34 +102,39 @@ func (q *Queries) CreateInviteNode(ctx context.Context, arg CreateInviteNodePara
 	return err
 }
 
-const createReport = `-- name: CreateReport :one
-INSERT INTO reports (reporter_id, reported_id, reason) VALUES ($1, $2, $3) RETURNING id
+const createReport = `-- name: CreateReport :exec
+INSERT INTO reports (id, reporter_id, reported_id, reason_encrypted) VALUES ($1, $2, $3, $4)
 `
 
 type CreateReportParams struct {
-	ReporterID uuid.UUID  `json:"reporterId"`
-	ReportedID *uuid.UUID `json:"reportedId"`
-	Reason     string     `json:"reason"`
+	ID              uuid.UUID  `json:"id"`
+	ReporterID      uuid.UUID  `json:"reporterId"`
+	ReportedID      *uuid.UUID `json:"reportedId"`
+	ReasonEncrypted []byte     `json:"reasonEncrypted"`
 }
 
-func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createReport, arg.ReporterID, arg.ReportedID, arg.Reason)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+// The id is drawn by the caller: the sealed reason is bound to it.
+func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) error {
+	_, err := q.db.Exec(ctx, createReport,
+		arg.ID,
+		arg.ReporterID,
+		arg.ReportedID,
+		arg.ReasonEncrypted,
+	)
+	return err
 }
 
 const deleteStreak = `-- name: DeleteStreak :execrows
-DELETE FROM streaks WHERE user_id = $1 AND practice = $2
+DELETE FROM streaks WHERE user_id = $1 AND practice_hash = $2
 `
 
 type DeleteStreakParams struct {
-	UserID   uuid.UUID `json:"userId"`
-	Practice string    `json:"practice"`
+	UserID       uuid.UUID `json:"userId"`
+	PracticeHash []byte    `json:"practiceHash"`
 }
 
 func (q *Queries) DeleteStreak(ctx context.Context, arg DeleteStreakParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteStreak, arg.UserID, arg.Practice)
+	result, err := q.db.Exec(ctx, deleteStreak, arg.UserID, arg.PracticeHash)
 	if err != nil {
 		return 0, err
 	}
@@ -137,12 +142,13 @@ func (q *Queries) DeleteStreak(ctx context.Context, arg DeleteStreakParams) (int
 }
 
 const friendsStreaks = `-- name: FriendsStreaks :many
-SELECT streaks.user_id, streaks.practice, streaks.seq, streaks.payload, streaks.signature, streaks.deadline_at, streaks.updated_at, streaks.at_risk_sent_seq FROM streaks
+SELECT streaks.user_id, streaks.seq, streaks.signature, streaks.deadline_at, streaks.updated_at, streaks.at_risk_sent_seq, streaks.practice_encrypted, streaks.practice_hash, streaks.payload_encrypted FROM streaks
 JOIN friendships ON friendships.friend_id = streaks.user_id
 WHERE friendships.user_id = $1
-ORDER BY streaks.user_id, streaks.practice
+ORDER BY streaks.user_id
 `
 
+// The service orders each friend's practices by name, once opened.
 func (q *Queries) FriendsStreaks(ctx context.Context, userID uuid.UUID) ([]Streak, error) {
 	rows, err := q.db.Query(ctx, friendsStreaks, userID)
 	if err != nil {
@@ -154,13 +160,14 @@ func (q *Queries) FriendsStreaks(ctx context.Context, userID uuid.UUID) ([]Strea
 		var i Streak
 		if err := rows.Scan(
 			&i.UserID,
-			&i.Practice,
 			&i.Seq,
-			&i.Payload,
 			&i.Signature,
 			&i.DeadlineAt,
 			&i.UpdatedAt,
 			&i.AtRiskSentSeq,
+			&i.PracticeEncrypted,
+			&i.PracticeHash,
+			&i.PayloadEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -173,7 +180,7 @@ func (q *Queries) FriendsStreaks(ctx context.Context, userID uuid.UUID) ([]Strea
 }
 
 const getLiveInvite = `-- name: GetLiveInvite :one
-SELECT id, inviter_id, auth_hash, payload, signature, mac, expires_at, revoked_at, created_at FROM invites WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()
+SELECT id, inviter_id, auth_hash, signature, mac, expires_at, revoked_at, created_at, payload_encrypted FROM invites WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()
 `
 
 func (q *Queries) GetLiveInvite(ctx context.Context, id string) (Invite, error) {
@@ -183,37 +190,38 @@ func (q *Queries) GetLiveInvite(ctx context.Context, id string) (Invite, error) 
 		&i.ID,
 		&i.InviterID,
 		&i.AuthHash,
-		&i.Payload,
 		&i.Signature,
 		&i.Mac,
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.CreatedAt,
+		&i.PayloadEncrypted,
 	)
 	return i, err
 }
 
 const getStreak = `-- name: GetStreak :one
-SELECT user_id, practice, seq, payload, signature, deadline_at, updated_at, at_risk_sent_seq FROM streaks WHERE user_id = $1 AND practice = $2
+SELECT user_id, seq, signature, deadline_at, updated_at, at_risk_sent_seq, practice_encrypted, practice_hash, payload_encrypted FROM streaks WHERE user_id = $1 AND practice_hash = $2
 `
 
 type GetStreakParams struct {
-	UserID   uuid.UUID `json:"userId"`
-	Practice string    `json:"practice"`
+	UserID       uuid.UUID `json:"userId"`
+	PracticeHash []byte    `json:"practiceHash"`
 }
 
 func (q *Queries) GetStreak(ctx context.Context, arg GetStreakParams) (Streak, error) {
-	row := q.db.QueryRow(ctx, getStreak, arg.UserID, arg.Practice)
+	row := q.db.QueryRow(ctx, getStreak, arg.UserID, arg.PracticeHash)
 	var i Streak
 	err := row.Scan(
 		&i.UserID,
-		&i.Practice,
 		&i.Seq,
-		&i.Payload,
 		&i.Signature,
 		&i.DeadlineAt,
 		&i.UpdatedAt,
 		&i.AtRiskSentSeq,
+		&i.PracticeEncrypted,
+		&i.PracticeHash,
+		&i.PayloadEncrypted,
 	)
 	return i, err
 }
@@ -261,19 +269,19 @@ func (q *Queries) ListBlocks(ctx context.Context, blockerID uuid.UUID) ([]Block,
 }
 
 const listFriends = `-- name: ListFriends :many
-SELECT users.id, users.display_name, users.gender, users.identity_public_key, friendships.created_at, friendships.notify_done
+SELECT users.id, users.display_name_encrypted, users.gender_encrypted, users.identity_public_key_encrypted, friendships.created_at, friendships.notify_done
 FROM friendships JOIN users ON users.id = friendships.friend_id
 WHERE friendships.user_id = $1
 ORDER BY friendships.created_at, users.id
 `
 
 type ListFriendsRow struct {
-	ID                uuid.UUID `json:"id"`
-	DisplayName       string    `json:"displayName"`
-	Gender            *string   `json:"gender"`
-	IdentityPublicKey []byte    `json:"identityPublicKey"`
-	CreatedAt         time.Time `json:"createdAt"`
-	NotifyDone        bool      `json:"notifyDone"`
+	ID                         uuid.UUID `json:"id"`
+	DisplayNameEncrypted       []byte    `json:"displayNameEncrypted"`
+	GenderEncrypted            []byte    `json:"genderEncrypted"`
+	IdentityPublicKeyEncrypted []byte    `json:"identityPublicKeyEncrypted"`
+	CreatedAt                  time.Time `json:"createdAt"`
+	NotifyDone                 bool      `json:"notifyDone"`
 }
 
 func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFriendsRow, error) {
@@ -287,9 +295,9 @@ func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFrie
 		var i ListFriendsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.DisplayName,
-			&i.Gender,
-			&i.IdentityPublicKey,
+			&i.DisplayNameEncrypted,
+			&i.GenderEncrypted,
+			&i.IdentityPublicKeyEncrypted,
 			&i.CreatedAt,
 			&i.NotifyDone,
 		); err != nil {
@@ -304,7 +312,7 @@ func (q *Queries) ListFriends(ctx context.Context, userID uuid.UUID) ([]ListFrie
 }
 
 const listInvites = `-- name: ListInvites :many
-SELECT id, inviter_id, auth_hash, payload, signature, mac, expires_at, revoked_at, created_at FROM invites WHERE inviter_id = $1 ORDER BY created_at DESC
+SELECT id, inviter_id, auth_hash, signature, mac, expires_at, revoked_at, created_at, payload_encrypted FROM invites WHERE inviter_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListInvites(ctx context.Context, inviterID uuid.UUID) ([]Invite, error) {
@@ -320,12 +328,12 @@ func (q *Queries) ListInvites(ctx context.Context, inviterID uuid.UUID) ([]Invit
 			&i.ID,
 			&i.InviterID,
 			&i.AuthHash,
-			&i.Payload,
 			&i.Signature,
 			&i.Mac,
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.CreatedAt,
+			&i.PayloadEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -338,7 +346,7 @@ func (q *Queries) ListInvites(ctx context.Context, inviterID uuid.UUID) ([]Invit
 }
 
 const ownStreaks = `-- name: OwnStreaks :many
-SELECT user_id, practice, seq, payload, signature, deadline_at, updated_at, at_risk_sent_seq FROM streaks WHERE user_id = $1 ORDER BY practice
+SELECT user_id, seq, signature, deadline_at, updated_at, at_risk_sent_seq, practice_encrypted, practice_hash, payload_encrypted FROM streaks WHERE user_id = $1
 `
 
 func (q *Queries) OwnStreaks(ctx context.Context, userID uuid.UUID) ([]Streak, error) {
@@ -352,13 +360,14 @@ func (q *Queries) OwnStreaks(ctx context.Context, userID uuid.UUID) ([]Streak, e
 		var i Streak
 		if err := rows.Scan(
 			&i.UserID,
-			&i.Practice,
 			&i.Seq,
-			&i.Payload,
 			&i.Signature,
 			&i.DeadlineAt,
 			&i.UpdatedAt,
 			&i.AtRiskSentSeq,
+			&i.PracticeEncrypted,
+			&i.PracticeHash,
+			&i.PayloadEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -371,30 +380,33 @@ func (q *Queries) OwnStreaks(ctx context.Context, userID uuid.UUID) ([]Streak, e
 }
 
 const putStreak = `-- name: PutStreak :execrows
-INSERT INTO streaks (user_id, practice, seq, payload, signature, deadline_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (user_id, practice) DO UPDATE SET
-    seq = EXCLUDED.seq, payload = EXCLUDED.payload, signature = EXCLUDED.signature,
+INSERT INTO streaks (user_id, practice_encrypted, practice_hash, seq, payload_encrypted, signature, deadline_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (user_id, practice_hash) DO UPDATE SET
+    practice_encrypted = EXCLUDED.practice_encrypted, seq = EXCLUDED.seq,
+    payload_encrypted = EXCLUDED.payload_encrypted, signature = EXCLUDED.signature,
     deadline_at = EXCLUDED.deadline_at, updated_at = now()
 WHERE streaks.seq < EXCLUDED.seq
 `
 
 type PutStreakParams struct {
-	UserID     uuid.UUID `json:"userId"`
-	Practice   string    `json:"practice"`
-	Seq        int64     `json:"seq"`
-	Payload    []byte    `json:"payload"`
-	Signature  []byte    `json:"signature"`
-	DeadlineAt time.Time `json:"deadlineAt"`
+	UserID            uuid.UUID `json:"userId"`
+	PracticeEncrypted []byte    `json:"practiceEncrypted"`
+	PracticeHash      []byte    `json:"practiceHash"`
+	Seq               int64     `json:"seq"`
+	PayloadEncrypted  []byte    `json:"payloadEncrypted"`
+	Signature         []byte    `json:"signature"`
+	DeadlineAt        time.Time `json:"deadlineAt"`
 }
 
 // Only a higher seq replaces the stored statement.
 func (q *Queries) PutStreak(ctx context.Context, arg PutStreakParams) (int64, error) {
 	result, err := q.db.Exec(ctx, putStreak,
 		arg.UserID,
-		arg.Practice,
+		arg.PracticeEncrypted,
+		arg.PracticeHash,
 		arg.Seq,
-		arg.Payload,
+		arg.PayloadEncrypted,
 		arg.Signature,
 		arg.DeadlineAt,
 	)
@@ -405,22 +417,22 @@ func (q *Queries) PutStreak(ctx context.Context, arg PutStreakParams) (int64, er
 }
 
 const recordRedemption = `-- name: RecordRedemption :exec
-INSERT INTO invite_redemptions (invite_id, invitee_id, payload, signature) VALUES ($1, $2, $3, $4)
+INSERT INTO invite_redemptions (invite_id, invitee_id, payload_encrypted, signature) VALUES ($1, $2, $3, $4)
 ON CONFLICT (invite_id, invitee_id) DO NOTHING
 `
 
 type RecordRedemptionParams struct {
-	InviteID  string    `json:"inviteId"`
-	InviteeID uuid.UUID `json:"inviteeId"`
-	Payload   []byte    `json:"payload"`
-	Signature []byte    `json:"signature"`
+	InviteID         string    `json:"inviteId"`
+	InviteeID        uuid.UUID `json:"inviteeId"`
+	PayloadEncrypted []byte    `json:"payloadEncrypted"`
+	Signature        []byte    `json:"signature"`
 }
 
 func (q *Queries) RecordRedemption(ctx context.Context, arg RecordRedemptionParams) error {
 	_, err := q.db.Exec(ctx, recordRedemption,
 		arg.InviteID,
 		arg.InviteeID,
-		arg.Payload,
+		arg.PayloadEncrypted,
 		arg.Signature,
 	)
 	return err
@@ -444,16 +456,16 @@ func (q *Queries) RevokeInvite(ctx context.Context, arg RevokeInviteParams) (int
 }
 
 const setDisplayName = `-- name: SetDisplayName :exec
-UPDATE users SET display_name = $2 WHERE id = $1
+UPDATE users SET display_name_encrypted = $2 WHERE id = $1
 `
 
 type SetDisplayNameParams struct {
-	ID          uuid.UUID `json:"id"`
-	DisplayName string    `json:"displayName"`
+	ID                   uuid.UUID `json:"id"`
+	DisplayNameEncrypted []byte    `json:"displayNameEncrypted"`
 }
 
 func (q *Queries) SetDisplayName(ctx context.Context, arg SetDisplayNameParams) error {
-	_, err := q.db.Exec(ctx, setDisplayName, arg.ID, arg.DisplayName)
+	_, err := q.db.Exec(ctx, setDisplayName, arg.ID, arg.DisplayNameEncrypted)
 	return err
 }
 
@@ -493,43 +505,46 @@ func (q *Queries) Unfriend(ctx context.Context, arg UnfriendParams) (int64, erro
 
 const updateProfile = `-- name: UpdateProfile :exec
 UPDATE users SET
-    display_name = CASE WHEN $1::boolean THEN $2::text ELSE display_name END,
-    username = CASE WHEN $3::boolean THEN $4::text ELSE username END,
-    gender = CASE WHEN $5::boolean THEN $6::text ELSE gender END
-WHERE id = $7
+    display_name_encrypted = CASE WHEN $1::boolean THEN $2::bytea ELSE display_name_encrypted END,
+    username_encrypted = CASE WHEN $3::boolean THEN $4::bytea ELSE username_encrypted END,
+    username_hash = CASE WHEN $3::boolean THEN $5::bytea ELSE username_hash END,
+    gender_encrypted = CASE WHEN $6::boolean THEN $7::bytea ELSE gender_encrypted END
+WHERE id = $8
 `
 
 type UpdateProfileParams struct {
-	SetDisplayName bool      `json:"setDisplayName"`
-	DisplayName    string    `json:"displayName"`
-	SetUsername    bool      `json:"setUsername"`
-	Username       *string   `json:"username"`
-	SetGender      bool      `json:"setGender"`
-	Gender         *string   `json:"gender"`
-	ID             uuid.UUID `json:"id"`
+	SetDisplayName       bool      `json:"setDisplayName"`
+	DisplayNameEncrypted []byte    `json:"displayNameEncrypted"`
+	SetUsername          bool      `json:"setUsername"`
+	UsernameEncrypted    []byte    `json:"usernameEncrypted"`
+	UsernameHash         []byte    `json:"usernameHash"`
+	SetGender            bool      `json:"setGender"`
+	GenderEncrypted      []byte    `json:"genderEncrypted"`
+	ID                   uuid.UUID `json:"id"`
 }
 
-// Each field changes only when its set_ flag is true; username and gender may be set
-// to NULL.
+// Each field changes only when its set_ flag is true; each may be set to NULL (an
+// empty display name is NULL). The username and its hash change together.
 func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) error {
 	_, err := q.db.Exec(ctx, updateProfile,
 		arg.SetDisplayName,
-		arg.DisplayName,
+		arg.DisplayNameEncrypted,
 		arg.SetUsername,
-		arg.Username,
+		arg.UsernameEncrypted,
+		arg.UsernameHash,
 		arg.SetGender,
-		arg.Gender,
+		arg.GenderEncrypted,
 		arg.ID,
 	)
 	return err
 }
 
 const usernameTaken = `-- name: UsernameTaken :one
-SELECT EXISTS (SELECT 1 FROM users WHERE username = $1)
+SELECT EXISTS (SELECT 1 FROM users WHERE username_hash = $1)
 `
 
-func (q *Queries) UsernameTaken(ctx context.Context, username *string) (bool, error) {
-	row := q.db.QueryRow(ctx, usernameTaken, username)
+func (q *Queries) UsernameTaken(ctx context.Context, usernameHash []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, usernameTaken, usernameHash)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

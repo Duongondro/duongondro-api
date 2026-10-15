@@ -10,8 +10,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/migrate"
 )
+
+// SecretKeyBase is the test databases' SECRET_KEY_BASE: a fixed key, so a failing
+// test's schema can be read back with the same one.
+var SecretKeyBase = []byte("duongondro test SECRET_KEY_BASE, never used outside tests")
+
+var keys = func() *atrest.Keys {
+	k, err := atrest.New(SecretKeyBase, nil)
+	if err != nil {
+		panic(err)
+	}
+	return k
+}()
+
+// Keys are the keys Fresh migrates with, for the tests' services.
+func Keys() *atrest.Keys { return keys }
 
 // Fresh connects to TEST_DATABASE_URL with search_path set to schema, drops and
 // recreates that schema and migrates it. It skips the test when the variable is
@@ -20,6 +36,16 @@ import (
 // As in CodeShare, each test package passes a schema of its own, because go test
 // runs packages in parallel against the same database.
 func Fresh(t testing.TB, schema string) *pgxpool.Pool {
+	t.Helper()
+	pool := Empty(t, schema)
+	if err := migrate.Up(context.Background(), pool, keys); err != nil {
+		t.Fatal(err)
+	}
+	return pool
+}
+
+// Empty is Fresh without the migrations, for tests of the migrations themselves.
+func Empty(t testing.TB, schema string) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -41,9 +67,6 @@ func Fresh(t testing.TB, schema string) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	if _, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+ident+" CASCADE; CREATE SCHEMA "+ident); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate.Up(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
 	return pool

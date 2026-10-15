@@ -64,7 +64,7 @@ func (q *Queries) ExportLogs(ctx context.Context, userID uuid.UUID) ([]PracticeL
 }
 
 const exportRedemptions = `-- name: ExportRedemptions :many
-SELECT invite_id, invitee_id, payload, signature, created_at FROM invite_redemptions WHERE invitee_id = $1 ORDER BY created_at
+SELECT invite_id, invitee_id, signature, created_at, payload_encrypted FROM invite_redemptions WHERE invitee_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ExportRedemptions(ctx context.Context, inviteeID uuid.UUID) ([]InviteRedemption, error) {
@@ -79,9 +79,9 @@ func (q *Queries) ExportRedemptions(ctx context.Context, inviteeID uuid.UUID) ([
 		if err := rows.Scan(
 			&i.InviteID,
 			&i.InviteeID,
-			&i.Payload,
 			&i.Signature,
 			&i.CreatedAt,
+			&i.PayloadEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -94,14 +94,14 @@ func (q *Queries) ExportRedemptions(ctx context.Context, inviteeID uuid.UUID) ([
 }
 
 const exportReports = `-- name: ExportReports :many
-SELECT id, reported_id, reason, created_at FROM reports WHERE reporter_id = $1 ORDER BY created_at
+SELECT id, reported_id, reason_encrypted, created_at FROM reports WHERE reporter_id = $1 ORDER BY created_at
 `
 
 type ExportReportsRow struct {
-	ID         uuid.UUID  `json:"id"`
-	ReportedID *uuid.UUID `json:"reportedId"`
-	Reason     string     `json:"reason"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	ID              uuid.UUID  `json:"id"`
+	ReportedID      *uuid.UUID `json:"reportedId"`
+	ReasonEncrypted []byte     `json:"reasonEncrypted"`
+	CreatedAt       time.Time  `json:"createdAt"`
 }
 
 func (q *Queries) ExportReports(ctx context.Context, reporterID uuid.UUID) ([]ExportReportsRow, error) {
@@ -116,7 +116,7 @@ func (q *Queries) ExportReports(ctx context.Context, reporterID uuid.UUID) ([]Ex
 		if err := rows.Scan(
 			&i.ID,
 			&i.ReportedID,
-			&i.Reason,
+			&i.ReasonEncrypted,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

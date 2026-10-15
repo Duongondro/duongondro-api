@@ -129,8 +129,8 @@ func (a *fakeApple) Revoke(_ context.Context, token string) error {
 }
 
 func (f *fixture) signIn(verifiers map[string]TokenVerifier, mailer Mailer, apple AppleRevoker) (*SignIn, *Social) {
-	social := NewSocial(f.pool)
-	s, err := NewSignIn(f.pool, auth.New(f.pool), social, SignInConfig{RPID: testRPID, RPOrigins: []string{testOrigin},
+	social := NewSocial(f.pool, f.keys)
+	s, err := NewSignIn(f.pool, f.keys, auth.New(f.pool, f.keys), social, SignInConfig{RPID: testRPID, RPOrigins: []string{testOrigin},
 		Verifiers: verifiers, Mailer: mailer, Apple: apple})
 	if err != nil {
 		f.t.Fatal(err)
@@ -448,7 +448,7 @@ func TestMagicLinkCodes(t *testing.T) {
 
 	// An expired code is refused like a wrong one.
 	code, _ = request("di@example.com")
-	if _, err := f.pool.Exec(ctx, `UPDATE magic_links SET created_at = now() - interval '16 minutes' WHERE email = 'di@example.com'`); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE magic_links SET created_at = now() - interval '16 minutes' WHERE email_hash = $1`, f.keys.HashString("di@example.com")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemMagicLinkCode(ctx, "di@example.com", code); !isValidation(err) {
@@ -479,9 +479,9 @@ func TestMagicLinkCodeKeyIsPerProcess(t *testing.T) {
 	}
 	code, token := mailOf(t, mailer)
 	var stored []byte
-	_ = f.pool.QueryRow(ctx, `SELECT code_hash FROM magic_links WHERE email = 'fa@example.com'`).Scan(&stored)
+	_ = f.pool.QueryRow(ctx, `SELECT code_hash FROM magic_links WHERE email_hash = $1`, f.keys.HashString("fa@example.com")).Scan(&stored)
 	var tokenHash []byte
-	_ = f.pool.QueryRow(ctx, `SELECT token_hash FROM magic_links WHERE email = 'fa@example.com'`).Scan(&tokenHash)
+	_ = f.pool.QueryRow(ctx, `SELECT token_hash FROM magic_links WHERE email_hash = $1`, f.keys.HashString("fa@example.com")).Scan(&tokenHash)
 	if plain := sha(string(tokenHash) + NormalizeCode(code)); string(plain) == string(stored) {
 		t.Fatal("the code is stored as a plain hash")
 	}

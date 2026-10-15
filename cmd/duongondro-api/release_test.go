@@ -21,6 +21,9 @@ import (
 // route's path isn't in it, then runs it and checks that the route answers 404.
 // Ported from CodeShare.
 //
+// The same goes for the DEV builds' default SECRET_KEY_BASE (keys_dev.go): a release
+// binary has none, and refuses to start without SECRET_KEY_BASE.
+//
 // Needs no database: the pool connects lazily, and a 404 never reaches it. Builds two
 // binaries, so it's skipped with -short.
 func TestReleaseBinaryHasNoDevSession(t *testing.T) {
@@ -46,11 +49,20 @@ func TestReleaseBinaryHasNoDevSession(t *testing.T) {
 	}
 
 	// With the tag the path is there, so not finding it below means something.
-	if dev := build("server-dev", "-tags", "DEV"); !bytes.Contains(dev, []byte(path)) {
+	dev := build("server-dev", "-tags", "DEV")
+	if !bytes.Contains(dev, []byte(path)) {
 		t.Fatalf("a DEV binary doesn't contain %q: this test no longer detects the route", path)
 	}
-	if release := build("server"); bytes.Contains(release, []byte(path)) {
+	devKey := []byte("duongondro DEV SECRET_KEY_BASE")
+	if !bytes.Contains(dev, devKey) {
+		t.Fatalf("a DEV binary doesn't contain its default key: this test no longer detects it")
+	}
+	release := build("server")
+	if bytes.Contains(release, []byte(path)) {
 		t.Fatalf("the release binary contains %q", path)
+	}
+	if bytes.Contains(release, devKey) {
+		t.Fatal("the release binary contains the DEV builds' default SECRET_KEY_BASE")
 	}
 
 	port := freePort(t)
@@ -61,13 +73,25 @@ func TestReleaseBinaryHasNoDevSession(t *testing.T) {
 		return strings.HasPrefix(kv, "DATABASE_URL=") || strings.HasPrefix(kv, "LISTEN_ADDR=") ||
 			strings.HasPrefix(kv, "RP_") || strings.HasPrefix(kv, "APPLE_") || strings.HasPrefix(kv, "APNS_") ||
 			strings.HasPrefix(kv, "GOOGLE_") || strings.HasPrefix(kv, "FCM_") || strings.HasPrefix(kv, "MAIL_") ||
-			strings.HasPrefix(kv, "AWS_")
+			strings.HasPrefix(kv, "AWS_") || strings.HasPrefix(kv, "SECRET_KEY_BASE")
 	})
-	cmd.Env = append(env,
+	env = append(env,
 		"LISTEN_ADDR=127.0.0.1:"+port,
 		"DATABASE_URL=postgres://nobody@127.0.0.1:1/unused",
 		"RP_ID=localhost", "RP_ORIGINS=http://localhost:"+port,
 	)
+
+	// Without SECRET_KEY_BASE a release binary refuses to start, and migrate too.
+	for _, command := range []string{"serve", "migrate"} {
+		refused := exec.Command(filepath.Join(dir, "server"), command)
+		refused.Dir, refused.Env = dir, env
+		out, err := refused.CombinedOutput()
+		if err == nil || !bytes.Contains(out, []byte("SECRET_KEY_BASE is not set")) {
+			t.Fatalf("%s without SECRET_KEY_BASE: %v\n%s", command, err, out)
+		}
+	}
+
+	cmd.Env = append(env, "SECRET_KEY_BASE=c2VjcmV0IGtleSBiYXNlIGZvciB0aGUgcmVsZWFzZSB0ZXN0LCA2NCBieXRlcyBsb25nIG9yIGFib3V0")
 	var logs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &logs, &logs
 	if err := cmd.Start(); err != nil {

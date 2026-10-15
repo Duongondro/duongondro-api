@@ -23,7 +23,7 @@ import (
 
 func newTestServer(t *testing.T, schema string) *echo.Echo {
 	t.Helper()
-	e, _, err := New(dbtest.Fresh(t, schema), Config{
+	e, _, err := New(dbtest.Fresh(t, schema), Config{Keys: dbtest.Keys(),
 		SignIn:        service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
 		MagicLinkBase: "https://duongondro.app/m#",
 	})
@@ -110,7 +110,7 @@ func TestFirstSync(t *testing.T) {
 
 // The association files the apex serves for Universal Links, App Links and passkeys.
 func TestWellKnown(t *testing.T) {
-	e, _, err := New(dbtest.Fresh(t, "server_wellknown_tests"), Config{
+	e, _, err := New(dbtest.Fresh(t, "server_wellknown_tests"), Config{Keys: dbtest.Keys(),
 		SignIn:    service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
 		WellKnown: WellKnown{AppleAppIDs: []string{"TEAM.app.duongondro.ios"}, AndroidPackage: "app.duongondro", AndroidFingerprints: []string{"AB:CD"}},
 	})
@@ -132,7 +132,7 @@ func TestWellKnown(t *testing.T) {
 // The apex serves the website and the association files and nothing of the API;
 // www redirects to the apex; the API host never serves the website.
 func TestWebsiteHosts(t *testing.T) {
-	e, _, err := New(dbtest.Fresh(t, "server_website_tests"), Config{
+	e, _, err := New(dbtest.Fresh(t, "server_website_tests"), Config{Keys: dbtest.Keys(),
 		SignIn:    service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
 		WellKnown: WellKnown{AppleAppIDs: []string{"TEAM.app.duongondro.ios"}},
 		WebHosts:  []string{"duongondro.app", "www.duongondro.app"},
@@ -212,7 +212,7 @@ func TestMagicLinkRedemptionShapes(t *testing.T) {
 // database, once per request even when requests race, limited per client
 // address; the count endpoint reads the total back.
 func TestDownloadCounter(t *testing.T) {
-	e, _, err := New(dbtest.Fresh(t, "server_download_tests"), Config{
+	e, _, err := New(dbtest.Fresh(t, "server_download_tests"), Config{Keys: dbtest.Keys(),
 		SignIn:   service.SignInConfig{RPID: "duongondro.app", RPOrigins: []string{"https://duongondro.app"}},
 		WebHosts: []string{"duongondro.app"},
 	})

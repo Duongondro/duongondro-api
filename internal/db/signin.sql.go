@@ -15,7 +15,7 @@ import (
 const consumeMagicLink = `-- name: ConsumeMagicLink :one
 DELETE FROM magic_links
 WHERE token_hash = $1 AND created_at > now() - interval '15 minutes'
-RETURNING token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at
+RETURNING token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash
 `
 
 func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (MagicLink, error) {
@@ -23,13 +23,14 @@ func (q *Queries) ConsumeMagicLink(ctx context.Context, tokenHash []byte) (Magic
 	var i MagicLink
 	err := row.Scan(
 		&i.TokenHash,
-		&i.Email,
 		&i.InviteID,
 		&i.CreatedAt,
 		&i.AdmissionID,
 		&i.CodeHash,
 		&i.WrongCodes,
 		&i.CodeDeadAt,
+		&i.EmailEncrypted,
+		&i.EmailHash,
 	)
 	return i, err
 }
@@ -48,7 +49,7 @@ func (q *Queries) ConsumeNonce(ctx context.Context, nonceHash []byte) (int64, er
 
 const consumeWebauthnSession = `-- name: ConsumeWebauthnSession :one
 DELETE FROM webauthn_sessions WHERE id = $1 AND created_at > now() - interval '5 minutes'
-RETURNING id, data, user_id, invite_id, created_at, admission_id, username, display_name, gender
+RETURNING id, data, user_id, invite_id, created_at, admission_id, username_encrypted, display_name_encrypted, gender_encrypted
 `
 
 func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (WebauthnSession, error) {
@@ -61,78 +62,85 @@ func (q *Queries) ConsumeWebauthnSession(ctx context.Context, id uuid.UUID) (Web
 		&i.InviteID,
 		&i.CreatedAt,
 		&i.AdmissionID,
-		&i.Username,
-		&i.DisplayName,
-		&i.Gender,
+		&i.UsernameEncrypted,
+		&i.DisplayNameEncrypted,
+		&i.GenderEncrypted,
 	)
 	return i, err
 }
 
 const countRecentMagicLinks = `-- name: CountRecentMagicLinks :one
-SELECT count(*) FROM magic_links WHERE lower(email) = lower($1) AND created_at > now() - interval '15 minutes'
+SELECT count(*) FROM magic_links WHERE email_hash = $1 AND created_at > now() - interval '15 minutes'
 `
 
-func (q *Queries) CountRecentMagicLinks(ctx context.Context, lower string) (int64, error) {
-	row := q.db.QueryRow(ctx, countRecentMagicLinks, lower)
+func (q *Queries) CountRecentMagicLinks(ctx context.Context, emailHash []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentMagicLinks, emailHash)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const createCredential = `-- name: CreateCredential :exec
-INSERT INTO credentials (id, user_id, data) VALUES ($1, $2, $3)
+INSERT INTO credentials (id, user_id, data_encrypted) VALUES ($1, $2, $3)
 `
 
 type CreateCredentialParams struct {
-	ID     []byte    `json:"id"`
-	UserID uuid.UUID `json:"userId"`
-	Data   []byte    `json:"data"`
+	ID            []byte    `json:"id"`
+	UserID        uuid.UUID `json:"userId"`
+	DataEncrypted []byte    `json:"dataEncrypted"`
 }
 
 func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialParams) error {
-	_, err := q.db.Exec(ctx, createCredential, arg.ID, arg.UserID, arg.Data)
+	_, err := q.db.Exec(ctx, createCredential, arg.ID, arg.UserID, arg.DataEncrypted)
 	return err
 }
 
 const createIdentity = `-- name: CreateIdentity :exec
-INSERT INTO auth_identities (provider, subject, user_id, email, refresh_token) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO auth_identities (provider, subject_encrypted, subject_hash, user_id, email_encrypted, email_hash, refresh_token_encrypted)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type CreateIdentityParams struct {
-	Provider     string    `json:"provider"`
-	Subject      string    `json:"subject"`
-	UserID       uuid.UUID `json:"userId"`
-	Email        *string   `json:"email"`
-	RefreshToken *string   `json:"refreshToken"`
+	Provider              string    `json:"provider"`
+	SubjectEncrypted      []byte    `json:"subjectEncrypted"`
+	SubjectHash           []byte    `json:"subjectHash"`
+	UserID                uuid.UUID `json:"userId"`
+	EmailEncrypted        []byte    `json:"emailEncrypted"`
+	EmailHash             []byte    `json:"emailHash"`
+	RefreshTokenEncrypted []byte    `json:"refreshTokenEncrypted"`
 }
 
 func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) error {
 	_, err := q.db.Exec(ctx, createIdentity,
 		arg.Provider,
-		arg.Subject,
+		arg.SubjectEncrypted,
+		arg.SubjectHash,
 		arg.UserID,
-		arg.Email,
-		arg.RefreshToken,
+		arg.EmailEncrypted,
+		arg.EmailHash,
+		arg.RefreshTokenEncrypted,
 	)
 	return err
 }
 
 const createMagicLink = `-- name: CreateMagicLink :exec
-INSERT INTO magic_links (token_hash, email, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO magic_links (token_hash, email_encrypted, email_hash, invite_id, admission_id, code_hash) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type CreateMagicLinkParams struct {
-	TokenHash   []byte     `json:"tokenHash"`
-	Email       string     `json:"email"`
-	InviteID    *string    `json:"inviteId"`
-	AdmissionID *uuid.UUID `json:"admissionId"`
-	CodeHash    []byte     `json:"codeHash"`
+	TokenHash      []byte     `json:"tokenHash"`
+	EmailEncrypted []byte     `json:"emailEncrypted"`
+	EmailHash      []byte     `json:"emailHash"`
+	InviteID       *string    `json:"inviteId"`
+	AdmissionID    *uuid.UUID `json:"admissionId"`
+	CodeHash       []byte     `json:"codeHash"`
 }
 
 func (q *Queries) CreateMagicLink(ctx context.Context, arg CreateMagicLinkParams) error {
 	_, err := q.db.Exec(ctx, createMagicLink,
 		arg.TokenHash,
-		arg.Email,
+		arg.EmailEncrypted,
+		arg.EmailHash,
 		arg.InviteID,
 		arg.AdmissionID,
 		arg.CodeHash,
@@ -150,7 +158,7 @@ func (q *Queries) CreateNonce(ctx context.Context, nonceHash []byte) error {
 }
 
 const createUserWithID = `-- name: CreateUserWithID :one
-INSERT INTO users (id) VALUES ($1) RETURNING id, identity_public_key, key_version, created_at, display_name, username, gender
+INSERT INTO users (id) VALUES ($1) RETURNING id, key_version, created_at, identity_public_key_encrypted, display_name_encrypted, username_encrypted, username_hash, gender_encrypted
 `
 
 func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -158,44 +166,47 @@ func (q *Queries) CreateUserWithID(ctx context.Context, id uuid.UUID) (User, err
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.IdentityPublicKey,
 		&i.KeyVersion,
 		&i.CreatedAt,
-		&i.DisplayName,
-		&i.Username,
-		&i.Gender,
+		&i.IdentityPublicKeyEncrypted,
+		&i.DisplayNameEncrypted,
+		&i.UsernameEncrypted,
+		&i.UsernameHash,
+		&i.GenderEncrypted,
 	)
 	return i, err
 }
 
-const createWebauthnSession = `-- name: CreateWebauthnSession :one
-INSERT INTO webauthn_sessions (data, user_id, invite_id, admission_id, username, display_name, gender)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+const createWebauthnSession = `-- name: CreateWebauthnSession :exec
+INSERT INTO webauthn_sessions (id, data, user_id, invite_id, admission_id, username_encrypted, display_name_encrypted, gender_encrypted)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateWebauthnSessionParams struct {
-	Data        []byte     `json:"data"`
-	UserID      *uuid.UUID `json:"userId"`
-	InviteID    *string    `json:"inviteId"`
-	AdmissionID *uuid.UUID `json:"admissionId"`
-	Username    *string    `json:"username"`
-	DisplayName *string    `json:"displayName"`
-	Gender      *string    `json:"gender"`
+	ID                   uuid.UUID  `json:"id"`
+	Data                 []byte     `json:"data"`
+	UserID               *uuid.UUID `json:"userId"`
+	InviteID             *string    `json:"inviteId"`
+	AdmissionID          *uuid.UUID `json:"admissionId"`
+	UsernameEncrypted    []byte     `json:"usernameEncrypted"`
+	DisplayNameEncrypted []byte     `json:"displayNameEncrypted"`
+	GenderEncrypted      []byte     `json:"genderEncrypted"`
 }
 
-func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnSessionParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createWebauthnSession,
+// The id is drawn by the caller: the sealed profile is bound to it. data holds the
+// challenge, relying party and account id only (no personal data), so it stays plain.
+func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnSessionParams) error {
+	_, err := q.db.Exec(ctx, createWebauthnSession,
+		arg.ID,
 		arg.Data,
 		arg.UserID,
 		arg.InviteID,
 		arg.AdmissionID,
-		arg.Username,
-		arg.DisplayName,
-		arg.Gender,
+		arg.UsernameEncrypted,
+		arg.DisplayNameEncrypted,
+		arg.GenderEncrypted,
 	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+	return err
 }
 
 const deleteMagicLink = `-- name: DeleteMagicLink :exec
@@ -208,9 +219,9 @@ func (q *Queries) DeleteMagicLink(ctx context.Context, tokenHash []byte) error {
 }
 
 const deleteMagicLinksForUser = `-- name: DeleteMagicLinksForUser :exec
-DELETE FROM magic_links WHERE lower(email) IN (
-    SELECT lower(auth_identities.email) FROM auth_identities
-    WHERE auth_identities.user_id = $1 AND auth_identities.email IS NOT NULL)
+DELETE FROM magic_links WHERE email_hash IN (
+    SELECT auth_identities.email_hash FROM auth_identities
+    WHERE auth_identities.user_id = $1 AND auth_identities.email_hash IS NOT NULL)
 `
 
 // A purge also drops unused links to the user's addresses.
@@ -259,14 +270,15 @@ func (q *Queries) ExportCredentials(ctx context.Context, userID uuid.UUID) ([]Ex
 }
 
 const exportIdentities = `-- name: ExportIdentities :many
-SELECT provider, subject, email, created_at FROM auth_identities WHERE user_id = $1 ORDER BY created_at
+SELECT provider, subject_hash, subject_encrypted, email_encrypted, created_at FROM auth_identities WHERE user_id = $1 ORDER BY created_at
 `
 
 type ExportIdentitiesRow struct {
-	Provider  string    `json:"provider"`
-	Subject   string    `json:"subject"`
-	Email     *string   `json:"email"`
-	CreatedAt time.Time `json:"createdAt"`
+	Provider         string    `json:"provider"`
+	SubjectHash      []byte    `json:"subjectHash"`
+	SubjectEncrypted []byte    `json:"subjectEncrypted"`
+	EmailEncrypted   []byte    `json:"emailEncrypted"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 func (q *Queries) ExportIdentities(ctx context.Context, userID uuid.UUID) ([]ExportIdentitiesRow, error) {
@@ -280,8 +292,9 @@ func (q *Queries) ExportIdentities(ctx context.Context, userID uuid.UUID) ([]Exp
 		var i ExportIdentitiesRow
 		if err := rows.Scan(
 			&i.Provider,
-			&i.Subject,
-			&i.Email,
+			&i.SubjectHash,
+			&i.SubjectEncrypted,
+			&i.EmailEncrypted,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -295,15 +308,16 @@ func (q *Queries) ExportIdentities(ctx context.Context, userID uuid.UUID) ([]Exp
 }
 
 const exportMagicLinks = `-- name: ExportMagicLinks :many
-SELECT magic_links.email, magic_links.created_at FROM magic_links
-WHERE lower(magic_links.email) IN (
-    SELECT lower(auth_identities.email) FROM auth_identities
-    WHERE auth_identities.user_id = $1 AND auth_identities.email IS NOT NULL)
+SELECT magic_links.token_hash, magic_links.email_encrypted, magic_links.created_at FROM magic_links
+WHERE magic_links.email_hash IN (
+    SELECT auth_identities.email_hash FROM auth_identities
+    WHERE auth_identities.user_id = $1 AND auth_identities.email_hash IS NOT NULL)
 `
 
 type ExportMagicLinksRow struct {
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"createdAt"`
+	TokenHash      []byte    `json:"tokenHash"`
+	EmailEncrypted []byte    `json:"emailEncrypted"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 func (q *Queries) ExportMagicLinks(ctx context.Context, userID uuid.UUID) ([]ExportMagicLinksRow, error) {
@@ -315,7 +329,7 @@ func (q *Queries) ExportMagicLinks(ctx context.Context, userID uuid.UUID) ([]Exp
 	var items []ExportMagicLinksRow
 	for rows.Next() {
 		var i ExportMagicLinksRow
-		if err := rows.Scan(&i.Email, &i.CreatedAt); err != nil {
+		if err := rows.Scan(&i.TokenHash, &i.EmailEncrypted, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -327,24 +341,26 @@ func (q *Queries) ExportMagicLinks(ctx context.Context, userID uuid.UUID) ([]Exp
 }
 
 const getIdentity = `-- name: GetIdentity :one
-SELECT provider, subject, user_id, email, refresh_token, created_at FROM auth_identities WHERE provider = $1 AND subject = $2
+SELECT provider, user_id, created_at, subject_encrypted, subject_hash, email_encrypted, email_hash, refresh_token_encrypted FROM auth_identities WHERE provider = $1 AND subject_hash = $2
 `
 
 type GetIdentityParams struct {
-	Provider string `json:"provider"`
-	Subject  string `json:"subject"`
+	Provider    string `json:"provider"`
+	SubjectHash []byte `json:"subjectHash"`
 }
 
 func (q *Queries) GetIdentity(ctx context.Context, arg GetIdentityParams) (AuthIdentity, error) {
-	row := q.db.QueryRow(ctx, getIdentity, arg.Provider, arg.Subject)
+	row := q.db.QueryRow(ctx, getIdentity, arg.Provider, arg.SubjectHash)
 	var i AuthIdentity
 	err := row.Scan(
 		&i.Provider,
-		&i.Subject,
 		&i.UserID,
-		&i.Email,
-		&i.RefreshToken,
 		&i.CreatedAt,
+		&i.SubjectEncrypted,
+		&i.SubjectHash,
+		&i.EmailEncrypted,
+		&i.EmailHash,
+		&i.RefreshTokenEncrypted,
 	)
 	return i, err
 }
@@ -361,17 +377,17 @@ func (q *Queries) InviterOf(ctx context.Context, id string) (uuid.UUID, error) {
 }
 
 const killMagicLinkCodes = `-- name: KillMagicLinkCodes :exec
-UPDATE magic_links SET code_dead_at = now() WHERE lower(email) = lower($1) AND code_dead_at IS NULL
+UPDATE magic_links SET code_dead_at = now() WHERE email_hash = $1 AND code_dead_at IS NULL
 `
 
 // A newer mail to the address makes the older codes unusable; their links still work.
-func (q *Queries) KillMagicLinkCodes(ctx context.Context, lower string) error {
-	_, err := q.db.Exec(ctx, killMagicLinkCodes, lower)
+func (q *Queries) KillMagicLinkCodes(ctx context.Context, emailHash []byte) error {
+	_, err := q.db.Exec(ctx, killMagicLinkCodes, emailHash)
 	return err
 }
 
 const listCredentials = `-- name: ListCredentials :many
-SELECT id, user_id, data, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at
+SELECT id, user_id, created_at, last_used_at, data_encrypted FROM credentials WHERE user_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListCredentials(ctx context.Context, userID uuid.UUID) ([]Credential, error) {
@@ -386,9 +402,9 @@ func (q *Queries) ListCredentials(ctx context.Context, userID uuid.UUID) ([]Cred
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
-			&i.Data,
 			&i.CreatedAt,
 			&i.LastUsedAt,
+			&i.DataEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -401,7 +417,7 @@ func (q *Queries) ListCredentials(ctx context.Context, userID uuid.UUID) ([]Cred
 }
 
 const listIdentities = `-- name: ListIdentities :many
-SELECT provider, subject, user_id, email, refresh_token, created_at FROM auth_identities WHERE user_id = $1 ORDER BY created_at
+SELECT provider, user_id, created_at, subject_encrypted, subject_hash, email_encrypted, email_hash, refresh_token_encrypted FROM auth_identities WHERE user_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListIdentities(ctx context.Context, userID uuid.UUID) ([]AuthIdentity, error) {
@@ -415,11 +431,13 @@ func (q *Queries) ListIdentities(ctx context.Context, userID uuid.UUID) ([]AuthI
 		var i AuthIdentity
 		if err := rows.Scan(
 			&i.Provider,
-			&i.Subject,
 			&i.UserID,
-			&i.Email,
-			&i.RefreshToken,
 			&i.CreatedAt,
+			&i.SubjectEncrypted,
+			&i.SubjectHash,
+			&i.EmailEncrypted,
+			&i.EmailHash,
+			&i.RefreshTokenEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -432,36 +450,38 @@ func (q *Queries) ListIdentities(ctx context.Context, userID uuid.UUID) ([]AuthI
 }
 
 const lockEmail = `-- name: LockEmail :exec
-SELECT pg_advisory_xact_lock(hashtextextended(lower($1::text), 0))
+SELECT pg_advisory_xact_lock($1::bigint)
 `
 
-// Serialises magic-link requests for one address, so the per-address limit holds.
-func (q *Queries) LockEmail(ctx context.Context, email string) error {
-	_, err := q.db.Exec(ctx, lockEmail, email)
+// Serialises magic-link requests for one address, so the per-address limit holds:
+// the key is the first 8 bytes of the address's hash (atrest.LockKey).
+func (q *Queries) LockEmail(ctx context.Context, key int64) error {
+	_, err := q.db.Exec(ctx, lockEmail, key)
 	return err
 }
 
 const lockLiveMagicLinkForEmail = `-- name: LockLiveMagicLinkForEmail :one
-SELECT token_hash, email, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at FROM magic_links
-WHERE lower(email) = lower($1) AND code_dead_at IS NULL AND code_hash IS NOT NULL
+SELECT token_hash, invite_id, created_at, admission_id, code_hash, wrong_codes, code_dead_at, email_encrypted, email_hash FROM magic_links
+WHERE email_hash = $1 AND code_dead_at IS NULL AND code_hash IS NOT NULL
     AND created_at > now() - interval '15 minutes'
 ORDER BY created_at DESC LIMIT 1
 FOR UPDATE
 `
 
 // The one live code to an address (a newer mail kills the older), for a typed code.
-func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, lower string) (MagicLink, error) {
-	row := q.db.QueryRow(ctx, lockLiveMagicLinkForEmail, lower)
+func (q *Queries) LockLiveMagicLinkForEmail(ctx context.Context, emailHash []byte) (MagicLink, error) {
+	row := q.db.QueryRow(ctx, lockLiveMagicLinkForEmail, emailHash)
 	var i MagicLink
 	err := row.Scan(
 		&i.TokenHash,
-		&i.Email,
 		&i.InviteID,
 		&i.CreatedAt,
 		&i.AdmissionID,
 		&i.CodeHash,
 		&i.WrongCodes,
 		&i.CodeDeadAt,
+		&i.EmailEncrypted,
+		&i.EmailHash,
 	)
 	return i, err
 }
@@ -517,38 +537,42 @@ func (q *Queries) RecordWrongMagicLinkCode(ctx context.Context, arg RecordWrongM
 }
 
 const updateCredential = `-- name: UpdateCredential :exec
-UPDATE credentials SET data = $2, last_used_at = now() WHERE id = $1
+UPDATE credentials SET data_encrypted = $2, last_used_at = now() WHERE id = $1
 `
 
 type UpdateCredentialParams struct {
-	ID   []byte `json:"id"`
-	Data []byte `json:"data"`
+	ID            []byte `json:"id"`
+	DataEncrypted []byte `json:"dataEncrypted"`
 }
 
 func (q *Queries) UpdateCredential(ctx context.Context, arg UpdateCredentialParams) error {
-	_, err := q.db.Exec(ctx, updateCredential, arg.ID, arg.Data)
+	_, err := q.db.Exec(ctx, updateCredential, arg.ID, arg.DataEncrypted)
 	return err
 }
 
 const updateIdentity = `-- name: UpdateIdentity :exec
-UPDATE auth_identities SET email = COALESCE($1, email),
-    refresh_token = COALESCE($2, refresh_token)
-WHERE provider = $3 AND subject = $4
+UPDATE auth_identities SET email_encrypted = COALESCE($1, email_encrypted),
+    email_hash = COALESCE($2, email_hash),
+    refresh_token_encrypted = COALESCE($3, refresh_token_encrypted)
+WHERE provider = $4 AND subject_hash = $5
 `
 
 type UpdateIdentityParams struct {
-	Email        *string `json:"email"`
-	RefreshToken *string `json:"refreshToken"`
-	Provider     string  `json:"provider"`
-	Subject      string  `json:"subject"`
+	EmailEncrypted        []byte `json:"emailEncrypted"`
+	EmailHash             []byte `json:"emailHash"`
+	RefreshTokenEncrypted []byte `json:"refreshTokenEncrypted"`
+	Provider              string `json:"provider"`
+	SubjectHash           []byte `json:"subjectHash"`
 }
 
+// The address and its hash change together, or not at all.
 func (q *Queries) UpdateIdentity(ctx context.Context, arg UpdateIdentityParams) error {
 	_, err := q.db.Exec(ctx, updateIdentity,
-		arg.Email,
-		arg.RefreshToken,
+		arg.EmailEncrypted,
+		arg.EmailHash,
+		arg.RefreshTokenEncrypted,
 		arg.Provider,
-		arg.Subject,
+		arg.SubjectHash,
 	)
 	return err
 }

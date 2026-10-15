@@ -6,8 +6,8 @@ SELECT * FROM users WHERE id = $1;
 
 -- name: SetIdentityKey :execrows
 -- Set once: a second, different key is refused (the service reports a conflict).
-UPDATE users SET identity_public_key = sqlc.arg(identity_public_key)
-WHERE id = sqlc.arg(id) AND identity_public_key IS NULL;
+UPDATE users SET identity_public_key_encrypted = sqlc.arg(identity_public_key_encrypted)
+WHERE id = sqlc.arg(id) AND identity_public_key_encrypted IS NULL;
 
 -- name: DeleteUser :execrows
 DELETE FROM users WHERE id = $1;

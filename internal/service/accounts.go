@@ -8,20 +8,22 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 )
 
 type Accounts struct {
-	q *db.Queries
+	q    *db.Queries
+	keys *atrest.Keys
 }
 
-func NewAccounts(pool *pgxpool.Pool) *Accounts {
-	return &Accounts{q: db.New(pool)}
+func NewAccounts(pool *pgxpool.Pool, keys *atrest.Keys) *Accounts {
+	return &Accounts{q: db.New(pool), keys: keys}
 }
 
 // SetIdentity stores the user's Ed25519 identity public key, once. Friends pin it, so
 // it never changes; sending the same key again is a no-op.
-func (a *Accounts) SetIdentity(ctx context.Context, user db.User, key []byte) error {
+func (a *Accounts) SetIdentity(ctx context.Context, user atrest.User, key []byte) error {
 	if len(key) != ed25519.PublicKeySize {
 		return invalid("publicKey must be a %d-byte Ed25519 public key", ed25519.PublicKeySize)
 	}
@@ -31,13 +33,14 @@ func (a *Accounts) SetIdentity(ctx context.Context, user db.User, key []byte) er
 		}
 		return conflict("the identity key is already set and never changes")
 	}
-	n, err := a.q.SetIdentityKey(ctx, db.SetIdentityKeyParams{IdentityPublicKey: key, ID: user.ID})
+	n, err := a.q.SetIdentityKey(ctx, db.SetIdentityKeyParams{
+		IdentityPublicKeyEncrypted: a.keys.Seal(atrest.UsersIdentityPublicKey, atrest.IDRow(user.ID), key), ID: user.ID})
 	if err != nil {
 		return fmt.Errorf("set identity key: %w", err)
 	}
 	if n == 0 {
 		// Another request set it first; same answer as above against the stored key.
-		stored, err := a.q.GetUser(ctx, user.ID)
+		stored, err := a.keys.User(a.q.GetUser(ctx, user.ID))
 		if err != nil {
 			return err
 		}

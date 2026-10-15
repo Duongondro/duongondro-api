@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/oidc"
@@ -92,7 +93,7 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 	if err != nil {
 		return Session{}, err
 	}
-	identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
+	identity, err := s.identity(ctx, s.q, provider, claims.Subject)
 	if err == nil {
 		s.updateIdentity(ctx, provider, claims, authCode)
 		return s.session(ctx, identity.UserID, false)
@@ -112,13 +113,12 @@ func (s *SignIn) ProviderSignIn(ctx context.Context, provider, idToken, nonce, a
 		if user, err = createAccount(ctx, q, g, nil); err != nil {
 			return err
 		}
-		return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider, Subject: claims.Subject, UserID: user.ID,
-			Email: verifiedEmail(claims)})
+		return s.createIdentity(ctx, q, provider, claims.Subject, user.ID, verifiedEmail(claims))
 	})
 	if repository.IsUniqueViolation(err, "") || (errors.Is(err, ErrNotFound) && g.admissionID != nil) {
 		// The same account signed up twice at once; the other request made it (and,
 		// with an admission code, spent it).
-		identity, lookupErr := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
+		identity, lookupErr := s.identity(ctx, s.q, provider, claims.Subject)
 		if errors.Is(lookupErr, pgx.ErrNoRows) && errors.Is(err, ErrNotFound) {
 			return Session{}, err
 		} else if lookupErr != nil {
@@ -140,8 +140,12 @@ func (s *SignIn) updateIdentity(ctx context.Context, provider string, claims oid
 	if refresh == nil && verifiedEmail(claims) == nil {
 		return
 	}
-	err := s.q.UpdateIdentity(ctx, db.UpdateIdentityParams{Provider: provider, Subject: claims.Subject,
-		Email: verifiedEmail(claims), RefreshToken: refresh})
+	hash := s.keys.HashString(claims.Subject)
+	row := atrest.IdentityRow(provider, hash)
+	email := verifiedEmail(claims)
+	err := s.q.UpdateIdentity(ctx, db.UpdateIdentityParams{Provider: provider, SubjectHash: hash,
+		EmailEncrypted: s.keys.SealOptional(atrest.AuthIdentitiesEmail, row, email), EmailHash: s.keys.HashOptional(email),
+		RefreshTokenEncrypted: s.keys.SealOptional(atrest.AuthIdentitiesRefreshToken, row, refresh)})
 	if err != nil {
 		slog.WarnContext(ctx, "Updating a sign-in identity failed", "provider", provider, "error", err.Error())
 		if refresh != nil {
@@ -157,7 +161,7 @@ func (s *SignIn) LinkProvider(ctx context.Context, userID uuid.UUID, provider, i
 	if err != nil {
 		return err
 	}
-	identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, Subject: claims.Subject})
+	identity, err := s.identity(ctx, s.q, provider, claims.Subject)
 	if err == nil {
 		if identity.UserID != userID {
 			return conflict("this %s account already signs in to another Duongöndro account", provider)
@@ -166,8 +170,7 @@ func (s *SignIn) LinkProvider(ctx context.Context, userID uuid.UUID, provider, i
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	err = s.q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider, Subject: claims.Subject, UserID: userID,
-		Email: verifiedEmail(claims)})
+	err = s.createIdentity(ctx, s.q, provider, claims.Subject, userID, verifiedEmail(claims))
 	if repository.IsUniqueViolation(err, "") {
 		return conflict("this %s account was just linked; try again", provider)
 	} else if err != nil {
@@ -229,7 +232,7 @@ func (s *SignIn) RevokeApple(ctx context.Context, userID uuid.UUID) {
 	if s.apple == nil {
 		return
 	}
-	identities, err := s.q.ListIdentities(ctx, userID)
+	identities, err := s.keys.Identities(s.q.ListIdentities(ctx, userID))
 	if err != nil {
 		slog.WarnContext(ctx, "Listing identities to revoke failed", "user_id", userID.String(), "error", err.Error())
 		return
@@ -247,19 +250,37 @@ func verifiedEmail(c oidc.Claims) *string {
 	if c.Email == "" || !c.EmailVerified {
 		return nil
 	}
-	e := strings.ToLower(c.Email)
+	e := atrest.NormaliseEmail(c.Email)
 	return &e
+}
+
+// identity finds a provider's identity by the blind index of its subject: for the
+// email provider, the normalised address.
+func (s *SignIn) identity(ctx context.Context, q *db.Queries, provider, subject string) (atrest.Identity, error) {
+	return s.keys.Identity(q.GetIdentity(ctx, db.GetIdentityParams{Provider: provider, SubjectHash: s.keys.HashString(subject)}))
+}
+
+// createIdentity stores an identity sealed, keyed by its provider and the subject's
+// blind index; the address, if any, gets its own.
+func (s *SignIn) createIdentity(ctx context.Context, q *db.Queries, provider, subject string, userID uuid.UUID, email *string) error {
+	hash := s.keys.HashString(subject)
+	row := atrest.IdentityRow(provider, hash)
+	return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: provider,
+		SubjectEncrypted: s.keys.SealString(atrest.AuthIdentitiesSubject, row, subject), SubjectHash: hash, UserID: userID,
+		EmailEncrypted: s.keys.SealOptional(atrest.AuthIdentitiesEmail, row, email), EmailHash: s.keys.HashOptional(email)})
 }
 
 // --- Magic links ---------------------------------------------------------------
 
+// normalizeEmail checks a typed address and returns it normalised (atrest.NormaliseEmail:
+// trimmed, NFC, lower-cased), the form it is sealed, hashed and mailed in.
 func normalizeEmail(email string) (string, error) {
 	email = strings.TrimSpace(email)
 	addr, err := mail.ParseAddress(email)
 	if err != nil || addr.Address != email || len(email) > 320 || !auth.ValidText(email) {
 		return "", invalid("not an e-mail address")
 	}
-	return strings.ToLower(email), nil
+	return atrest.NormaliseEmail(email), nil
 }
 
 // RequestMagicLink mails a single-use sign-in link valid for 15 minutes, with a code
@@ -295,30 +316,34 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 		return err
 	}
 	send := false
+	// The limit, the lock and every lookup go through the address's blind index; for
+	// the email provider it is also the identity's subject hash.
+	hash := s.keys.HashString(email)
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if err := q.LockEmail(ctx, email); err != nil {
+		if err := q.LockEmail(ctx, atrest.LockKey(hash)); err != nil {
 			return err
 		}
 		if _, err := q.PurgeExpiredMagicLinks(ctx); err != nil {
 			return err
 		}
-		if n, err := q.CountRecentMagicLinks(ctx, email); err != nil {
+		if n, err := q.CountRecentMagicLinks(ctx, hash); err != nil {
 			return err
 		} else if n >= magicLinksPerWindow {
 			return ErrMailRateLimited
 		}
-		_, err := q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: email})
+		_, err := q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", SubjectHash: hash})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		send = err == nil || g != (gate{})
-		if err := q.KillMagicLinkCodes(ctx, email); err != nil {
+		if err := q.KillMagicLinkCodes(ctx, hash); err != nil {
 			return err
 		}
 		sum := sha256.Sum256([]byte(token))
-		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:], Email: email, InviteID: g.inviteID,
-			AdmissionID: g.admissionID, CodeHash: s.linkCodeHash(sum[:], code)})
+		return q.CreateMagicLink(ctx, db.CreateMagicLinkParams{TokenHash: sum[:],
+			EmailEncrypted: s.keys.SealString(atrest.MagicLinksEmail, atrest.RowOf(sum[:]), email), EmailHash: hash,
+			InviteID: g.inviteID, AdmissionID: g.admissionID, CodeHash: s.linkCodeHash(sum[:], code)})
 	})
 	if err != nil || !send {
 		return err
@@ -337,7 +362,7 @@ func (s *SignIn) RequestMagicLink(ctx context.Context, email string, proof *Sign
 // was requested with an invite or admission code and the address has none yet.
 func (s *SignIn) RedeemMagicLink(ctx context.Context, token string) (Session, error) {
 	sum := sha256.Sum256([]byte(token))
-	link, err := s.q.ConsumeMagicLink(ctx, sum[:])
+	link, err := s.keys.MagicLink(s.q.ConsumeMagicLink(ctx, sum[:]))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, invalid("this sign-in link has expired or was already used")
 	} else if err != nil {
@@ -361,11 +386,11 @@ func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (S
 	if len(code) != MagicLinkCodeLength || strings.Trim(code, crockford) != "" {
 		return Session{}, invalid("a sign-in code is %d characters of Crockford base32", MagicLinkCodeLength)
 	}
-	var link db.MagicLink
+	var link atrest.MagicLink
 	matched := false
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		row, err := q.LockLiveMagicLinkForEmail(ctx, email)
+		row, err := s.keys.MagicLink(q.LockLiveMagicLinkForEmail(ctx, s.keys.HashString(email)))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		} else if err != nil {
@@ -389,8 +414,8 @@ func (s *SignIn) RedeemMagicLinkCode(ctx context.Context, email, code string) (S
 
 // signInWithLink signs in the account of a consumed link's address, or creates it
 // when the link was requested with an invite or admission code.
-func (s *SignIn) signInWithLink(ctx context.Context, link db.MagicLink) (Session, error) {
-	identity, err := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: link.Email})
+func (s *SignIn) signInWithLink(ctx context.Context, link atrest.MagicLink) (Session, error) {
+	identity, err := s.identity(ctx, s.q, "email", link.Email)
 	if err == nil {
 		return s.session(ctx, identity.UserID, false)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -407,12 +432,12 @@ func (s *SignIn) signInWithLink(ctx context.Context, link db.MagicLink) (Session
 			return err
 		}
 		email := link.Email
-		return q.CreateIdentity(ctx, db.CreateIdentityParams{Provider: "email", Subject: link.Email, UserID: user.ID, Email: &email})
+		return s.createIdentity(ctx, q, "email", link.Email, user.ID, &email)
 	})
 	if repository.IsUniqueViolation(err, "") || (errors.Is(err, ErrNotFound) && g.admissionID != nil) {
 		// Two links for one address redeemed at once: the other made the account (and,
 		// with an admission code, spent it).
-		identity, lookupErr := s.q.GetIdentity(ctx, db.GetIdentityParams{Provider: "email", Subject: link.Email})
+		identity, lookupErr := s.identity(ctx, s.q, "email", link.Email)
 		if errors.Is(lookupErr, pgx.ErrNoRows) && errors.Is(err, ErrNotFound) {
 			return Session{}, err
 		} else if lookupErr != nil {

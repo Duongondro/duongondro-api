@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 	"github.com/Duongondro/duongondro-api/internal/repository"
@@ -50,7 +51,7 @@ func NewLogs(pool *pgxpool.Pool) *Logs {
 // The key version is checked in the same transaction, against the user row held FOR
 // SHARE: a rotation, which locks the row FOR UPDATE, waits, so no log lands under a
 // version rotated away while the devices reseal.
-func (l *Logs) Put(ctx context.Context, user db.User, id uuid.UUID, in LogInput) (db.PracticeLog, error) {
+func (l *Logs) Put(ctx context.Context, user atrest.User, id uuid.UUID, in LogInput) (db.PracticeLog, error) {
 	if !isV7(id) {
 		return db.PracticeLog{}, invalid("the log id must be a UUIDv7")
 	}

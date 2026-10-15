@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/repository"
@@ -32,6 +33,7 @@ import (
 type SignIn struct {
 	pool   *pgxpool.Pool
 	q      *db.Queries
+	keys   *atrest.Keys
 	auth   *auth.Service
 	social *Social
 	web    *webauthn.WebAuthn
@@ -56,7 +58,7 @@ type SignInConfig struct {
 	Apple     AppleRevoker
 }
 
-func NewSignIn(pool *pgxpool.Pool, a *auth.Service, social *Social, cfg SignInConfig) (*SignIn, error) {
+func NewSignIn(pool *pgxpool.Pool, keys *atrest.Keys, a *auth.Service, social *Social, cfg SignInConfig) (*SignIn, error) {
 	web, err := webauthn.New(&webauthn.Config{
 		RPDisplayName: "Duongöndro",
 		RPID:          cfg.RPID,
@@ -69,7 +71,7 @@ func NewSignIn(pool *pgxpool.Pool, a *auth.Service, social *Social, cfg SignInCo
 	if _, err := rand.Read(codeKey); err != nil {
 		return nil, err
 	}
-	s := &SignIn{pool: pool, q: db.New(pool), auth: a, social: social, web: web, oidc: cfg.Verifiers,
+	s := &SignIn{pool: pool, q: db.New(pool), keys: keys, auth: a, social: social, web: web, oidc: cfg.Verifiers,
 		mailer: cfg.Mailer, apple: cfg.Apple, now: time.Now, codeKey: codeKey}
 	if s.oidc == nil {
 		s.oidc = map[string]TokenVerifier{}
@@ -169,7 +171,7 @@ func (u *passkeyUser) WebAuthnDisplayName() string {
 func (u *passkeyUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
 
 func (s *SignIn) loadPasskeyUser(ctx context.Context, q *db.Queries, id uuid.UUID) (*passkeyUser, error) {
-	rows, err := q.ListCredentials(ctx, id)
+	rows, err := s.keys.Credentials(q.ListCredentials(ctx, id))
 	if err != nil {
 		return nil, err
 	}
@@ -196,13 +198,18 @@ func (s *SignIn) saveCeremony(ctx context.Context, data *webauthn.SessionData, u
 	if _, err := s.q.PurgeExpiredWebauthnSessions(ctx); err != nil {
 		return uuid.UUID{}, err
 	}
-	return s.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{Data: raw, UserID: userID, InviteID: g.inviteID,
-		AdmissionID: g.admissionID, Username: profile.Username, DisplayName: profile.DisplayName, Gender: profile.Gender})
+	id := uuid.NewV7()
+	row := atrest.IDRow(id)
+	return id, s.q.CreateWebauthnSession(ctx, db.CreateWebauthnSessionParams{ID: id, Data: raw, UserID: userID,
+		InviteID: g.inviteID, AdmissionID: g.admissionID,
+		UsernameEncrypted:    s.keys.SealOptional(atrest.WebauthnSessionsUsername, row, profile.Username),
+		DisplayNameEncrypted: s.keys.SealOptional(atrest.WebauthnSessionsDisplayName, row, profile.DisplayName),
+		GenderEncrypted:      s.keys.SealOptional(atrest.WebauthnSessionsGender, row, profile.Gender)})
 }
 
-func (s *SignIn) consumeCeremony(ctx context.Context, id uuid.UUID) (db.WebauthnSession, webauthn.SessionData, error) {
+func (s *SignIn) consumeCeremony(ctx context.Context, id uuid.UUID) (atrest.Ceremony, webauthn.SessionData, error) {
 	var data webauthn.SessionData
-	row, err := s.q.ConsumeWebauthnSession(ctx, id)
+	row, err := s.keys.Ceremony(s.q.ConsumeWebauthnSession(ctx, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, data, invalid("the passkey ceremony expired or is unknown; start again")
 	} else if err != nil {
@@ -256,7 +263,7 @@ func (s *SignIn) BeginPasskeySignUp(ctx context.Context, proof SignUpProof, prof
 		return Ceremony{}, err
 	}
 	if profile.Username != nil {
-		if taken, err := s.q.UsernameTaken(ctx, profile.Username); err != nil {
+		if taken, err := s.q.UsernameTaken(ctx, s.keys.HashOptional(profile.Username)); err != nil {
 			return Ceremony{}, err
 		} else if taken {
 			return Ceremony{}, conflict("that username is taken")
@@ -286,7 +293,7 @@ func (s *SignIn) BeginPasskeyAdd(ctx context.Context, userID uuid.UUID) (Ceremon
 	if err != nil {
 		return Ceremony{}, err
 	}
-	account, err := s.q.GetUser(ctx, userID)
+	account, err := s.keys.User(s.q.GetUser(ctx, userID))
 	if err != nil {
 		return Ceremony{}, err
 	}
@@ -331,7 +338,7 @@ func (s *SignIn) FinishPasskey(ctx context.Context, sessionID uuid.UUID, credent
 	return s.finishSignIn(ctx, row, data, credential)
 }
 
-func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession, data webauthn.SessionData, credential json.RawMessage, signedIn *uuid.UUID) (Session, error) {
+func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, data webauthn.SessionData, credential json.RawMessage, signedIn *uuid.UUID) (Session, error) {
 	g := ceremonyGate(row)
 	signUp := g != (gate{})
 	if row.UserID == nil || signUp == (signedIn != nil) || (signedIn != nil && *signedIn != *row.UserID) {
@@ -362,18 +369,16 @@ func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession,
 				return err
 			}
 			if row.Username != nil || row.DisplayName != nil || row.Gender != nil {
-				p := db.UpdateProfileParams{ID: *row.UserID, SetDisplayName: row.DisplayName != nil,
-					SetUsername: row.Username != nil, Username: row.Username, SetGender: row.Gender != nil, Gender: row.Gender}
-				if row.DisplayName != nil {
-					p.DisplayName = *row.DisplayName
-				}
+				p := profileParams(s.keys, *row.UserID, ProfileUpdate{DisplayName: row.DisplayName,
+					SetUsername: row.Username != nil, Username: row.Username, SetGender: row.Gender != nil, Gender: row.Gender})
 				// The username may have been taken since the ceremony began.
 				if err := usernameConflict(q.UpdateProfile(ctx, p)); err != nil {
 					return err
 				}
 			}
 		}
-		return q.CreateCredential(ctx, db.CreateCredentialParams{ID: cred.ID, UserID: *row.UserID, Data: raw})
+		return q.CreateCredential(ctx, db.CreateCredentialParams{ID: cred.ID, UserID: *row.UserID,
+			DataEncrypted: s.keys.Seal(atrest.CredentialsData, atrest.RowOf(cred.ID), raw)})
 	})
 	if repository.IsUniqueViolation(err, "credentials_pkey") {
 		return Session{}, conflict("this passkey is already registered")
@@ -388,7 +393,7 @@ func (s *SignIn) finishRegistration(ctx context.Context, row db.WebauthnSession,
 
 // ceremonyGate is the invite or admission code a sign-up ceremony began with; zero
 // for a sign-in or for adding a passkey.
-func ceremonyGate(row db.WebauthnSession) gate {
+func ceremonyGate(row atrest.Ceremony) gate {
 	return gate{inviteID: row.InviteID, admissionID: row.AdmissionID}
 }
 
@@ -410,7 +415,7 @@ func (s *SignIn) FinishPasskeySignIn(ctx context.Context, sessionID uuid.UUID, c
 	return s.finishSignIn(ctx, row, data, credential)
 }
 
-func (s *SignIn) finishSignIn(ctx context.Context, row db.WebauthnSession, data webauthn.SessionData, credential json.RawMessage) (Session, error) {
+func (s *SignIn) finishSignIn(ctx context.Context, row atrest.Ceremony, data webauthn.SessionData, credential json.RawMessage) (Session, error) {
 	if row.UserID != nil || ceremonyGate(row) != (gate{}) {
 		return Session{}, invalid("this passkey ceremony belongs to another flow")
 	}
@@ -433,7 +438,8 @@ func (s *SignIn) finishSignIn(ctx context.Context, row db.WebauthnSession, data 
 	if err != nil {
 		return Session{}, err
 	}
-	if err := s.q.UpdateCredential(ctx, db.UpdateCredentialParams{ID: cred.ID, Data: raw}); err != nil {
+	if err := s.q.UpdateCredential(ctx, db.UpdateCredentialParams{ID: cred.ID,
+		DataEncrypted: s.keys.Seal(atrest.CredentialsData, atrest.RowOf(cred.ID), raw)}); err != nil {
 		return Session{}, err
 	}
 	id, err := uuidFromBytes(user.WebAuthnID())

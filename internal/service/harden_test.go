@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/auth"
-	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/e2ee"
 )
 
@@ -20,7 +20,7 @@ func TestWrapsASessionCannotBreak(t *testing.T) {
 	if err := f.wraps.Put(ctx, u, phone.ID, signedWrap(u, identity, phone, e2ee.KindPracticeKey, 1)); err != nil {
 		t.Fatal(err)
 	}
-	unsigned := func(d db.Device, authType string) WrapInput {
+	unsigned := func(d atrest.Device, authType string) WrapInput {
 		w := signedWrap(u, identity, d, e2ee.KindPracticeKey, 1)
 		w.AuthType, w.Authenticator = authType, random(32)
 		return w
@@ -58,7 +58,7 @@ func TestWrapsASessionCannotBreak(t *testing.T) {
 func TestSessionsEndWithTheirDevice(t *testing.T) {
 	f := setup(t)
 	ctx := t.Context()
-	a := auth.New(f.pool)
+	a := auth.New(f.pool, f.keys)
 	u := f.user()
 	phone, _ := f.device(u, "hardware")
 	onPhone, _ := a.NewSession(ctx, u.ID)
@@ -87,7 +87,7 @@ func TestSessionsEndWithTheirDevice(t *testing.T) {
 func TestPushTokenReachesOneDevice(t *testing.T) {
 	f := setup(t)
 	ctx := t.Context()
-	n := NewNudges(f.pool, nil)
+	n := NewNudges(f.pool, f.keys, nil)
 	ana, bo := f.user(), f.user()
 	anaPhone, _ := f.device(ana, "hardware")
 	boPhone, _ := f.device(bo, "hardware")
@@ -105,7 +105,7 @@ func TestPushTokenReachesOneDevice(t *testing.T) {
 
 func TestStreakDeadlineBounds(t *testing.T) {
 	f := setup(t)
-	s := NewSocial(f.pool)
+	s := NewSocial(f.pool, f.keys)
 	ana := f.member()
 	for name, deadline := range map[string]time.Time{
 		"before the day": time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
@@ -123,7 +123,7 @@ func TestStreakDeadlineBounds(t *testing.T) {
 func TestPurgesAreReappliedAfterARestore(t *testing.T) {
 	f := setup(t)
 	ctx := t.Context()
-	g := NewGDPR(f.pool)
+	g := NewGDPR(f.pool, f.keys)
 	u := f.user()
 	if err := g.Purge(ctx, u.ID); err != nil {
 		t.Fatal(err)

@@ -17,15 +17,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/db"
 )
 
 type Service struct {
-	q *db.Queries
+	q    *db.Queries
+	keys *atrest.Keys
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{q: db.New(pool)}
+func New(pool *pgxpool.Pool, keys *atrest.Keys) *Service {
+	return &Service{q: db.New(pool), keys: keys}
 }
 
 // ErrInvalidToken means the token is not a live session: never issued, or revoked.
@@ -52,12 +54,12 @@ func (s *Service) NewSession(ctx context.Context, userID uuid.UUID) (string, err
 }
 
 // SessionUser returns the owner of a live session, or ErrInvalidToken.
-func (s *Service) SessionUser(ctx context.Context, token string) (db.User, error) {
-	row, err := s.q.GetSessionUser(ctx, hashToken(token))
+func (s *Service) SessionUser(ctx context.Context, token string) (atrest.User, error) {
+	user, err := s.keys.User(s.q.GetSessionUser(ctx, hashToken(token)))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return row, ErrInvalidToken
+		return user, ErrInvalidToken
 	}
-	return row, err
+	return user, err
 }
 
 // RevokeToken deletes the session, reporting whether it existed. Sessions never
