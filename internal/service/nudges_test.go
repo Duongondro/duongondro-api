@@ -51,7 +51,9 @@ func TestNudges(t *testing.T) {
 	n := NewNudges(f.pool, f.keys, sender)
 	ctx := t.Context()
 	ana, bo := f.member(), f.member()
-	_ = social.SetDisplayName(ctx, ana.ID, "Ana")
+	if err := social.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
+		t.Fatal(err)
+	}
 	ana.User = f.reload(ana.User)
 	auth := f.invite(social, ana, "N2DGESXY")
 	p, sg := acceptance(bo, "N2DGESXY")
@@ -103,7 +105,9 @@ func TestNudges(t *testing.T) {
 	}
 
 	// A sender without a display name gets the unnamed keys, without the name.
-	_ = social.SetDisplayName(ctx, ana.ID, "  ")
+	if err := social.SetDisplayName(ctx, ana.ID, "  "); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct{ gender, key string }{{"female", "FRIEND_DONE_UNNAMED_FEMALE"}, {"male", "FRIEND_DONE_UNNAMED_MALE"}, {"nonbinary", LocFriendDoneUnnamed}} {
 		if err := social.UpdateProfile(ctx, ana.ID, ProfileUpdate{SetGender: true, Gender: &c.gender}); err != nil {
 			t.Fatal(err)
@@ -115,7 +119,9 @@ func TestNudges(t *testing.T) {
 			t.Fatalf("done today, unnamed, %s: %+v", c.gender, got)
 		}
 	}
-	_ = social.SetDisplayName(ctx, ana.ID, "Ana")
+	if err := social.SetDisplayName(ctx, ana.ID, "Ana"); err != nil {
+		t.Fatal(err)
+	}
 
 	// One poke per friend per day; strangers cannot be poked.
 	if err := n.Poke(ctx, bo.User, ana.ID); err != nil {

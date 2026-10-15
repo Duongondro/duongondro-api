@@ -55,12 +55,26 @@ func TestSignUpNamesAnAccount(t *testing.T) {
 			t.Fatalf("passkey sign-up with display name %v: %q", given, name)
 		}
 	}
-	ana := "Ana"
-	c, err := s.BeginPasskeySignUp(ctx, code(), SignUpProfile{DisplayName: &ana})
+	// A username and a gender without a display name keep the random name.
+	user, gender := "nameless", "female"
+	c, err := s.BeginPasskeySignUp(ctx, code(), SignUpProfile{Username: &user, Gender: &gender})
 	if err != nil {
 		t.Fatal(err)
 	}
 	session, err := s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, err := f.keys.User(f.q.GetUser(ctx, session.UserID)); err != nil || !isRandomName(u.DisplayName) ||
+		u.Username == nil || *u.Username != "nameless" || u.Gender == nil || *u.Gender != "female" {
+		t.Fatalf("username and gender without a display name: %+v %v", u, err)
+	}
+	ana := "Ana"
+	c, err = s.BeginPasskeySignUp(ctx, code(), SignUpProfile{DisplayName: &ana})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err = s.FinishPasskey(ctx, c.SessionID, newAuthenticator().create(t, c.Options))
 	if err != nil || nameOf(session.UserID) != "Ana" {
 		t.Fatalf("a given name was not kept: %v %q", err, nameOf(session.UserID))
 	}
