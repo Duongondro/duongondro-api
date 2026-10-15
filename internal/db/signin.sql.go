@@ -126,6 +126,19 @@ func (q *Queries) CountRecentMagicLinks(ctx context.Context, emailHash []byte) (
 	return count, err
 }
 
+const countSignInMethods = `-- name: CountSignInMethods :one
+SELECT (SELECT count(*) FROM credentials WHERE credentials.user_id = $1)
+     + (SELECT count(*) FROM auth_identities WHERE auth_identities.user_id = $1) AS methods
+`
+
+// Passkeys plus linked identities (an e-mail for magic links, later Apple or Google).
+func (q *Queries) CountSignInMethods(ctx context.Context, userID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countSignInMethods, userID)
+	var methods int32
+	err := row.Scan(&methods)
+	return methods, err
+}
+
 const createCredential = `-- name: CreateCredential :exec
 INSERT INTO credentials (id, user_id, data_encrypted) VALUES ($1, $2, $3)
 `
@@ -264,6 +277,24 @@ func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnS
 	return err
 }
 
+const deleteCredential = `-- name: DeleteCredential :execrows
+DELETE FROM credentials WHERE id = $1 AND user_id = $2
+`
+
+type DeleteCredentialParams struct {
+	ID     []byte    `json:"id"`
+	UserID uuid.UUID `json:"userId"`
+}
+
+// Its sessions go with it (sessions.credential_id ON DELETE CASCADE).
+func (q *Queries) DeleteCredential(ctx context.Context, arg DeleteCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCredential, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteEmailIdentities = `-- name: DeleteEmailIdentities :execrows
 DELETE FROM auth_identities WHERE user_id = $1 AND provider = 'email'
 `
@@ -307,13 +338,14 @@ func (q *Queries) DeleteWebauthnSessionsForUser(ctx context.Context, userID *uui
 }
 
 const exportCredentials = `-- name: ExportCredentials :many
-SELECT id, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at
+SELECT id, name_encrypted, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at
 `
 
 type ExportCredentialsRow struct {
-	ID         []byte     `json:"id"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
+	ID            []byte     `json:"id"`
+	NameEncrypted []byte     `json:"nameEncrypted"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	LastUsedAt    *time.Time `json:"lastUsedAt"`
 }
 
 func (q *Queries) ExportCredentials(ctx context.Context, userID uuid.UUID) ([]ExportCredentialsRow, error) {
@@ -325,7 +357,12 @@ func (q *Queries) ExportCredentials(ctx context.Context, userID uuid.UUID) ([]Ex
 	var items []ExportCredentialsRow
 	for rows.Next() {
 		var i ExportCredentialsRow
-		if err := rows.Scan(&i.ID, &i.CreatedAt, &i.LastUsedAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.NameEncrypted,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -466,7 +503,7 @@ func (q *Queries) KillMagicLinkCodes(ctx context.Context, emailHash []byte) erro
 }
 
 const listCredentials = `-- name: ListCredentials :many
-SELECT id, user_id, created_at, last_used_at, data_encrypted FROM credentials WHERE user_id = $1 ORDER BY created_at
+SELECT id, user_id, created_at, last_used_at, data_encrypted, name_encrypted FROM credentials WHERE user_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListCredentials(ctx context.Context, userID uuid.UUID) ([]Credential, error) {
@@ -484,6 +521,7 @@ func (q *Queries) ListCredentials(ctx context.Context, userID uuid.UUID) ([]Cred
 			&i.CreatedAt,
 			&i.LastUsedAt,
 			&i.DataEncrypted,
+			&i.NameEncrypted,
 		); err != nil {
 			return nil, err
 		}
@@ -644,6 +682,24 @@ type RecordWrongMagicLinkCodeParams struct {
 func (q *Queries) RecordWrongMagicLinkCode(ctx context.Context, arg RecordWrongMagicLinkCodeParams) error {
 	_, err := q.db.Exec(ctx, recordWrongMagicLinkCode, arg.MaxWrong, arg.TokenHash)
 	return err
+}
+
+const renameCredential = `-- name: RenameCredential :execrows
+UPDATE credentials SET name_encrypted = $3 WHERE id = $1 AND user_id = $2
+`
+
+type RenameCredentialParams struct {
+	ID            []byte    `json:"id"`
+	UserID        uuid.UUID `json:"userId"`
+	NameEncrypted []byte    `json:"nameEncrypted"`
+}
+
+func (q *Queries) RenameCredential(ctx context.Context, arg RenameCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameCredential, arg.ID, arg.UserID, arg.NameEncrypted)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateCredential = `-- name: UpdateCredential :exec

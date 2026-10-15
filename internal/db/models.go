@@ -47,6 +47,7 @@ type Credential struct {
 	CreatedAt     time.Time  `json:"createdAt"`
 	LastUsedAt    *time.Time `json:"lastUsedAt"`
 	DataEncrypted []byte     `json:"dataEncrypted"`
+	NameEncrypted []byte     `json:"nameEncrypted"`
 }
 
 type DatabaseGeneration struct {
@@ -185,10 +186,11 @@ type Report struct {
 }
 
 type Session struct {
-	TokenHash []byte     `json:"tokenHash"`
-	UserID    uuid.UUID  `json:"userId"`
-	CreatedAt time.Time  `json:"createdAt"`
-	DeviceID  *uuid.UUID `json:"deviceId"`
+	TokenHash    []byte     `json:"tokenHash"`
+	UserID       uuid.UUID  `json:"userId"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	DeviceID     *uuid.UUID `json:"deviceId"`
+	CredentialID []byte     `json:"credentialId"`
 }
 
 type Streak struct {

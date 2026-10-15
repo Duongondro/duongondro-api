@@ -43,11 +43,17 @@ func hashToken(token string) []byte {
 
 // NewSession starts a session for the user and returns its token.
 func (s *Service) NewSession(ctx context.Context, userID uuid.UUID) (string, error) {
+	return s.NewPasskeySession(ctx, userID, nil)
+}
+
+// NewPasskeySession starts a session that a passkey signed in with: removing that
+// passkey ends it. A nil credential is a session from anything else.
+func (s *Service) NewPasskeySession(ctx context.Context, userID uuid.UUID, credentialID []byte) (string, error) {
 	token, err := RandomToken()
 	if err != nil {
 		return "", err
 	}
-	if err := s.q.CreateSession(ctx, db.CreateSessionParams{TokenHash: hashToken(token), UserID: userID}); err != nil {
+	if err := s.q.CreateSession(ctx, db.CreateSessionParams{TokenHash: hashToken(token), UserID: userID, CredentialID: credentialID}); err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
 	return token, nil
@@ -60,6 +66,16 @@ func (s *Service) SessionUser(ctx context.Context, token string) (atrest.User, e
 		return user, ErrInvalidToken
 	}
 	return user, err
+}
+
+// SessionCredential is the passkey a live session signed in with, nil for any other
+// session.
+func (s *Service) SessionCredential(ctx context.Context, token string) ([]byte, error) {
+	id, err := s.q.SessionCredential(ctx, hashToken(token))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrInvalidToken
+	}
+	return id, err
 }
 
 // RevokeToken deletes the session, reporting whether it existed. Sessions never

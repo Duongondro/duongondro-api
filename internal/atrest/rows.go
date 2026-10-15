@@ -222,6 +222,7 @@ type Credential struct {
 	ID         []byte
 	UserID     uuid.UUID
 	Data       []byte
+	Name       *string // given by the person; nil: the app names it after its password manager
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 }
@@ -229,7 +230,26 @@ type Credential struct {
 func (k *Keys) Credentials(rows []db.Credential, err error) ([]Credential, error) {
 	return each(rows, err, func(r db.Credential) (Credential, error) {
 		data, err := k.Open(CredentialsData, RowOf(r.ID), r.DataEncrypted)
-		return Credential{ID: r.ID, UserID: r.UserID, Data: data, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt}, err
+		if err != nil {
+			return Credential{}, err
+		}
+		name, err := k.OpenOptional(CredentialsName, RowOf(r.ID), r.NameEncrypted)
+		return Credential{ID: r.ID, UserID: r.UserID, Data: data, Name: name, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt}, err
+	})
+}
+
+// ExportCredential is a passkey as the export lists it: no key material.
+type ExportCredential struct {
+	ID         []byte     `json:"id"`
+	Name       *string    `json:"name"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+}
+
+func (k *Keys) ExportCredentials(rows []db.ExportCredentialsRow, err error) ([]ExportCredential, error) {
+	return each(rows, err, func(r db.ExportCredentialsRow) (ExportCredential, error) {
+		name, err := k.OpenOptional(CredentialsName, RowOf(r.ID), r.NameEncrypted)
+		return ExportCredential{ID: r.ID, Name: name, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt}, err
 	})
 }
 

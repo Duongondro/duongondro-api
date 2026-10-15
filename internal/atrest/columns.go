@@ -20,6 +20,7 @@ var (
 	StreaksPayload  = Column{"streaks", "payload_encrypted"}
 
 	CredentialsData = Column{"credentials", "data_encrypted"}
+	CredentialsName = Column{"credentials", "name_encrypted"}
 
 	WebauthnSessionsUsername    = Column{"webauthn_sessions", "username_encrypted"}
 	WebauthnSessionsDisplayName = Column{"webauthn_sessions", "display_name_encrypted"}
@@ -70,7 +71,7 @@ var Tables = []Table{
 	{Name: "streaks", Key: []string{"user_id", "practice_hash"},
 		Sealed:  []Column{StreaksPractice, StreaksPayload},
 		Indexes: []Index{{Column{"streaks", "practice_hash"}, StreaksPractice}}},
-	{Name: "credentials", Key: []string{"id"}, Sealed: []Column{CredentialsData}},
+	{Name: "credentials", Key: []string{"id"}, Sealed: []Column{CredentialsData, CredentialsName}},
 	{Name: "webauthn_sessions", Key: []string{"id"},
 		Sealed: []Column{WebauthnSessionsUsername, WebauthnSessionsDisplayName, WebauthnSessionsGender}},
 	{Name: "auth_identities", Key: []string{"provider", "subject_hash"},
