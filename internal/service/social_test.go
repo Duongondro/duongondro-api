@@ -252,10 +252,15 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		SetGender: true, Gender: ptr("female")}); err != nil {
 		f.t.Fatal(err)
 	}
-	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.
+	// Sign-in rows: a named passkey, an e-mail identity with an unused link, a ceremony.
 	credID := random(16)
 	if err := f.q.CreateCredential(ctx, db.CreateCredentialParams{ID: credID, UserID: ana.ID,
 		DataEncrypted: f.keys.Seal(atrest.CredentialsData, atrest.RowOf(credID), []byte(`{"publicKey":"ana's passkey"}`))}); err != nil {
+		f.t.Fatal(err)
+	}
+	passkeyName := "Ana's phone"
+	if _, err := f.q.RenameCredential(ctx, db.RenameCredentialParams{ID: credID, UserID: ana.ID,
+		NameEncrypted: f.keys.SealString(atrest.CredentialsName, atrest.RowOf(credID), passkeyName)}); err != nil {
 		f.t.Fatal(err)
 	}
 	email := "ana@example.com"
