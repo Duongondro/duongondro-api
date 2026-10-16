@@ -11,6 +11,7 @@ var (
 	DevicesPublicKey = Column{"devices", "public_key_encrypted"}
 
 	DeviceListsPayload       = Column{"device_lists", "payload_encrypted"}
+	UserKeysPayload          = Column{"user_keys", "payload_encrypted"}
 	InvitesPayload           = Column{"invites", "payload_encrypted"}
 	InviteRedemptionsPayload = Column{"invite_redemptions", "payload_encrypted"}
 
@@ -20,6 +21,7 @@ var (
 	StreaksPayload  = Column{"streaks", "payload_encrypted"}
 
 	CredentialsData = Column{"credentials", "data_encrypted"}
+	CredentialsName = Column{"credentials", "name_encrypted"}
 
 	WebauthnSessionsUsername    = Column{"webauthn_sessions", "username_encrypted"}
 	WebauthnSessionsDisplayName = Column{"webauthn_sessions", "display_name_encrypted"}
@@ -62,6 +64,7 @@ var Tables = []Table{
 		Sealed:  []Column{DevicesPublicKey},
 		Indexes: []Index{{Column{"devices", "public_key_hash"}, DevicesPublicKey}}},
 	{Name: "device_lists", Key: []string{"user_id"}, Sealed: []Column{DeviceListsPayload}},
+	{Name: "user_keys", Key: []string{"user_id"}, Sealed: []Column{UserKeysPayload}},
 	{Name: "invites", Key: []string{"id"}, Sealed: []Column{InvitesPayload}},
 	{Name: "invite_redemptions", Key: []string{"invite_id", "invitee_id"}, Sealed: []Column{InviteRedemptionsPayload}},
 	{Name: "reports", Key: []string{"id"}, Sealed: []Column{ReportsReason}},
@@ -70,7 +73,7 @@ var Tables = []Table{
 	{Name: "streaks", Key: []string{"user_id", "practice_hash"},
 		Sealed:  []Column{StreaksPractice, StreaksPayload},
 		Indexes: []Index{{Column{"streaks", "practice_hash"}, StreaksPractice}}},
-	{Name: "credentials", Key: []string{"id"}, Sealed: []Column{CredentialsData}},
+	{Name: "credentials", Key: []string{"id"}, Sealed: []Column{CredentialsData, CredentialsName}},
 	{Name: "webauthn_sessions", Key: []string{"id"},
 		Sealed: []Column{WebauthnSessionsUsername, WebauthnSessionsDisplayName, WebauthnSessionsGender}},
 	{Name: "auth_identities", Key: []string{"provider", "subject_hash"},

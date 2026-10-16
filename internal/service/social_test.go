@@ -252,10 +252,22 @@ func (f *fixture) fillEveryTable(s *Social) member {
 		SetGender: true, Gender: ptr("female")}); err != nil {
 		f.t.Fatal(err)
 	}
-	// Sign-in rows: a passkey, an e-mail identity with an unused link, a ceremony.
+	// Sign-in rows: a named passkey, an e-mail identity with an unused link, a ceremony.
 	credID := random(16)
 	if err := f.q.CreateCredential(ctx, db.CreateCredentialParams{ID: credID, UserID: ana.ID,
 		DataEncrypted: f.keys.Seal(atrest.CredentialsData, atrest.RowOf(credID), []byte(`{"publicKey":"ana's passkey"}`))}); err != nil {
+		f.t.Fatal(err)
+	}
+	// The user key, a wrap to it, and the passkey's box of it.
+	unlock := NewUnlock(f.pool, f.keys)
+	uk := f.publishUserKey(unlock, ana, 1)
+	ukBox, ukSig := passkeyBox(ana, uk, credID)
+	if err := unlock.PutPasskeyBox(ctx, ana.User, credID, uk.id, ukBox, ukSig); err != nil {
+		f.t.Fatal(err)
+	}
+	passkeyName := "Ana's phone"
+	if _, err := f.q.RenameCredential(ctx, db.RenameCredentialParams{ID: credID, UserID: ana.ID,
+		NameEncrypted: f.keys.SealString(atrest.CredentialsName, atrest.RowOf(credID), passkeyName)}); err != nil {
 		f.t.Fatal(err)
 	}
 	email := "ana@example.com"
@@ -380,6 +392,15 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM magic_links`).Scan(&links)
 	if links != 0 {
 		t.Errorf("%d unused magic links or confirmations remain", links)
+	}
+	// U, the wraps to it and the passkey boxes go with the account (no column of
+	// theirs names the user, so the loop above cannot see them).
+	for _, table := range []string{"user_keys", "user_key_wraps", "passkey_boxes"} {
+		var n int
+		_ = f.pool.QueryRow(ctx, fmt.Sprintf(`SELECT count(*) FROM %q`, table)).Scan(&n)
+		if n != 0 {
+			t.Errorf("%d rows remain in %s", n, table)
+		}
 	}
 	var named int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username_hash = $1`, f.keys.HashString("ana")).Scan(&named)

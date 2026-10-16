@@ -173,6 +173,15 @@ func (s *SignIn) session(ctx context.Context, userID uuid.UUID, created bool) (S
 	return Session{Token: token, UserID: userID, Created: created}, err
 }
 
+// passkeySession is a session a passkey signed in with; removing the passkey ends it.
+func (s *SignIn) passkeySession(ctx context.Context, userID uuid.UUID, credentialID []byte, created bool) (Session, error) {
+	token, err := s.auth.NewPasskeySession(ctx, userID, credentialID)
+	if repository.IsForeignKeyViolation(err) {
+		return Session{}, invalid("the passkey was not accepted") // removed meanwhile
+	}
+	return Session{Token: token, UserID: userID, Created: created}, err
+}
+
 // --- Passkeys ------------------------------------------------------------------
 
 // passkeyUser adapts an account (or one about to be created) to webauthn.User. The
@@ -381,6 +390,9 @@ func (s *SignIn) FinishPasskey(ctx context.Context, sessionID uuid.UUID, credent
 }
 
 func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, data webauthn.SessionData, credential json.RawMessage, signedIn *uuid.UUID) (Session, error) {
+	if err := refusePRFResults(credential); err != nil {
+		return Session{}, err
+	}
 	g := ceremonyGate(row)
 	signUp := g != (gate{})
 	if row.UserID == nil || signUp == (signedIn != nil) || (signedIn != nil && *signedIn != *row.UserID) {
@@ -438,7 +450,29 @@ func (s *SignIn) finishRegistration(ctx context.Context, row atrest.Ceremony, da
 	if !signUp {
 		return Session{UserID: *row.UserID}, nil
 	}
-	return s.session(ctx, *row.UserID, true)
+	return s.passkeySession(ctx, *row.UserID, cred.ID, true)
+}
+
+// refusePRFResults refuses a passkey response that carries PRF results
+// (docs/crypto.md › Passkey unlock): the PRF output opens the user key U and must
+// never reach the server. Credential Manager returns it in clientExtensionResults,
+// so a phone removes those before posting; one that forgot is told so with a 400,
+// and the body is neither stored nor logged. The server never asks for PRF in the
+// options it sends, either: the phone adds the extension itself.
+func refusePRFResults(credential json.RawMessage) error {
+	var body struct {
+		ClientExtensionResults struct {
+			PRF *struct {
+				Results json.RawMessage `json:"results"`
+			} `json:"prf"`
+		} `json:"clientExtensionResults"`
+	}
+	// A malformed body is refused by the parser after this; what decoded is checked.
+	_ = json.Unmarshal(credential, &body)
+	if p := body.ClientExtensionResults.PRF; p != nil && len(p.Results) > 0 && string(p.Results) != "null" {
+		return invalid("the passkey response carries a PRF output (clientExtensionResults.prf.results), which must never leave the phone; remove clientExtensionResults before sending it")
+	}
+	return nil
 }
 
 // ceremonyGate is the invite or admission code a sign-up ceremony began with, or
@@ -467,6 +501,9 @@ func (s *SignIn) FinishPasskeySignIn(ctx context.Context, sessionID uuid.UUID, c
 }
 
 func (s *SignIn) finishSignIn(ctx context.Context, row atrest.Ceremony, data webauthn.SessionData, credential json.RawMessage) (Session, error) {
+	if err := refusePRFResults(credential); err != nil {
+		return Session{}, err
+	}
 	if row.UserID != nil || ceremonyGate(row) != (gate{}) {
 		return Session{}, invalid("this passkey ceremony belongs to another flow")
 	}
@@ -489,15 +526,19 @@ func (s *SignIn) finishSignIn(ctx context.Context, row atrest.Ceremony, data web
 	if err != nil {
 		return Session{}, err
 	}
-	if err := s.q.UpdateCredential(ctx, db.UpdateCredentialParams{ID: cred.ID,
+	// A passkey removed from Settings while this sign-in ran is gone: refuse it as one
+	// never registered rather than fail on the session's foreign key.
+	if n, err := s.q.UpdateCredential(ctx, db.UpdateCredentialParams{ID: cred.ID,
 		DataEncrypted: s.keys.Seal(atrest.CredentialsData, atrest.RowOf(cred.ID), raw)}); err != nil {
 		return Session{}, err
+	} else if n == 0 {
+		return Session{}, invalid("the passkey was not accepted")
 	}
 	id, err := uuidFromBytes(user.WebAuthnID())
 	if err != nil {
 		return Session{}, err
 	}
-	return s.session(ctx, id, false)
+	return s.passkeySession(ctx, id, cred.ID, false)
 }
 
 // uuidFromBytes reads a 16-byte user handle back into an account id.

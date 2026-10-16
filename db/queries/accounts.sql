@@ -13,7 +13,11 @@ WHERE id = sqlc.arg(id) AND identity_public_key_encrypted IS NULL;
 DELETE FROM users WHERE id = $1;
 
 -- name: CreateSession :exec
-INSERT INTO sessions (token_hash, user_id) VALUES ($1, $2);
+INSERT INTO sessions (token_hash, user_id, credential_id) VALUES ($1, $2, sqlc.narg(credential_id));
+
+-- name: SessionCredential :one
+-- The passkey a session signed in with; NULL for a magic link.
+SELECT credential_id FROM sessions WHERE token_hash = $1;
 
 -- name: GetSessionUser :one
 SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id

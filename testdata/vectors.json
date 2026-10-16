@@ -86,5 +86,55 @@
     "practiceKeyBox": "f60c4852f0e48920ff8bb7baad16ce8e1a723ba45a2f291dd977f032a492e9339338658354a4a3dafbf566c8a3ac9f9afc5f4f989afa2911bb6b3ea2",
     "practiceKeyBoxSignature": "1eb5a77536490f88f7c1dc24af7465b265a8efa5088901bf323bc6dc64d373eeaed8e10e1f0b618bd8fc3fe1ea38d8c868045e7f99130215bb6ba3af668aed0c",
     "recoveryKey": "cc8a67251adef89a3b4345a3722138fa33f1c133315938cb9290abbdade29b16"
+  },
+  "prf": {
+    "aad": "b67fe412410871f1b85c4c0606f45a8acfce2edf65c24d92c601f0cb7e6f3405a9b614aea7914bc37e604fb62402413c2f2ace8af4df74e1a1868d03be8ae61bf65495128ac11e5873a9b947a7e992f3",
+    "box": "f60c4852f0e48920ff8bb7ba2186f9f986336887d45fbd808e85bc28c9fa7717c3d099f0fe81c3c469774736880decd97bdc6a92292cecbfc62f78e3",
+    "boxSignature": "2e307ff496ee35bbc9eac2b98ae757b405be611a2ca19b29e6343c4d6966c33914de78a09a36581101ac7b004d7c4644268a7cfd30f2ac67e95cfeab85fa7102",
+    "inputs": {
+      "credentialId": "f65495128ac11e5873a9b947a7e992f3",
+      "identityPublic": "cfce2edf65c24d92c601f0cb7e6f3405a9b614aea7914bc37e604fb62402413c",
+      "keyVersion": 1,
+      "prfOutput": "6791b8dcbf1205b0711d4b9b922b0074f001ac94277d6109d8e162f9d84234b6",
+      "userKeyId": "2f2ace8af4df74e1a1868d03be8ae61b",
+      "userKeyPrivate": "2f2ace8af4df94e121868d03be8ae61bcc8729a0ef40497da5a36185bac5ceaf",
+      "userKeyPublic": "0455d9ed1166b9c9187a9a626ecafabc30b7a47c5291f39aca5b975d2c97cbbb0757fc02883e1a8a110e8c708503cd7e60090162c8fb360b6389a24414e883c82c"
+    },
+    "prfInput": "64756f6e676f6e64726f2f76312f707266",
+    "prfKey": "4215a898259d47ce09167ef597908f2a9253b7170bf32af708fdf1779b3de9d1",
+    "statement": {
+      "payload": "{\"id\":\"2f2ace8a-f4df-74e1-a186-8d03be8ae61b\",\"pk\":\"BFXZ7RFmuckYeppibsr6vDC3pHxSkfOayluXXSyXy7sHV_wCiD4aihEOjHCFA81-YAkBYsj7NgtjiaJEFOiDyCw\",\"user\":\"b67fe412-4108-71f1-b85c-4c0606f45a8a\",\"version\":1}",
+      "signature": "c48710d20f033753cbf13cbece4d9debeef826f961c2e5c372563868f7fae1c45fd825318cb7455ad1f9eb4c1194cd6414e3a0e256ca80d571d46125d08dde06",
+      "type": "user-key"
+    },
+    "wraps": [
+      {
+        "aad": "b67fe412410871f1b85c4c0606f45a8a000000012f2ace8af4df74e1a1868d03be8ae61b01",
+        "box": "f60c4852f0e48920ff8bb7ba478bcbc0548ddf7a544a48bd69cf528085da7ac5ec53a38465c99db2bd6c67fd539d892aac6a31d48b45f1b8cde0dda8",
+        "epk": "047664745a2d626e2cb9c412bbcb0cc607b175fe999ca7bed2e08e8a72fd6b6ad23b7f2b77b22dc31a9246f7993ea962c0963118167796beec6f4ee701efbe43f5",
+        "kind": 1,
+        "name": "practice key to U",
+        "recipient": "2f2ace8af4df74e1a1868d03be8ae61b",
+        "signature": "910f10849be7e2b9e9d42342cb6b404379fdf4ddc9b434e35474eafc682543f981575fe3ec24a6504ea796fa34679dc6e6988b427a24a5ef09302715832cec0c"
+      },
+      {
+        "aad": "b67fe412410871f1b85c4c0606f45a8a000000012f2ace8af4df74e1a1868d03be8ae61b02",
+        "box": "f60c4852f0e48920ff8bb7ba26513550edc0c3e0ab0fd043d27ed5185eff2891fb349fd2eda253bcbbc3d8d1bd2540425f084d2c9803d752ce627040",
+        "epk": "047664745a2d626e2cb9c412bbcb0cc607b175fe999ca7bed2e08e8a72fd6b6ad23b7f2b77b22dc31a9246f7993ea962c0963118167796beec6f4ee701efbe43f5",
+        "kind": 2,
+        "name": "identity seed to U",
+        "recipient": "2f2ace8af4df74e1a1868d03be8ae61b",
+        "signature": "a402ceeeaa6051547b544258579e60fc321a7688d56602ebf1204abb961dab416f50a3290397dd49b023df835460f4c5f1d9a0a702a74573d8d8c6170db4460c"
+      },
+      {
+        "aad": "b67fe412410871f1b85c4c0606f45a8a00000001a8abe1a3dd567367b77e6ceade9b835104",
+        "box": "f60c4852f0e48920ff8bb7bac394d54eba7db17da16b528ac6dbb97d8ac89236a9fce6855da806e1ce6395e6efc8b90083e18c5bd81112a2e5d77cec",
+        "epk": "047664745a2d626e2cb9c412bbcb0cc607b175fe999ca7bed2e08e8a72fd6b6ad23b7f2b77b22dc31a9246f7993ea962c0963118167796beec6f4ee701efbe43f5",
+        "kind": 4,
+        "name": "U to a device",
+        "recipient": "a8abe1a3dd567367b77e6ceade9b8351",
+        "signature": "73205f35b399d67dd54274927c0de810b881c4bcd831102aa8a3de9e4c30e92f41c48a8359c80751252e96ff98341229d397b71e1fb47cefa1442faeaeeeec0c"
+      }
+    ]
   }
 }

@@ -38,6 +38,7 @@ A value the server looks up gets `<name>_hash = HMAC-SHA256(blindIndexKey, norma
 | `users` | `identity_public_key`, `display_name` (NULL when empty), `username`, `gender` | `username_hash` (unique) | `id` |
 | `devices` | `public_key` | `public_key_hash` (unique with `user_id`) | `id` |
 | `device_lists` | `payload` | | `user_id` |
+| `user_keys` | `payload` (the signed user-key statement) | | `user_id` |
 | `invites` | `payload` | | `id` |
 | `invite_redemptions` | `payload` | | `invite_id`, `invitee_id` |
 | `reports` | `reason` | | `id` |
@@ -48,7 +49,7 @@ A value the server looks up gets `<name>_hash = HMAC-SHA256(blindIndexKey, norma
 | `magic_links` | `email` | `email_hash` (limit, lock, lookup) | `token_hash` |
 | `push_tokens` | `token` | `token_hash` (unique with `platform`) | `device_id` |
 
-Rows whose ids the database used to draw (devices, reports, passkey ceremonies) now get them from the service, which needs the id to seal. Signed statements are verified on the bytes received, sealed, and open to exactly those bytes, so friends' phones verify them as before; the signatures stay plain. Plain on purpose, with the reasons in `plainColumns` (internal/service/atrest_test.go): hashes of tokens, codes and nonces; signatures; key wraps, recovery boxes and practice logs (end-to-end sealed); invite ids and macs; credential ids; enum values; and a passkey ceremony's state (challenge, relying party and account id, deleted within five minutes). Still plain beside them, and said so in the privacy policy: that an account exists, the links between accounts (friendships, invitations, blocks, pokes, reports), when each thing was written, sizes, a public streak's deadline and sequence number, and which kinds of sign-in, device and push service an account uses.
+Rows whose ids the database used to draw (devices, reports, passkey ceremonies) now get them from the service, which needs the id to seal. Signed statements are verified on the bytes received, sealed, and open to exactly those bytes, so friends' phones verify them as before; the signatures stay plain. Plain on purpose, with the reasons in `plainColumns` (internal/service/atrest_test.go): hashes of tokens, codes and nonces; signatures; key wraps (to devices and to the user key), recovery boxes, passkey boxes and practice logs (end-to-end sealed); invite ids and macs; credential ids; enum values; and a passkey ceremony's state (challenge, relying party and account id, deleted within five minutes). Still plain beside them, and said so in the privacy policy: that an account exists, the links between accounts (friendships, invitations, blocks, pokes, reports), when each thing was written, sizes, a public streak's deadline and sequence number, and which kinds of sign-in, device and push service an account uses.
 
 ## Migrating
 

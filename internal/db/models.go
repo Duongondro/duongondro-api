@@ -47,6 +47,7 @@ type Credential struct {
 	CreatedAt     time.Time  `json:"createdAt"`
 	LastUsedAt    *time.Time `json:"lastUsedAt"`
 	DataEncrypted []byte     `json:"dataEncrypted"`
+	NameEncrypted []byte     `json:"nameEncrypted"`
 }
 
 type DatabaseGeneration struct {
@@ -143,6 +144,14 @@ type Nudge struct {
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
+type PasskeyBox struct {
+	CredentialID []byte    `json:"credentialId"`
+	UserKeyID    uuid.UUID `json:"userKeyId"`
+	Box          []byte    `json:"box"`
+	Signature    []byte    `json:"signature"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
 type PracticeLog struct {
 	ID              uuid.UUID  `json:"id"`
 	UserID          uuid.UUID  `json:"userId"`
@@ -185,10 +194,11 @@ type Report struct {
 }
 
 type Session struct {
-	TokenHash []byte     `json:"tokenHash"`
-	UserID    uuid.UUID  `json:"userId"`
-	CreatedAt time.Time  `json:"createdAt"`
-	DeviceID  *uuid.UUID `json:"deviceId"`
+	TokenHash    []byte     `json:"tokenHash"`
+	UserID       uuid.UUID  `json:"userId"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	DeviceID     *uuid.UUID `json:"deviceId"`
+	CredentialID []byte     `json:"credentialId"`
 }
 
 type Streak struct {
@@ -212,6 +222,25 @@ type User struct {
 	UsernameEncrypted          []byte    `json:"usernameEncrypted"`
 	UsernameHash               []byte    `json:"usernameHash"`
 	GenderEncrypted            []byte    `json:"genderEncrypted"`
+}
+
+type UserKey struct {
+	UserID           uuid.UUID `json:"userId"`
+	ID               uuid.UUID `json:"id"`
+	Version          int64     `json:"version"`
+	PayloadEncrypted []byte    `json:"payloadEncrypted"`
+	Signature        []byte    `json:"signature"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+type UserKeyWrap struct {
+	UserKeyID    uuid.UUID `json:"userKeyId"`
+	Kind         int16     `json:"kind"`
+	KeyVersion   int32     `json:"keyVersion"`
+	EphemeralKey []byte    `json:"ephemeralKey"`
+	Box          []byte    `json:"box"`
+	Signature    []byte    `json:"signature"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type WebauthnSession struct {

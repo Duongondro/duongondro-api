@@ -27,13 +27,14 @@ type WrapInput struct {
 
 type Wraps struct {
 	q       *db.Queries
+	pool    *pgxpool.Pool
 	keys    *atrest.Keys
 	repo    *repository.Wraps
 	devices *Devices
 }
 
 func NewWraps(pool *pgxpool.Pool, keys *atrest.Keys, devices *Devices) *Wraps {
-	return &Wraps{q: db.New(pool), keys: keys, repo: repository.NewWraps(pool, keys), devices: devices}
+	return &Wraps{q: db.New(pool), pool: pool, keys: keys, repo: repository.NewWraps(pool, keys), devices: devices}
 }
 
 // Put stores a wrap to one of the user's devices. What the server cannot verify is
@@ -45,7 +46,11 @@ func (w *Wraps) Put(ctx context.Context, user atrest.User, deviceID uuid.UUID, i
 	if err != nil {
 		return err
 	}
-	if err := validateWrap(user, dev, in, int(user.KeyVersion)); err != nil {
+	maxVersion := int(user.KeyVersion)
+	if in.Kind == int(e2ee.KindUserKey) {
+		return w.putUserKeyToDevice(ctx, user, dev, in)
+	}
+	if err := validateWrap(user, dev, in, maxVersion); err != nil {
 		return err
 	}
 	if in.AuthType != "signature" {
@@ -65,6 +70,35 @@ func (w *Wraps) Put(ctx context.Context, user atrest.User, deviceID uuid.UUID, i
 	return w.q.PutWrap(ctx, wrapParams(dev.ID, in))
 }
 
+// putUserKeyToDevice stores U's scalar wrapped to one of the account's phones (kind
+// 4): signed by the identity key, at U's own version. The check and the write run
+// under the user's lock, which replacing U takes too, so a wrap of a U that is being
+// replaced is refused rather than stored beside the new one.
+func (w *Wraps) putUserKeyToDevice(ctx context.Context, user atrest.User, dev atrest.Device, in WrapInput) error {
+	if in.AuthType != "signature" {
+		return invalid("a user key's wrap is signed by the identity key")
+	}
+	return pgx.BeginTxFunc(ctx, w.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := w.q.WithTx(tx)
+		if _, err := q.LockUser(ctx, user.ID); err != nil {
+			return err
+		}
+		uk, err := q.GetUserKey(ctx, user.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return conflict("publish a user key before wrapping it to a device")
+		} else if err != nil {
+			return err
+		}
+		if in.KeyVersion != int(uk.Version) {
+			return conflict("a user key's wrap carries its version, %d", uk.Version)
+		}
+		if err := validateWrap(user, dev, in, int(uk.Version)); err != nil {
+			return err
+		}
+		return q.PutWrap(ctx, wrapParams(dev.ID, in))
+	})
+}
+
 func (w *Wraps) List(ctx context.Context, userID, deviceID uuid.UUID) ([]db.KeyWrap, error) {
 	if _, err := w.devices.Owned(ctx, userID, deviceID); err != nil {
 		return nil, err
@@ -81,51 +115,77 @@ type RotationWrap struct {
 // Rotate moves the practice key to newVersion. The wraps must carry it to exactly the
 // devices holding the current version, each once, all of kind 1 at newVersion: a
 // device left out would lose the practice key.
-func (w *Wraps) Rotate(ctx context.Context, user atrest.User, newVersion int, wraps []RotationWrap) error {
+//
+// While the user key U holds the current version, the new key is wrapped to it too
+// (toUserKey), or a passkey could no longer unlock the counts.
+func (w *Wraps) Rotate(ctx context.Context, user atrest.User, newVersion int, wraps []RotationWrap, toUserKey *UserKeyWrapInput) error {
 	if user.IdentityPublicKey == nil {
 		return conflict("set the identity key before rotating the practice key")
 	}
-	return w.repo.Rotate(ctx, user.ID, newVersion, func(locked atrest.User, holders []atrest.Device) ([]db.PutWrapParams, error) {
+	return w.repo.Rotate(ctx, user.ID, newVersion, func(locked atrest.User, holders []atrest.Device, uk *repository.UserKeyHolder) ([]db.PutWrapParams, *db.PutUserKeyWrapParams, error) {
 		if newVersion != int(locked.KeyVersion)+1 {
-			return nil, conflict("newVersion must be %d", locked.KeyVersion+1)
+			return nil, nil, conflict("newVersion must be %d", locked.KeyVersion+1)
 		}
-		// Only devices in the signed device list count: one a session registered and
-		// gave an unsigned wrap is not the user's, and must not block their rotation.
-		listed, err := w.listedDevices(ctx, locked)
-		if err != nil {
+		var ukParams *db.PutUserKeyWrapParams
+		switch {
+		case toUserKey != nil && uk == nil:
+			return nil, nil, conflict("there is no user key to wrap to")
+		case toUserKey != nil:
+			if toUserKey.Kind != int(e2ee.KindPracticeKey) || toUserKey.KeyVersion != newVersion {
+				return nil, nil, invalid("a rotation wraps the practice key (kind 1) at version %d", newVersion)
+			}
+			p, err := validateUserKeyWrap(locked, uk.UserKey, *toUserKey, newVersion)
+			if err != nil {
+				return nil, nil, err
+			}
+			ukParams = &p
+		case uk != nil && uk.HoldsCurrent:
+			return nil, nil, invalid("a rotation must wrap the new key to the user key, which holds the current one")
+		}
+		params, err := w.rotationWraps(ctx, locked, holders, newVersion, wraps)
+		return params, ukParams, err
+	})
+}
+
+// rotationWraps checks a rotation's device wraps against the devices holding the
+// current practice key.
+func (w *Wraps) rotationWraps(ctx context.Context, locked atrest.User, holders []atrest.Device, newVersion int, wraps []RotationWrap) ([]db.PutWrapParams, error) {
+	// Only devices in the signed device list count: one a session registered and
+	// gave an unsigned wrap is not the user's, and must not block their rotation.
+	listed, err := w.listedDevices(ctx, locked)
+	if err != nil {
+		return nil, err
+	}
+	pending := map[uuid.UUID]atrest.Device{}
+	for _, h := range holders {
+		if listed == nil || listed[h.ID.String()] {
+			pending[h.ID] = h
+		}
+	}
+	params := make([]db.PutWrapParams, 0, len(wraps))
+	for _, rw := range wraps {
+		h, ok := pending[rw.DeviceID]
+		if !ok {
+			return nil, invalid("device %s does not hold the current practice key, or is wrapped to twice", rw.DeviceID)
+		}
+		delete(pending, rw.DeviceID)
+		if rw.Kind != int(e2ee.KindPracticeKey) || rw.KeyVersion != newVersion {
+			return nil, invalid("a rotation wraps the practice key (kind 1) at version %d", newVersion)
+		}
+		// The server can verify a signature only; a rotation from a session
+		// without the identity key would lock every device out.
+		if rw.AuthType != "signature" {
+			return nil, invalid("rotation wraps are signed by the identity key")
+		}
+		if err := validateWrap(locked, h, rw.WrapInput, newVersion); err != nil {
 			return nil, err
 		}
-		pending := map[uuid.UUID]atrest.Device{}
-		for _, h := range holders {
-			if listed == nil || listed[h.ID.String()] {
-				pending[h.ID] = h
-			}
-		}
-		params := make([]db.PutWrapParams, 0, len(wraps))
-		for _, rw := range wraps {
-			h, ok := pending[rw.DeviceID]
-			if !ok {
-				return nil, invalid("device %s does not hold the current practice key, or is wrapped to twice", rw.DeviceID)
-			}
-			delete(pending, rw.DeviceID)
-			if rw.Kind != int(e2ee.KindPracticeKey) || rw.KeyVersion != newVersion {
-				return nil, invalid("a rotation wraps the practice key (kind 1) at version %d", newVersion)
-			}
-			// The server can verify a signature only; a rotation from a session
-			// without the identity key would lock every device out.
-			if rw.AuthType != "signature" {
-				return nil, invalid("rotation wraps are signed by the identity key")
-			}
-			if err := validateWrap(locked, h, rw.WrapInput, newVersion); err != nil {
-				return nil, err
-			}
-			params = append(params, wrapParams(h.ID, rw.WrapInput))
-		}
-		if len(pending) > 0 {
-			return nil, invalid("a rotation must wrap the new key to every device holding the current one (%d missing)", len(pending))
-		}
-		return params, nil
-	})
+		params = append(params, wrapParams(h.ID, rw.WrapInput))
+	}
+	if len(pending) > 0 {
+		return nil, invalid("a rotation must wrap the new key to every device holding the current one (%d missing)", len(pending))
+	}
+	return params, nil
 }
 
 // listedDevices returns the device ids in the user's signed device list, or nil when
@@ -154,8 +214,8 @@ func (w *Wraps) listedDevices(ctx context.Context, user atrest.User) (map[string
 // be moved to another device, user, kind or version; HMAC tags only the devices
 // can check, so their size is all the server sees.
 func validateWrap(user atrest.User, dev atrest.Device, in WrapInput, maxVersion int) error {
-	if in.Kind != int(e2ee.KindPracticeKey) && in.Kind != int(e2ee.KindIdentitySeed) {
-		return invalid("kind must be 1 (practice key) or 2 (identity seed)")
+	if in.Kind != int(e2ee.KindPracticeKey) && in.Kind != int(e2ee.KindIdentitySeed) && in.Kind != int(e2ee.KindUserKey) {
+		return invalid("kind must be 1 (practice key), 2 (identity seed) or 4 (user key)")
 	}
 	if in.KeyVersion < 1 || in.KeyVersion > maxVersion {
 		return invalid("keyVersion must be between 1 and %d", maxVersion)

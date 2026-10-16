@@ -16,6 +16,8 @@ The glowie curve is NIST P-256 (secp256r1), nicknamed here for its parameters, w
 | Device key | glowie curve | each device, hardware where possible | Receives wraps |
 | Share key `S` | 32, random | sharer | Seals progress summaries for one friend |
 | Recovery secret `R` | 16 bytes, random | first device | Shown to the user; word encoding is specified separately |
+| User key `U` | glowie curve, software | a phone holding the keys | Receives wraps like a device; its private scalar is carried per passkey ([Passkey unlock](#passkey-unlock-prf)) |
+| PRF output | 32 bytes | the passkey's authenticator | Never leaves the phone; one per passkey |
 
 ## Sealed session
 
@@ -46,7 +48,7 @@ Readers ignore unknown fields (`minutes` and `note` are reserved for later versi
 
 ## Wraps
 
-A wrap carries a 32-byte secret (`P`, the identity seed, or a share key) to one device.
+A wrap carries a 32-byte secret (`P`, the identity seed, a share key, or `U`'s scalar) to one device.
 
 ```
 e         = fresh ephemeral key pair on the glowie curve
@@ -56,7 +58,7 @@ aad       = uuid(user) ‖ u32be(keyVersion) ‖ uuid(recipientDevice) ‖ u8(ki
 box       = nonce(12) ‖ ChaCha20-Poly1305(wrap_key, nonce, secret, aad)          60 bytes
 ```
 
-`kind`: 1 = practice key, 2 = identity seed, 3 = share key. The server stores `epk` (65 bytes), `box` and an authenticator:
+`kind`: 1 = practice key, 2 = identity seed, 3 = share key, 4 = user key `U`'s private scalar (32 bytes, big-endian), whose `keyVersion` is the version of `U`'s statement. The server stores `epk` (65 bytes), `box` and an authenticator:
 
 | Authenticator | Used when | Value |
 | --- | --- | --- |
@@ -81,6 +83,7 @@ signature = Ed25519(identity, message)
 | `streak` | `current`, `day`, `deadline`, `longest`, `practice`, `seq`, `user` (`current` and `longest` count tracked days only) |
 | `invite` | `expiresAt`, `inviteId`, `inviter`, `inviterIdentityPk` |
 | `acceptance` | `inviteId`, `invitee`, `inviteeIdentityPk` |
+| `user-key` | `id` (a UUIDv7 the phone picks, new for every key), `pk` (65 bytes), `user`, `version` (starts at 1, goes up with each new key, at most 2³¹−1) |
 
 ## Invites
 
@@ -106,6 +109,53 @@ One box per kind (practice key, identity seed), stored by the server. Each box i
 signature    = Ed25519(identity, "duongondro/v1/recovery-sig" ‖ uuid(user) ‖ u8(kind) ‖ box)
 ```
 
+The recovery boxes do not need the identity key in their AAD: both secrets come straight out of boxes whose key derives from `R`, which the server never has, so it can neither forge nor swap them, and the phone checks the opened seed against the identity key rather than trusting a key the server hands it.
+
+## Passkey unlock (PRF)
+
+A passkey made with the WebAuthn PRF extension also brings the keys to a new phone ([design: Keys › Passkeys that unlock the counts](https://github.com/Duongondro/duongondro-design/blob/main/docs/05-keys.md#passkeys-that-unlock-the-counts)), as in Code Share (CodeShareApp/codeshare-design#22). A **user key `U`** sits between passkeys and keys: the practice key and the identity seed are wrapped to `U` as to a device, and `U`'s private scalar is sealed once per passkey under that passkey's PRF output.
+
+**`U`.** A phone holding the keys makes a key pair on the glowie curve in software (it must travel, so never in hardware) and publishes it as a signed `user-key` statement. Senders wrap to `U` only after checking that statement against the identity key, so the server cannot slip in a key of its own. An account has one `U` at a time.
+
+**Wraps to `U`.** Exactly as in [Wraps](#wraps), with `U` in the recipient's place: the recipient public key is `U`'s `pk` and `uuid(recipientDevice)` in the AAD is `uuid(U.id)`. Kinds 1 and 2 only, always signed by the identity key (there is no enrolment or self tag for `U`). A practice-key rotation wraps the new key to `U` too while `U` holds the current one.
+
+**Publishing `U` is a conditional create, never a replacement.** The server stores `U` only when the account has none (`PUT /api/me/user-key`, 201): the first phone wins. While a `U` exists, another phone's statement is refused (409 carrying the stored `U`'s `id` and `version`) and nothing changes; that phone keeps no `U` of its own and waits for the existing one to reach it as a kind 4 wrap. Sending the stored statement again is answered 201, so a retry after a lost response is safe. This is what lets accounts made before passkey unlock gain it (the retrofit): any 0.5 phone that holds the keys may try to create `U`, and none can take it from another.
+
+**Replacing `U`: lost or compromised.** A phone replaces `U` only by asking explicitly (`replace: true`), in two cases: `U` is lost (no phone holds it any more, every phone that had it is gone), or `U` may be compromised (a passkey that could unlock it was removed because it is no longer trusted, see below). The server accepts that only from a session bound to a device that holds a wrap of the current practice key, and only for a statement signed by the identity key with a new `id` and a `version` above the stored one's. Replacing `U` makes every box and wrap of the old one useless, so the server deletes them in the same transaction: the old `U`'s passkey boxes, its kind 1 and 2 wraps, and its kind 4 wraps to the account's devices. Each passkey then gets a new box the next time it is used on a phone holding the new `U`. A phone never replaces `U` on its own, only on the person's request, since every passkey has to be wrapped again.
+
+**Removing a passkey is not revocation.** Removing a passkey (or only its box) deletes its box, so the server no longer hands it out, but whoever already used that passkey to open `U`, or kept a copy of the box and the PRF output, holds `U`'s scalar and can open every wrap to `U`: the practice key and the identity seed. The passkey may also have brought the keys to a phone of its own, which holds a device wrap of the practice key; a rotation alone would hand the new key to that device too, since it wraps to every device holding the current one. So shutting the passkey out takes, in this order, on a phone the person trusts:
+
+1. Before removing the passkey, read its `devices` (`GET /api/me/credentials`: the devices bound to live sessions it signed in with, which the phones it reached registered). Removing the passkey ends those sessions, so the list is gone afterwards.
+2. Remove those devices (`DELETE /api/devices/{deviceId}`, which deletes their wraps) and publish a new signed device list without them (`PUT /api/me/device-list`).
+3. Sign out everywhere else (`DELETE /api/me/sessions`), which also ends sessions that recorded no passkey, and remove the passkey.
+4. Replace `U` (`replace: true`), wrap the keys to the new `U`, and give each remaining passkey a new box.
+5. Rotate the practice key; the rotation wraps it to the remaining devices and the new `U` only.
+
+What was readable before stays readable to whoever held the old `U` or a removed device, and the identity seed cannot be rotated. A device the passkey reached through a session that has already ended is not in `devices`; the person checks the device list for phones they do not recognise. Apps offer this as "Replace the unlock key and rotate" when the person removes a passkey whose `canUnlock` is true, and do all of it when they accept.
+
+**`U` between phones.** A phone holding `U` gives it to another of the account's phones as a kind 4 wrap ([Wraps](#wraps)), signed, with `keyVersion` = `U`'s `version`, so a phone that came in by the recovery code can still add a passkey. The server stores a kind 4 wrap only at the current `U`'s version, checked under the account's lock, but a receiving phone does not rely on that: it fetches `U`'s statement (`GET /api/me/user-key`) and verifies it against the identity key, ignores a kind 4 wrap whose `keyVersion` is not that statement's `version`, and after unwrapping checks that `scalar·G` equals the signed `pk` before keeping or using the scalar.
+
+**A passkey's box.**
+
+```
+prf       = PRF output of the passkey for eval.first = "duongondro/v1/prf"     32 bytes
+prf_key   = HKDF(prf, salt = uuid(user), info = "duongondro/v1/prf-wrap")
+aad       = uuid(user) ‖ identityPk ‖ uuid(U.id) ‖ credentialId                  64 + n bytes
+box       = nonce(12) ‖ ChaCha20-Poly1305(prf_key, nonce, scalar(U), aad)        60 bytes
+signature = Ed25519(identity, "duongondro/v1/prf-sig" ‖ aad ‖ box)
+```
+
+- `eval.first` is the 17 ASCII bytes of the label, passed as the WebAuthn-level PRF input (Credential Manager's JSON, base64url; `ASAuthorizationPublicKeyCredentialPRFAssertionInput` on iOS). The platform hashes it into the authenticator's salt (`SHA-256("WebAuthn PRF" ‖ 0x00 ‖ input)`), so the same input gives the same output on every platform. The phone fixes the input; it never takes one from the server. A ceremony may ask with `prf.eval` (sign-in) or at creation (`prf.eval` where supported, else a sign-in right after).
+- **The PRF output never leaves the phone.** The phone builds the ceremony's `extensions` itself: it drops any `extensions` in the options the server sends and adds only `prf` with its own input (the server never asks for PRF). Credential Manager returns the output in the response's `clientExtensionResults.prf.results`, so before posting the response to a finish route the phone removes `clientExtensionResults.prf` (simplest: sends `clientExtensionResults` as `{}`). The server refuses a response that carries any `prf.results` with 400, and neither stores nor logs it.
+- `scalar(U)` is `U`'s private key as 32 bytes, big-endian. After opening it, the phone derives the public point and checks it against the signed `pk` before using it.
+- `identityPk` is the account's Ed25519 identity public key, 32 bytes, as `PUT /api/me/identity` stored it (a new phone reads it from `GET /api/me`). **It is bound into the box because nothing else on a new phone authenticates it.** A new phone has no pinned identity key: it gets it from the server, and the statement of `U` and every wrap to `U` are trusted only through signatures under that key. Anyone can encrypt to `U`'s public key, so a malicious server could publish an identity key of its own, re-sign `U`'s statement, and serve wraps to `U` of a practice key and seed it chose; the phone would then seal new sessions under a key the server knows. The box's key comes from the PRF output, which the server cannot produce, so binding `identityPk` into the box's AAD makes the box open only under the identity key the phone that sealed it saw. A new phone therefore opens the box with the identity key it was given **before** trusting the statement or any wrap: if it does not open, it stops and trusts nothing from that response. The server rebuilds the same AAD from the identity key it holds when it checks a box's signature.
+- `credentialId` is the raw credential id (as the server stores it, up to 1023 bytes), last in the AAD so its length needs no prefix. A box therefore opens only for its passkey, account and `U`.
+- The signature lets the server refuse a box from a session that holds no identity key, as for [recovery boxes](#recovery). It does not protect the box's content, which the AEAD does; a new phone checks it against the published identity key before opening.
+
+**A new phone** signs in with a passkey, asks for the PRF output in the same ceremony, fetches its passkey's box, `U`'s statement and the wraps to `U`, and the account's identity key; opens `scalar(U)` with the AAD built from that identity key (which authenticates the identity key, above), verifies the box's signature, the statement and the wraps' signatures against it, checks `scalar(U)` against `pk`, unwraps the identity seed and checks it against the published identity key, then unwraps the practice key, registers its device and wraps to itself as after recovery.
+
+**Rollback (what remains).** Every check above proves that a box, statement or wrap was once genuine, not that it is current. A server colluding with someone who held an old `U` (or the old practice key) can serve a new phone an old box, `U`'s old statement and the old wraps to it, all still validly signed: the phone then unlocks an old practice key and seals new sessions under a key that holder knows. The same holds for recovery boxes, which the server could serve from before a rotation. Shutting a passkey out (above) therefore protects against the server alone, not against the server together with whoever it shut out. Later: a new phone compares the unwrapped `keyVersion` with the versions of the sealed logs it syncs (and with `keyVersion` in `GET /api/me`, which the server controls too) and refuses to seal under a key older than logs it can see; signed device lists and statements could carry the current key version for the same check.
+
 ## Test vectors
 
-`testdata/vectors.json` is generated by `go test ./internal/e2ee -update` from fixed inputs (keys derived from labelled SHA-256 hashes, fixed nonces and ephemeral keys), and checked on every test run. Clients reproduce each output from the listed inputs and also open the sealed values. Fixed nonces exist only in vectors; production code always draws them at random.
+`testdata/vectors.json` is generated by `go test ./internal/e2ee -update` from fixed inputs (keys derived from labelled SHA-256 hashes, fixed nonces and ephemeral keys), and checked on every test run. Clients reproduce each output from the listed inputs and also open the sealed values. The `prf` section starts from a fixed PRF output, since a real one comes only from an authenticator. Fixed nonces exist only in vectors; production code always draws them at random.

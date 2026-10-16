@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 	"uuid"
@@ -49,10 +51,10 @@ func TestWrapsASessionCannotBreak(t *testing.T) {
 	rotation := []RotationWrap{{DeviceID: phone.ID, WrapInput: signedWrap(u, identity, phone, e2ee.KindPracticeKey, 2)}}
 	forged := []RotationWrap{{DeviceID: phone.ID, WrapInput: signedWrap(u, identity, phone, e2ee.KindPracticeKey, 2)}}
 	forged[0].AuthType, forged[0].Authenticator = "self", random(32)
-	if err := f.wraps.Rotate(ctx, u, 2, forged); !isValidation(err) {
+	if err := f.wraps.Rotate(ctx, u, 2, forged, nil); !isValidation(err) {
 		t.Fatalf("a rotation with unsigned wraps: %v", err)
 	}
-	if err := f.wraps.Rotate(ctx, u, 2, rotation); err != nil {
+	if err := f.wraps.Rotate(ctx, u, 2, rotation, nil); err != nil {
 		t.Fatalf("rotation, with a planted holder outside the list: %v", err)
 	}
 }
@@ -207,5 +209,76 @@ func TestPurgesAreReappliedAfterARestore(t *testing.T) {
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE id = $1`, u.ID).Scan(&left)
 	if left != 0 {
 		t.Fatal("the purged account came back")
+	}
+}
+
+// A phone signed out by "sign out everywhere else" or by removing the passkey it signed
+// in with stops receiving nudges, as one that signs out itself does; this one keeps them.
+func TestSignedOutPhonesStopNudges(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	a := auth.New(f.pool, f.keys)
+	s, _ := f.signIn(nil, nil, nil)
+	n := NewNudges(f.pool, f.keys, nil)
+	u, other := f.user(), f.user()
+	tokens := func() int {
+		rows, err := f.q.PushTokensOf(ctx, u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows)
+	}
+	// Each phone has its own token and a session bound to it.
+	signIn := func(credential []byte) (string, string) {
+		phone, _ := f.device(u, "hardware")
+		var token string
+		var err error
+		if credential != nil {
+			token, err = a.NewPasskeySession(ctx, u.ID, credential)
+		} else {
+			token, err = a.NewSession(ctx, u.ID)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.BindDevice(ctx, token, phone.ID); err != nil {
+			t.Fatal(err)
+		}
+		push := hex.EncodeToString(random(32))
+		if err := n.PutToken(ctx, u.ID, phone.ID, "apns", push); err != nil {
+			t.Fatal(err)
+		}
+		return token, push
+	}
+	passkey := func(userID [16]byte) []byte {
+		id := random(16)
+		if err := f.q.CreateCredential(ctx, db.CreateCredentialParams{ID: id, UserID: userID,
+			DataEncrypted: f.keys.Seal(atrest.CredentialsData, atrest.RowOf(id), []byte(`{}`))}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	first, second := passkey(u.ID), passkey(u.ID)
+	signIn(first)
+	here, _ := signIn(second)
+	signIn(nil)
+	if tokens() != 3 {
+		t.Fatalf("tokens: %d", tokens())
+	}
+	if err := s.RemovePasskey(ctx, u.ID, first); err != nil {
+		t.Fatal(err)
+	}
+	if tokens() != 2 {
+		t.Fatalf("the removed passkey's phone keeps its token: %d left", tokens())
+	}
+	// Someone else's passkey id removes nothing of this account's.
+	if err := s.RemovePasskey(ctx, other.ID, second); !errors.Is(err, ErrNotFound) || tokens() != 2 {
+		t.Fatalf("another account's removal: %v, %d left", err, tokens())
+	}
+	if _, err := a.RevokeOthers(ctx, u.ID, here); err != nil {
+		t.Fatal(err)
+	}
+	if tokens() != 1 {
+		t.Fatalf("after signing out everywhere else: %d left, want this phone's", tokens())
 	}
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -498,5 +499,80 @@ func TestMagicLinkCodeKeyIsPerProcess(t *testing.T) {
 	}
 	if session, err := restarted.RedeemMagicLink(ctx, token); err != nil || !session.Created {
 		t.Fatalf("the link from before the restart: %v", err)
+	}
+}
+
+// withPRFResults adds the PRF output Credential Manager returns in a passkey
+// response's clientExtensionResults, as a phone that forgot to remove it would send.
+func withPRFResults(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	body["clientExtensionResults"] = map[string]any{"prf": map[string]any{"enabled": true, "results": map[string]any{"first": b64(random(32))}}}
+	out, _ := json.Marshal(body)
+	return out
+}
+
+// The PRF output never reaches the server (docs/crypto.md › Passkey unlock): the
+// options it sends never ask for PRF, and a response carrying PRF results is refused
+// at sign-up, when adding a passkey and at sign-in.
+func TestPasskeyResponsesWithPRFAreRefused(t *testing.T) {
+	f := setup(t)
+	s, _ := f.signIn(nil, nil, nil)
+	ctx := t.Context()
+	noPRF := func(what string, options any) {
+		t.Helper()
+		raw, _ := json.Marshal(options)
+		if bytes.Contains(bytes.ToLower(raw), []byte(`"prf"`)) || bytes.Contains(raw, []byte(`"extensions"`)) {
+			t.Fatalf("the %s options ask for an extension: %s", what, raw)
+		}
+	}
+	// go-webauthn also refuses an extension output nobody asked for; the explicit
+	// check names the problem and does not depend on the library.
+	refusedPRF := func(err error) bool {
+		return isValidation(err) && strings.Contains(err.Error(), "PRF output")
+	}
+	phone := newAuthenticator()
+	signUp := func() Ceremony {
+		c, err := s.BeginPasskeySignUp(ctx, SignUpProof{SignUp: true, Consent: true}, SignUpProfile{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		noPRF("sign-up", c.Options)
+		return c
+	}
+	refused := signUp()
+	if _, err := s.FinishPasskey(ctx, refused.SessionID, withPRFResults(t, phone.create(t, refused.Options))); !refusedPRF(err) {
+		t.Fatalf("a sign-up carrying a PRF output: %v", err)
+	}
+	c := signUp()
+	session, err := s.FinishPasskey(ctx, c.SessionID, phone.create(t, c.Options))
+	if err != nil {
+		t.Fatalf("a sign-up without one: %v", err)
+	}
+
+	tablet := newAuthenticator()
+	add, err := s.BeginPasskeyAdd(ctx, session.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noPRF("add", add.Options)
+	if _, err := s.FinishPasskeyRegistration(ctx, add.SessionID, withPRFResults(t, tablet.create(t, add.Options)), &session.UserID); !refusedPRF(err) {
+		t.Fatalf("adding a passkey with a PRF output: %v", err)
+	}
+
+	login, err := s.BeginPasskeySignIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noPRF("sign-in", login.Options)
+	if _, err := s.FinishPasskeySignIn(ctx, login.SessionID, withPRFResults(t, phone.get(t, login.Options))); !refusedPRF(err) {
+		t.Fatalf("a sign-in carrying a PRF output: %v", err)
+	}
+	login, _ = s.BeginPasskeySignIn(ctx)
+	if got, err := s.FinishPasskeySignIn(ctx, login.SessionID, phone.get(t, login.Options)); err != nil || got.UserID != session.UserID {
+		t.Fatalf("a sign-in without one: %v", err)
 	}
 }

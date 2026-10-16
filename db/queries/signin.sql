@@ -10,7 +10,7 @@ INSERT INTO credentials (id, user_id, data_encrypted) VALUES ($1, $2, $3);
 -- name: ListCredentials :many
 SELECT * FROM credentials WHERE user_id = $1 ORDER BY created_at;
 
--- name: UpdateCredential :exec
+-- name: UpdateCredential :execrows
 UPDATE credentials SET data_encrypted = $2, last_used_at = now() WHERE id = $1;
 
 -- name: PurgeExpiredWebauthnSessions :execrows
@@ -90,7 +90,7 @@ DELETE FROM magic_links WHERE email_hash IN (
     WHERE auth_identities.user_id = $1 AND auth_identities.email_hash IS NOT NULL);
 
 -- name: ExportCredentials :many
-SELECT id, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at;
+SELECT id, name_encrypted, created_at, last_used_at FROM credentials WHERE user_id = $1 ORDER BY created_at;
 
 -- name: ExportIdentities :many
 SELECT provider, subject_hash, subject_encrypted, email_encrypted, created_at FROM auth_identities WHERE user_id = $1 ORDER BY created_at;
@@ -143,3 +143,23 @@ DELETE FROM auth_identities WHERE user_id = $1 AND provider = 'email';
 
 -- name: CountCredentials :one
 SELECT count(*) FROM credentials WHERE user_id = $1;
+
+-- name: RenameCredential :execrows
+UPDATE credentials SET name_encrypted = sqlc.narg(name_encrypted) WHERE id = $1 AND user_id = $2;
+
+-- name: DeleteCredential :execrows
+-- Its sessions go with it (sessions.credential_id ON DELETE CASCADE).
+DELETE FROM credentials WHERE id = $1 AND user_id = $2;
+
+-- name: CountSignInMethods :one
+-- Passkeys plus linked identities (an e-mail for magic links, later Apple or Google).
+SELECT (SELECT count(*) FROM credentials WHERE credentials.user_id = $1)
+     + (SELECT count(*) FROM auth_identities WHERE auth_identities.user_id = $1) AS methods;
+
+-- name: CredentialDevices :many
+-- The devices bound to the account's live sessions that a passkey signed in with:
+-- what a phone that passkey reached registered, for removing them from the device
+-- list when the passkey is no longer trusted.
+SELECT DISTINCT credential_id, device_id FROM sessions
+WHERE user_id = $1 AND credential_id IS NOT NULL AND device_id IS NOT NULL
+ORDER BY credential_id, device_id;

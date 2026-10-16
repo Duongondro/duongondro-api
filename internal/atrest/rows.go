@@ -119,6 +119,24 @@ func (k *Keys) DeviceList(r db.DeviceList, err error) (DeviceList, error) {
 	return DeviceList{UserID: r.UserID, Version: r.Version, Payload: payload, Signature: r.Signature, UpdatedAt: r.UpdatedAt}, err
 }
 
+// UserKey is the signed user-key statement (docs/crypto.md, Passkey unlock).
+type UserKey struct {
+	UserID    uuid.UUID `json:"userId"`
+	ID        uuid.UUID `json:"id"`
+	Version   int64     `json:"version"`
+	Payload   []byte    `json:"payload"`
+	Signature []byte    `json:"signature"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func (k *Keys) UserKey(r db.UserKey, err error) (UserKey, error) {
+	if err != nil {
+		return UserKey{}, err
+	}
+	payload, err := k.Open(UserKeysPayload, IDRow(r.UserID), r.PayloadEncrypted)
+	return UserKey{UserID: r.UserID, ID: r.ID, Version: r.Version, Payload: payload, Signature: r.Signature, UpdatedAt: r.UpdatedAt}, err
+}
+
 type Invite struct {
 	ID        string     `json:"id"`
 	InviterID uuid.UUID  `json:"inviterId"`
@@ -222,6 +240,7 @@ type Credential struct {
 	ID         []byte
 	UserID     uuid.UUID
 	Data       []byte
+	Name       *string // given by the person; nil: the app names it after its password manager
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 }
@@ -229,7 +248,26 @@ type Credential struct {
 func (k *Keys) Credentials(rows []db.Credential, err error) ([]Credential, error) {
 	return each(rows, err, func(r db.Credential) (Credential, error) {
 		data, err := k.Open(CredentialsData, RowOf(r.ID), r.DataEncrypted)
-		return Credential{ID: r.ID, UserID: r.UserID, Data: data, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt}, err
+		if err != nil {
+			return Credential{}, err
+		}
+		name, err := k.OpenOptional(CredentialsName, RowOf(r.ID), r.NameEncrypted)
+		return Credential{ID: r.ID, UserID: r.UserID, Data: data, Name: name, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt}, err
+	})
+}
+
+// ExportCredential is a passkey as the export lists it: no key material.
+type ExportCredential struct {
+	ID         []byte     `json:"id"`
+	Name       *string    `json:"name"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+}
+
+func (k *Keys) ExportCredentials(rows []db.ExportCredentialsRow, err error) ([]ExportCredential, error) {
+	return each(rows, err, func(r db.ExportCredentialsRow) (ExportCredential, error) {
+		name, err := k.OpenOptional(CredentialsName, RowOf(r.ID), r.NameEncrypted)
+		return ExportCredential{ID: r.ID, Name: name, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt}, err
 	})
 }
 

@@ -173,7 +173,8 @@ paths:
       operationId: rotatePracticeKey
       description: |
         Moves the practice key to keyVersion + 1. The wraps must carry the new key to
-        exactly the devices that hold the current one. Logs sealed under the old
+        exactly the devices that hold the current one, and userKeyWrap to the user key
+        while it holds the current one. Logs sealed under the old
         version are then refused with 422 until the devices reseal them.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
@@ -732,6 +733,188 @@ paths:
         "204": {description: Added.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/credentials:
+    get:
+      operationId: listPasskeys
+      description: |
+        The account's passkeys, oldest first, for Settings › Passkeys (design decision
+        25). No key material: a name if the person gave one, the authenticator's AAGUID
+        (the app names the passkey after its password manager), when it was added and
+        last used, and whether this session signed in with it.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: Passkeys.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PasskeyList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/me/credentials/{credentialId}:
+    patch:
+      operationId: renamePasskey
+      description: Names a passkey, or clears its name (null or blank). The name is encrypted at rest.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasskeyRename"}
+      responses:
+        "204": {description: Renamed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      operationId: deletePasskey
+      description: |
+        Removes a passkey and ends every session it signed in with, this one included
+        if it did. Sessions made before the deploy that records each session's passkey
+        (sessions.credential_id) are tied to none: removing a passkey does not end
+        them, and they never see current true; "sign out everywhere
+        else" (DELETE /api/me/sessions) ends them.
+        409 when it is the account's last way to sign in (no other passkey,
+        e-mail, Apple or Google identity). The passkey stays in the password manager.
+        Its box goes with it, but removal is not revocation: a U this passkey already
+        opened stays open to whoever opened it. When the passkey's canUnlock was true,
+        the app offers to shut it out (docs/crypto.md › Passkey unlock): read the
+        passkey's devices first, remove them and publish a device list without them,
+        sign out everywhere else, remove the passkey, replace U (PUT /api/me/user-key
+        with replace) and rotate the practice key.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /api/me/credentials/{credentialId}/unlock:
+    get:
+      operationId: getPasskeyUnlock
+      description: |
+        What a new phone needs after signing in with this passkey (docs/crypto.md ›
+        Passkey unlock): the user key's signed statement, the passkey's box holding
+        U's scalar, and the practice key and identity seed wrapped to U. 404 when the
+        passkey is not this account's or cannot unlock the counts.
+        The box's AAD binds the account's identity public key (GET /api/me): open the
+        box with it first, and trust the statement and wraps only if it opens.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      responses:
+        "200":
+          description: The passkey's box and the user key.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PasskeyUnlock"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: putPasskeyUnlock
+      description: |
+        Stores U's scalar sealed under this passkey's PRF output, replacing its box.
+        The signature by the identity key is verified over the AAD the server rebuilds
+        (user, identity public key, current user key, credential id). 409 when no user key is published or
+        userKeyId is not the current one.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PasskeyBoxInput"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      operationId: deletePasskeyUnlock
+      description: |
+        Stops the server handing out this passkey's box. The passkey itself stays. Not
+        a revocation: to shut out a U already opened, replace U and rotate.
+      parameters:
+        - {$ref: "#/components/parameters/Authorization"}
+        - {$ref: "#/components/parameters/CredentialId"}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /api/me/user-key:
+    get:
+      operationId: getUserKey
+      description: The user key U's signed statement and the wraps to it; 404 when none is published.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      responses:
+        "200":
+          description: The user key.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserKeyState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: putUserKey
+      description: |
+        Publishes the user key U (type `user-key`): a conditional create, never an
+        implicit replacement (docs/crypto.md › Passkey unlock). The payload must name
+        this user, carry a lowercase UUID id, a 65-byte point on the glowie curve and
+        a version of at least 1, and be signed by the identity key.
+
+        - No U yet: stored, 201. The first phone wins.
+        - A U exists: 409 with `userKey` (its id and version), and nothing changes.
+          The phone keeps no U of its own and waits for the existing one to reach it
+          as a kind 4 wrap from a phone that holds it.
+        - The same statement as the stored one again: 201 (a safe retry).
+        - `replace: true`, for when U is lost (no phone holds it) or may be
+          compromised (a passkey that could unlock it was removed): replaces U only
+          when this session is bound to a device holding the current practice key,
+          and the new U has a new id and a version above the stored one's; else 409
+          without `userKey`. Replacing deletes every passkey box and wrap to the old
+          U, and its kind 4 wraps to the account's devices.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UserKeyInput"}
+      responses:
+        "201": {description: "Stored: U is now this statement's key."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409":
+          description: |
+            The account already has a U (`userKey` is present), or a replacement or
+            precondition was refused (identity key not set, the session's device does
+            not hold the current practice key, the version is not above the stored
+            one's).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserKeyConflict"}
+  /api/me/user-key/wraps:
+    post:
+      operationId: putUserKeyWrap
+      description: |
+        Stores the practice key or identity seed wrapped to the current U, replacing
+        one of the same kind and version. Signed by the identity key over the wrap and
+        the AAD the server rebuilds with U in the recipient's place. A practice key
+        (kind 1) only at the current key version: 409 otherwise, as when no U is
+        published or userKeyId is not the current U.
+      parameters: [{$ref: "#/components/parameters/Authorization"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UserKeyWrapInput"}
+      responses:
+        "204": {description: Stored.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /api/me/identities/{provider}:
     post:
       operationId: linkProvider
@@ -913,6 +1096,12 @@ components:
       in: path
       required: true
       schema: {$ref: "#/components/schemas/UUID"}
+    CredentialId:
+      name: credentialId
+      in: path
+      required: true
+      description: The passkey's credential id, base64url without padding.
+      schema: {type: string, minLength: 1, maxLength: 1400}
     Provider:
       name: provider
       in: path
@@ -1021,6 +1210,29 @@ components:
       properties:
         payload: {type: string, format: byte}
         signature: {type: string, format: byte}
+    UserKeyInput:
+      type: object
+      required: [payload, signature]
+      description: A signed `user-key` statement (as SignedStatement), and whether it may replace a stored U.
+      properties:
+        payload: {type: string, format: byte}
+        signature: {type: string, format: byte}
+        replace:
+          type: boolean
+          default: false
+          description: "Replace an existing U (lost, or compromised). Only from a session bound to a device holding the current practice key; never implied."
+    UserKeyConflict:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+        userKey:
+          type: object
+          description: Present when the account already has a U; the phone waits for it as a kind 4 wrap.
+          required: [id, version]
+          properties:
+            id: {$ref: "#/components/schemas/UUID"}
+            version: {type: integer, format: int64}
     Tier:
       type: string
       enum: [hardware, tee, software]
@@ -1055,7 +1267,7 @@ components:
       type: object
       required: [kind, keyVersion, ephemeralKey, box, authType, authenticator]
       properties:
-        kind: {type: integer, minimum: 1, maximum: 2}
+        kind: {type: integer, minimum: 1, maximum: 4, description: "1 practice key, 2 identity seed, 4 user key (signed, keyVersion = the user key's version); not 3"}
         keyVersion: {type: integer, minimum: 1}
         ephemeralKey: {type: string, format: byte, description: 65 bytes}
         box: {type: string, format: byte, description: "nonce ‖ ciphertext ‖ tag, 60 bytes"}
@@ -1091,6 +1303,48 @@ components:
         wraps:
           type: array
           items: {$ref: "#/components/schemas/RotationWrap"}
+        userKeyWrap: {$ref: "#/components/schemas/UserKeyWrapInput"}
+    UserKeyWrapInput:
+      type: object
+      required: [userKeyId, kind, keyVersion, ephemeralKey, box, signature]
+      properties:
+        userKeyId: {$ref: "#/components/schemas/UUID"}
+        kind: {type: integer, minimum: 1, maximum: 2}
+        keyVersion: {type: integer, minimum: 1}
+        ephemeralKey: {type: string, format: byte, description: 65 bytes}
+        box: {type: string, format: byte, description: "nonce ‖ ciphertext ‖ tag, 60 bytes"}
+        signature: {type: string, format: byte, description: "Ed25519 by the identity key (docs/crypto.md, Wraps)"}
+    UserKeyWrap:
+      allOf:
+        - {$ref: "#/components/schemas/UserKeyWrapInput"}
+        - type: object
+          required: [createdAt]
+          properties:
+            createdAt: {type: string, format: date-time}
+    UserKeyState:
+      type: object
+      required: [id, version, statement, wraps]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        version: {type: integer, format: int64}
+        statement: {$ref: "#/components/schemas/SignedStatement"}
+        wraps:
+          type: array
+          items: {$ref: "#/components/schemas/UserKeyWrap"}
+    PasskeyBoxInput:
+      type: object
+      required: [userKeyId, box, signature]
+      properties:
+        userKeyId: {$ref: "#/components/schemas/UUID"}
+        box: {type: string, format: byte, description: "U's scalar sealed under the PRF key, 60 bytes"}
+        signature: {type: string, format: byte, description: "Ed25519 by the identity key over prf-sig ‖ aad ‖ box (docs/crypto.md)"}
+    PasskeyUnlock:
+      type: object
+      required: [userKey, box, signature]
+      properties:
+        userKey: {$ref: "#/components/schemas/UserKeyState"}
+        box: {type: string, format: byte}
+        signature: {type: string, format: byte}
     RecoveryBoxInput:
       type: object
       required: [box, signature]
@@ -1319,6 +1573,38 @@ components:
             ("Adjective Animal", e.g. "Tidy Otter"), as every sign-up without one gets,
             drawn when the ceremony begins so that it names the passkey too.
         gender: {$ref: "#/components/schemas/Gender"}
+    Passkey:
+      type: object
+      required: [id, createdAt, current, canUnlock, devices]
+      properties:
+        id: {type: string, description: "Credential id, base64url without padding"}
+        name: {type: string, description: Absent when the person has not named it}
+        aaguid: {type: string, description: "The authenticator's AAGUID, absent when it gave none (all zeros)"}
+        createdAt: {type: string, format: date-time}
+        lastUsedAt: {type: string, format: date-time}
+        current: {type: boolean, description: "This session signed in with this passkey, so removing it signs this phone out"}
+        canUnlock: {type: boolean, description: "It holds a box of the user key, so signing in with it brings the keys to a new phone"}
+        devices:
+          type: array
+          items: {$ref: "#/components/schemas/UUID"}
+          description: |
+            Devices bound to live sessions this passkey signed in with (the phones it
+            reached, which registered these devices). Read it before removing a passkey
+            that is no longer trusted: those devices leave the signed device list.
+            Sessions already ended, or made before sessions recorded their passkey,
+            leave nothing here.
+    PasskeyList:
+      type: object
+      required: [passkeys]
+      properties:
+        passkeys:
+          type: array
+          items: {$ref: "#/components/schemas/Passkey"}
+    PasskeyRename:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, nullable: true, maxLength: 64, description: "Characters, trimmed; null or blank clears the name"}
     Ceremony:
       type: object
       required: [sessionId, options]
@@ -1335,7 +1621,12 @@ components:
         credential:
           type: object
           additionalProperties: true
-          description: The authenticator's PublicKeyCredential as WebAuthn JSON (base64url fields)
+          description: |
+            The authenticator's PublicKeyCredential as WebAuthn JSON (base64url
+            fields), without any PRF output: the phone removes clientExtensionResults (at least prf) before sending it, and
+            a response carrying prf.results is refused with 400 (docs/crypto.md ›
+            Passkey unlock). The server's options never ask for PRF; the phone adds
+            the extension itself.
     SignInResult:
       type: object
       required: [token, userId, created]

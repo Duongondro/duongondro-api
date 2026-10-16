@@ -11,6 +11,27 @@ import (
 	"uuid"
 )
 
+const deviceHoldsPracticeKey = `-- name: DeviceHoldsPracticeKey :one
+SELECT EXISTS (SELECT 1 FROM key_wraps JOIN devices ON devices.id = key_wraps.device_id
+    WHERE key_wraps.device_id = $1 AND devices.user_id = $2
+      AND key_wraps.kind = 1 AND key_wraps.key_version = $3)
+`
+
+type DeviceHoldsPracticeKeyParams struct {
+	DeviceID   uuid.UUID `json:"deviceId"`
+	UserID     uuid.UUID `json:"userId"`
+	KeyVersion int32     `json:"keyVersion"`
+}
+
+// Whether the account's device holds a wrap of the given practice-key version:
+// replacing the user key U is for a phone that holds the keys.
+func (q *Queries) DeviceHoldsPracticeKey(ctx context.Context, arg DeviceHoldsPracticeKeyParams) (bool, error) {
+	row := q.db.QueryRow(ctx, deviceHoldsPracticeKey, arg.DeviceID, arg.UserID, arg.KeyVersion)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listWraps = `-- name: ListWraps :many
 SELECT device_id, kind, key_version, ephemeral_key, box, auth_type, authenticator, created_at FROM key_wraps WHERE device_id = $1 ORDER BY kind, key_version
 `

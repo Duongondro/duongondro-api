@@ -22,3 +22,10 @@ SELECT * FROM users WHERE id = $1 FOR UPDATE;
 -- name: SetKeyVersion :execrows
 UPDATE users SET key_version = sqlc.arg(new_version)
 WHERE id = sqlc.arg(id) AND key_version = sqlc.arg(new_version)::integer - 1;
+
+-- name: DeviceHoldsPracticeKey :one
+-- Whether the account's device holds a wrap of the given practice-key version:
+-- replacing the user key U is for a phone that holds the keys.
+SELECT EXISTS (SELECT 1 FROM key_wraps JOIN devices ON devices.id = key_wraps.device_id
+    WHERE key_wraps.device_id = sqlc.arg(device_id) AND devices.user_id = sqlc.arg(user_id)
+      AND key_wraps.kind = 1 AND key_wraps.key_version = sqlc.arg(key_version));

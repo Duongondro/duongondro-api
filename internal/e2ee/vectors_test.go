@@ -58,6 +58,7 @@ type Vectors struct {
 	Statements []map[string]any `json:"statements"`
 	Invite     map[string]any   `json:"invite"`
 	Recovery   map[string]any   `json:"recovery"`
+	PRF        map[string]any   `json:"prf"`
 }
 
 func uuidHex(u UUID) string { return hex.EncodeToString(u[:]) }
@@ -201,7 +202,82 @@ func build(t *testing.T) Vectors {
 		"practiceKeyBox":          hexBytes(rbox),
 		"practiceKeyBoxSignature": hexBytes(SignRecoveryBox(identity, user, KindPracticeKey, rbox)),
 	}
+	v.PRF = buildPRF(t, user, device, identity, recipient, ephemeral, nonce, practiceKey, identitySeed)
 	return v
+}
+
+// buildPRF covers Passkey unlock (docs/crypto.md): the user-key statement, a passkey's
+// box from a fixed PRF output, wraps to U, and U's scalar wrapped to a device.
+func buildPRF(t *testing.T, user, device UUID, identity ed25519.PrivateKey, recipient, ephemeral *ecdh.PrivateKey,
+	nonce, practiceKey, identitySeed []byte) map[string]any {
+	userKeyID := uuidOf("user key")
+	userKey := p256(t, "user key")
+	credentialID := fixed("credential id", 16)
+	prf := fixed("prf output", 32)
+	upk := userKey.PublicKey().Bytes()
+
+	payload, err := Marshal(UserKey{ID: uuidText(userKeyID), PK: upk, User: uuidText(user), Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prfKey := PRFKey(prf, user)
+	aad := PasskeyBoxAAD(user, identity.Public().(ed25519.PublicKey), userKeyID, credentialID)
+	box, err := SealPasskeyBox(prfKey, aad, userKey.Bytes(), nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]any{
+		"inputs": map[string]any{
+			"userKeyId":      uuidHex(userKeyID),
+			"userKeyPrivate": hexBytes(userKey.Bytes()),
+			"userKeyPublic":  hexBytes(upk),
+			"credentialId":   hexBytes(credentialID),
+			"identityPublic": hexBytes(identity.Public().(ed25519.PublicKey)),
+			"prfOutput":      hexBytes(prf),
+			"keyVersion":     1,
+		},
+		"prfInput": hexBytes(LabelPRF),
+		"statement": map[string]any{
+			"type":      TypeUserKey,
+			"payload":   string(payload),
+			"signature": hexBytes(SignStatement(identity, TypeUserKey, payload)),
+		},
+		"prfKey":       hexBytes(prfKey),
+		"aad":          hexBytes(aad),
+		"box":          hexBytes(box),
+		"boxSignature": hexBytes(SignPasskeyBox(identity, aad, box)),
+	}
+
+	// Wraps to U: as to a device, U's id and key in the recipient's place.
+	var wraps []map[string]any
+	for _, w := range []struct {
+		name      string
+		kind      WrapKind
+		secret    []byte
+		recipient *ecdh.PrivateKey
+		id        UUID
+	}{
+		{"practice key to U", KindPracticeKey, practiceKey, userKey, userKeyID},
+		{"identity seed to U", KindIdentitySeed, identitySeed, userKey, userKeyID},
+		{"U to a device", KindUserKey, userKey.Bytes(), recipient, device},
+	} {
+		wa := WrapAAD(user, 1, w.id, w.kind)
+		epk, wbox, err := Wrap(w.recipient.PublicKey(), ephemeral, w.secret, wa, nonce)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wraps = append(wraps, map[string]any{
+			"name":      w.name,
+			"kind":      int(w.kind),
+			"recipient": uuidHex(w.id),
+			"aad":       hexBytes(wa),
+			"epk":       hexBytes(epk),
+			"box":       hexBytes(wbox),
+			"signature": hexBytes(SignWrap(identity, epk, wbox, wa, w.recipient.PublicKey().Bytes())),
+		})
+	}
+	out["wraps"] = wraps
+	return out
 }
 
 func TestVectors(t *testing.T) {
@@ -272,6 +348,42 @@ func TestRoundTrips(t *testing.T) {
 	box[20] ^= 1
 	if VerifyWrap(identity.Public().(ed25519.PublicKey), epk, box, aad, recipient.PublicKey().Bytes(), sig) {
 		t.Fatal("a modified wrap must not verify")
+	}
+}
+
+func TestPasskeyBox(t *testing.T) {
+	user, userKey := uuidOf("user"), uuidOf("user key")
+	identity := ed25519.NewKeyFromSeed(fixed("identity seed", 32))
+	pub := identity.Public().(ed25519.PublicKey)
+	scalar := p256(t, "user key").Bytes()
+	prfKey := PRFKey(fixed("prf output", 32), user)
+	cred := fixed("credential id", 16)
+	aad := PasskeyBoxAAD(user, pub, userKey, cred)
+	if len(aad) != 64+len(cred) {
+		t.Fatalf("aad is %d bytes", len(aad))
+	}
+	box, err := SealPasskeyBox(prfKey, aad, scalar, fixed("nonce", NonceSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := OpenPasskeyBox(prfKey, aad, box); err != nil || !bytes.Equal(got, scalar) {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := OpenPasskeyBox(prfKey, PasskeyBoxAAD(user, pub, userKey, fixed("other credential", 16)), box); err != ErrOpen {
+		t.Fatalf("a box must not open for another passkey: %v", err)
+	}
+	if _, err := OpenPasskeyBox(PRFKey(fixed("other prf", 32), user), aad, box); err != ErrOpen {
+		t.Fatalf("a box must not open with another passkey's PRF output: %v", err)
+	}
+	// A server that hands out another identity key (with wraps to U signed by it)
+	// makes the box fail to open.
+	forged := ed25519.NewKeyFromSeed(fixed("server's identity", 32)).Public().(ed25519.PublicKey)
+	if _, err := OpenPasskeyBox(prfKey, PasskeyBoxAAD(user, forged, userKey, cred), box); err != ErrOpen {
+		t.Fatalf("a box must not open under another identity key: %v", err)
+	}
+	sig := SignPasskeyBox(identity, aad, box)
+	if !VerifyPasskeyBox(pub, aad, box, sig) || VerifyPasskeyBox(pub, PasskeyBoxAAD(user, pub, uuidOf("other"), cred), box, sig) {
+		t.Fatal("box signature")
 	}
 }
 
