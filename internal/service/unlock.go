@@ -284,7 +284,7 @@ func (u *Unlock) PutPasskeyBox(ctx context.Context, user atrest.User, credential
 	if userKeyID != uk.ID {
 		return conflict("the user key was replaced; seal the current one")
 	}
-	aad := e2ee.PasskeyBoxAAD(e2ee.UUID(user.ID), e2ee.UUID(uk.ID), credentialID)
+	aad := e2ee.PasskeyBoxAAD(e2ee.UUID(user.ID), user.IdentityPublicKey, e2ee.UUID(uk.ID), credentialID)
 	if !e2ee.VerifyPasskeyBox(user.IdentityPublicKey, aad, box, signature) {
 		return invalid("the box's signature does not verify against the identity key")
 	}

@@ -316,11 +316,16 @@ func PRFKey(prf []byte, user UUID) []byte {
 	return Derive(prf, user[:], LabelPRFWrap)
 }
 
-// PasskeyBoxAAD binds a passkey's box to the user, the user key and the passkey; the
-// credential id comes last, so its length needs no prefix.
-func PasskeyBoxAAD(user, userKey UUID, credentialID []byte) []byte {
-	aad := make([]byte, 0, 32+len(credentialID))
+// PasskeyBoxAAD binds a passkey's box to the user, the account's identity public key
+// (32 bytes, Ed25519), the user key and the passkey; the credential id comes last, so
+// its length needs no prefix. Binding the identity key lets a new phone trust the
+// identity key the server hands it only once the box opens: the box's key comes from
+// the PRF output, which the server cannot forge, so a server that published another
+// identity key, with wraps to U signed by it, would make the box fail to open.
+func PasskeyBoxAAD(user UUID, identity ed25519.PublicKey, userKey UUID, credentialID []byte) []byte {
+	aad := make([]byte, 0, 16+ed25519.PublicKeySize+16+len(credentialID))
 	aad = append(aad, user[:]...)
+	aad = append(aad, identity...)
 	aad = append(aad, userKey[:]...)
 	return append(aad, credentialID...)
 }

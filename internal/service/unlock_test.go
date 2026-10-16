@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
 	"testing"
@@ -62,7 +63,7 @@ func wrapToUserKey(m member, uk userKey, kind e2ee.WrapKind, version int) UserKe
 
 // passkeyBox seals U's scalar under a made-up PRF output for one passkey.
 func passkeyBox(m member, uk userKey, credentialID []byte) (box, sig []byte) {
-	aad := e2ee.PasskeyBoxAAD(e2ee.UUID(m.ID), e2ee.UUID(uk.id), credentialID)
+	aad := e2ee.PasskeyBoxAAD(e2ee.UUID(m.ID), m.identity.Public().(ed25519.PublicKey), e2ee.UUID(uk.id), credentialID)
 	box, err := e2ee.SealPasskeyBox(e2ee.PRFKey(random(32), e2ee.UUID(m.ID)), aad, uk.key.Bytes(), random(e2ee.NonceSize))
 	if err != nil {
 		panic(err)
@@ -143,6 +144,11 @@ func TestUserKey(t *testing.T) {
 	box, sig := passkeyBox(ana, first, phone)
 	if err := u.PutPasskeyBox(ctx, ana.User, bos, first.id, box, sig); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a box for someone else's passkey: %v", err)
+	}
+	// A box bound to another identity key (the AAD the phone signed) is refused.
+	forgedAAD := e2ee.PasskeyBoxAAD(e2ee.UUID(ana.ID), bo.identity.Public().(ed25519.PublicKey), e2ee.UUID(first.id), phone)
+	if err := u.PutPasskeyBox(ctx, ana.User, phone, first.id, box, e2ee.SignPasskeyBox(ana.identity, forgedAAD, box)); !isValidation(err) {
+		t.Fatalf("a box bound to another identity key: %v", err)
 	}
 	if err := u.PutPasskeyBox(ctx, ana.User, phone, first.id, box, e2ee.SignPasskeyBox(ana.identity, random(48), box)); !isValidation(err) {
 		t.Fatalf("a signature over another AAD: %v", err)

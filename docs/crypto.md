@@ -109,6 +109,8 @@ One box per kind (practice key, identity seed), stored by the server. Each box i
 signature    = Ed25519(identity, "duongondro/v1/recovery-sig" ‖ uuid(user) ‖ u8(kind) ‖ box)
 ```
 
+The recovery boxes do not need the identity key in their AAD: both secrets come straight out of boxes whose key derives from `R`, which the server never has, so it can neither forge nor swap them, and the phone checks the opened seed against the identity key rather than trusting a key the server hands it.
+
 ## Passkey unlock (PRF)
 
 A passkey made with the WebAuthn PRF extension also brings the keys to a new phone ([design: Keys › Passkeys that unlock the counts](https://github.com/Duongondro/duongondro-design/blob/main/docs/05-keys.md#passkeys-that-unlock-the-counts)), as in Code Share (CodeShareApp/codeshare-design#22). A **user key `U`** sits between passkeys and keys: the practice key and the identity seed are wrapped to `U` as to a device, and `U`'s private scalar is sealed once per passkey under that passkey's PRF output.
@@ -130,7 +132,7 @@ A passkey made with the WebAuthn PRF extension also brings the keys to a new pho
 ```
 prf       = PRF output of the passkey for eval.first = "duongondro/v1/prf"     32 bytes
 prf_key   = HKDF(prf, salt = uuid(user), info = "duongondro/v1/prf-wrap")
-aad       = uuid(user) ‖ uuid(U.id) ‖ credentialId                               32 + n bytes
+aad       = uuid(user) ‖ identityPk ‖ uuid(U.id) ‖ credentialId                  64 + n bytes
 box       = nonce(12) ‖ ChaCha20-Poly1305(prf_key, nonce, scalar(U), aad)        60 bytes
 signature = Ed25519(identity, "duongondro/v1/prf-sig" ‖ aad ‖ box)
 ```
@@ -138,10 +140,11 @@ signature = Ed25519(identity, "duongondro/v1/prf-sig" ‖ aad ‖ box)
 - `eval.first` is the 17 ASCII bytes of the label, passed as the WebAuthn-level PRF input (Credential Manager's JSON, base64url; `ASAuthorizationPublicKeyCredentialPRFAssertionInput` on iOS). The platform hashes it into the authenticator's salt (`SHA-256("WebAuthn PRF" ‖ 0x00 ‖ input)`), so the same input gives the same output on every platform. The phone fixes the input; it never takes one from the server. A ceremony may ask with `prf.eval` (sign-in) or at creation (`prf.eval` where supported, else a sign-in right after).
 - **The PRF output never leaves the phone.** The phone builds the ceremony's `extensions` itself: it drops any `extensions` in the options the server sends and adds only `prf` with its own input (the server never asks for PRF). Credential Manager returns the output in the response's `clientExtensionResults.prf.results`, so before posting the response to a finish route the phone removes `clientExtensionResults.prf` (simplest: sends `clientExtensionResults` as `{}`). The server refuses a response that carries any `prf.results` with 400, and neither stores nor logs it.
 - `scalar(U)` is `U`'s private key as 32 bytes, big-endian. After opening it, the phone derives the public point and checks it against the signed `pk` before using it.
+- `identityPk` is the account's Ed25519 identity public key, 32 bytes, as `PUT /api/me/identity` stored it (a new phone reads it from `GET /api/me`). **It is bound into the box because nothing else on a new phone authenticates it.** A new phone has no pinned identity key: it gets it from the server, and the statement of `U` and every wrap to `U` are trusted only through signatures under that key. Anyone can encrypt to `U`'s public key, so a malicious server could publish an identity key of its own, re-sign `U`'s statement, and serve wraps to `U` of a practice key and seed it chose; the phone would then seal new sessions under a key the server knows. The box's key comes from the PRF output, which the server cannot produce, so binding `identityPk` into the box's AAD makes the box open only under the identity key the phone that sealed it saw. A new phone therefore opens the box with the identity key it was given **before** trusting the statement or any wrap: if it does not open, it stops and trusts nothing from that response. The server rebuilds the same AAD from the identity key it holds when it checks a box's signature.
 - `credentialId` is the raw credential id (as the server stores it, up to 1023 bytes), last in the AAD so its length needs no prefix. A box therefore opens only for its passkey, account and `U`.
 - The signature lets the server refuse a box from a session that holds no identity key, as for [recovery boxes](#recovery). It does not protect the box's content, which the AEAD does; a new phone checks it against the published identity key before opening.
 
-**A new phone** signs in with a passkey, asks for the PRF output in the same ceremony, fetches its passkey's box, `U`'s statement and the wraps to `U`, verifies the statement and signatures against the account's identity key, opens `scalar(U)`, checks it against `pk`, unwraps the identity seed and checks it against the published identity key, then unwraps the practice key, registers its device and wraps to itself as after recovery.
+**A new phone** signs in with a passkey, asks for the PRF output in the same ceremony, fetches its passkey's box, `U`'s statement and the wraps to `U`, and the account's identity key; opens `scalar(U)` with the AAD built from that identity key (which authenticates the identity key, above), verifies the box's signature, the statement and the wraps' signatures against it, checks `scalar(U)` against `pk`, unwraps the identity seed and checks it against the published identity key, then unwraps the practice key, registers its device and wraps to itself as after recovery.
 
 ## Test vectors
 

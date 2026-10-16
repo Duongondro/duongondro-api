@@ -161,7 +161,7 @@ func TestPasskeyUnlockOverHTTP(t *testing.T) {
 		"ephemeralKey": epk, "box": wbox, "signature": e2ee.SignWrap(ana.identity, epk, wbox, aad, u.PublicKey().Bytes())}); rec.Code != http.StatusNoContent {
 		t.Fatalf("wrap to U: %d %s", rec.Code, rec.Body)
 	}
-	boxAAD := e2ee.PasskeyBoxAAD(user, e2ee.UUID(ukID), cred)
+	boxAAD := e2ee.PasskeyBoxAAD(user, ana.identity.Public().(ed25519.PublicKey), e2ee.UUID(ukID), cred)
 	box, _ := e2ee.SealPasskeyBox(e2ee.PRFKey(make([]byte, 32), user), boxAAD, u.Bytes(), nonce)
 	if rec := serve(t, e, http.MethodPut, unlockPath, ana.token, map[string]any{"userKeyId": ukID, "box": box,
 		"signature": e2ee.SignPasskeyBox(ana.identity, boxAAD, box)}); rec.Code != http.StatusNoContent {

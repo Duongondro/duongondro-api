@@ -796,6 +796,8 @@ paths:
         Passkey unlock): the user key's signed statement, the passkey's box holding
         U's scalar, and the practice key and identity seed wrapped to U. 404 when the
         passkey is not this account's or cannot unlock the counts.
+        The box's AAD binds the account's identity public key (GET /api/me): open the
+        box with it first, and trust the statement and wraps only if it opens.
       parameters:
         - {$ref: "#/components/parameters/Authorization"}
         - {$ref: "#/components/parameters/CredentialId"}
@@ -812,7 +814,7 @@ paths:
       description: |
         Stores U's scalar sealed under this passkey's PRF output, replacing its box.
         The signature by the identity key is verified over the AAD the server rebuilds
-        (user, current user key, credential id). 409 when no user key is published or
+        (user, identity public key, current user key, credential id). 409 when no user key is published or
         userKeyId is not the current one.
       parameters:
         - {$ref: "#/components/parameters/Authorization"}

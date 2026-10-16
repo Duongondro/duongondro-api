@@ -221,7 +221,7 @@ func buildPRF(t *testing.T, user, device UUID, identity ed25519.PrivateKey, reci
 		t.Fatal(err)
 	}
 	prfKey := PRFKey(prf, user)
-	aad := PasskeyBoxAAD(user, userKeyID, credentialID)
+	aad := PasskeyBoxAAD(user, identity.Public().(ed25519.PublicKey), userKeyID, credentialID)
 	box, err := SealPasskeyBox(prfKey, aad, userKey.Bytes(), nonce)
 	if err != nil {
 		t.Fatal(err)
@@ -232,6 +232,7 @@ func buildPRF(t *testing.T, user, device UUID, identity ed25519.PrivateKey, reci
 			"userKeyPrivate": hexBytes(userKey.Bytes()),
 			"userKeyPublic":  hexBytes(upk),
 			"credentialId":   hexBytes(credentialID),
+			"identityPublic": hexBytes(identity.Public().(ed25519.PublicKey)),
 			"prfOutput":      hexBytes(prf),
 			"keyVersion":     1,
 		},
@@ -352,10 +353,15 @@ func TestRoundTrips(t *testing.T) {
 
 func TestPasskeyBox(t *testing.T) {
 	user, userKey := uuidOf("user"), uuidOf("user key")
+	identity := ed25519.NewKeyFromSeed(fixed("identity seed", 32))
+	pub := identity.Public().(ed25519.PublicKey)
 	scalar := p256(t, "user key").Bytes()
 	prfKey := PRFKey(fixed("prf output", 32), user)
 	cred := fixed("credential id", 16)
-	aad := PasskeyBoxAAD(user, userKey, cred)
+	aad := PasskeyBoxAAD(user, pub, userKey, cred)
+	if len(aad) != 64+len(cred) {
+		t.Fatalf("aad is %d bytes", len(aad))
+	}
 	box, err := SealPasskeyBox(prfKey, aad, scalar, fixed("nonce", NonceSize))
 	if err != nil {
 		t.Fatal(err)
@@ -363,16 +369,20 @@ func TestPasskeyBox(t *testing.T) {
 	if got, err := OpenPasskeyBox(prfKey, aad, box); err != nil || !bytes.Equal(got, scalar) {
 		t.Fatalf("open: %v", err)
 	}
-	if _, err := OpenPasskeyBox(prfKey, PasskeyBoxAAD(user, userKey, fixed("other credential", 16)), box); err != ErrOpen {
+	if _, err := OpenPasskeyBox(prfKey, PasskeyBoxAAD(user, pub, userKey, fixed("other credential", 16)), box); err != ErrOpen {
 		t.Fatalf("a box must not open for another passkey: %v", err)
 	}
 	if _, err := OpenPasskeyBox(PRFKey(fixed("other prf", 32), user), aad, box); err != ErrOpen {
 		t.Fatalf("a box must not open with another passkey's PRF output: %v", err)
 	}
-	identity := ed25519.NewKeyFromSeed(fixed("identity seed", 32))
-	pub := identity.Public().(ed25519.PublicKey)
+	// A server that hands out another identity key (with wraps to U signed by it)
+	// makes the box fail to open.
+	forged := ed25519.NewKeyFromSeed(fixed("server's identity", 32)).Public().(ed25519.PublicKey)
+	if _, err := OpenPasskeyBox(prfKey, PasskeyBoxAAD(user, forged, userKey, cred), box); err != ErrOpen {
+		t.Fatalf("a box must not open under another identity key: %v", err)
+	}
 	sig := SignPasskeyBox(identity, aad, box)
-	if !VerifyPasskeyBox(pub, aad, box, sig) || VerifyPasskeyBox(pub, PasskeyBoxAAD(user, uuidOf("other"), cred), box, sig) {
+	if !VerifyPasskeyBox(pub, aad, box, sig) || VerifyPasskeyBox(pub, PasskeyBoxAAD(user, pub, uuidOf("other"), cred), box, sig) {
 		t.Fatal("box signature")
 	}
 }
