@@ -1595,7 +1595,12 @@ components:
         credential:
           type: object
           additionalProperties: true
-          description: The authenticator's PublicKeyCredential as WebAuthn JSON (base64url fields)
+          description: |
+            The authenticator's PublicKeyCredential as WebAuthn JSON (base64url
+            fields), without any PRF output: the phone removes clientExtensionResults (at least prf) before sending it, and
+            a response carrying prf.results is refused with 400 (docs/crypto.md ›
+            Passkey unlock). The server's options never ask for PRF; the phone adds
+            the extension itself.
     SignInResult:
       type: object
       required: [token, userId, created]
