@@ -893,7 +893,9 @@ paths:
       description: |
         Stores the practice key or identity seed wrapped to the current U, replacing
         one of the same kind and version. Signed by the identity key over the wrap and
-        the AAD the server rebuilds with U in the recipient's place.
+        the AAD the server rebuilds with U in the recipient's place. A practice key
+        (kind 1) only at the current key version: 409 otherwise, as when no U is
+        published or userKeyId is not the current U.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true

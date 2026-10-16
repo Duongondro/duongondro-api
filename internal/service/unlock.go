@@ -184,21 +184,34 @@ func (u *Unlock) UserKey(ctx context.Context, userID uuid.UUID) (atrest.UserKey,
 }
 
 // PutUserKeyWrap stores the practice key or identity seed wrapped to the current U.
+// A practice key is the current one only: an older version wrapped now could reach
+// a U the newer key never did. Under the user's lock, so a rotation (which takes it
+// too) cannot slip between the check and the write.
 func (u *Unlock) PutUserKeyWrap(ctx context.Context, user atrest.User, in UserKeyWrapInput) error {
 	if in.Kind != int(e2ee.KindPracticeKey) && in.Kind != int(e2ee.KindIdentitySeed) {
 		return invalid("kind must be 1 (practice key) or 2 (identity seed)")
 	}
-	uk, err := u.keys.UserKey(u.q.GetUserKey(ctx, user.ID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return conflict("publish a user key before wrapping to it")
-	} else if err != nil {
-		return err
-	}
-	params, err := validateUserKeyWrap(user, uk, in, int(user.KeyVersion))
-	if err != nil {
-		return err
-	}
-	err = u.q.PutUserKeyWrap(ctx, params)
+	err := pgx.BeginTxFunc(ctx, u.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := u.q.WithTx(tx)
+		locked, err := q.LockUser(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		if in.Kind == int(e2ee.KindPracticeKey) && in.KeyVersion != int(locked.KeyVersion) {
+			return conflict("a practice key goes to the user key at the current version, %d", locked.KeyVersion)
+		}
+		uk, err := u.keys.UserKey(q.GetUserKey(ctx, user.ID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return conflict("publish a user key before wrapping to it")
+		} else if err != nil {
+			return err
+		}
+		params, err := validateUserKeyWrap(user, uk, in, int(locked.KeyVersion))
+		if err != nil {
+			return err
+		}
+		return q.PutUserKeyWrap(ctx, params)
+	})
 	if repository.IsForeignKeyViolation(err) {
 		return conflict("the user key was replaced meanwhile; wrap to the new one")
 	}

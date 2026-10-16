@@ -127,7 +127,7 @@ func TestUserKey(t *testing.T) {
 	if err := u.PutUserKeyWrap(ctx, ana.User, w); !isValidation(err) {
 		t.Fatalf("a wrap signed by someone else: %v", err)
 	}
-	if err := u.PutUserKeyWrap(ctx, ana.User, wrapToUserKey(ana, first, e2ee.KindPracticeKey, 2)); !isValidation(err) {
+	if err := u.PutUserKeyWrap(ctx, ana.User, wrapToUserKey(ana, first, e2ee.KindPracticeKey, 2)); !isConflict(err) {
 		t.Fatalf("a future key version: %v", err)
 	}
 	if err := u.PutUserKeyWrap(ctx, ana.User, wrapToUserKey(ana, first, e2ee.KindUserKey, 1)); !isValidation(err) {
@@ -263,6 +263,10 @@ func TestRotationWrapsToUserKey(t *testing.T) {
 	}
 	if _, wraps, _ := u.UserKey(ctx, ana.ID); len(wraps) != 3 || wraps[1].KeyVersion != 2 {
 		t.Fatalf("wraps to U after the rotation: %+v", wraps)
+	}
+	// After the rotation, only the current practice key goes to U.
+	if err := u.PutUserKeyWrap(ctx, ana.User, wrapToUserKey(ana, uk, e2ee.KindPracticeKey, 1)); !isConflict(err) {
+		t.Fatalf("the old practice key wrapped to U: %v", err)
 	}
 
 	// Without a user key, a wrap to one is refused.
