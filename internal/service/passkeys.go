@@ -25,6 +25,10 @@ type Passkey struct {
 	LastUsedAt *time.Time
 	Current    bool // the asking session signed in with it
 	CanUnlock  bool // it holds a box of the user key (docs/crypto.md, Passkey unlock)
+	// Devices are those bound to live sessions this passkey signed in with, oldest
+	// id first; sessions already ended, or from before sessions recorded their
+	// passkey, leave none.
+	Devices []uuid.UUID
 }
 
 // Passkeys lists the account's passkeys, oldest first; current is the credential the
@@ -42,10 +46,22 @@ func (s *SignIn) Passkeys(ctx context.Context, userID uuid.UUID, current []byte)
 	for _, id := range unlocking {
 		canUnlock[string(id)] = true
 	}
+	bound, err := s.q.CredentialDevices(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	devices := map[string][]uuid.UUID{}
+	for _, b := range bound {
+		devices[string(b.CredentialID)] = append(devices[string(b.CredentialID)], *b.DeviceID)
+	}
 	out := make([]Passkey, len(rows))
 	for i, r := range rows {
 		out[i] = Passkey{ID: r.ID, Name: r.Name, CreatedAt: r.CreatedAt, LastUsedAt: r.LastUsedAt,
-			Current: current != nil && string(current) == string(r.ID), CanUnlock: canUnlock[string(r.ID)]}
+			Current: current != nil && string(current) == string(r.ID), CanUnlock: canUnlock[string(r.ID)],
+			Devices: devices[string(r.ID)]}
+		if out[i].Devices == nil {
+			out[i].Devices = []uuid.UUID{}
+		}
 		var c webauthn.Credential
 		if json.Unmarshal(r.Data, &c) == nil {
 			out[i].AAGUID = aaguid(c.Authenticator.AAGUID)

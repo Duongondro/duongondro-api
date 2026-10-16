@@ -39,7 +39,7 @@ func (s *Server) ListPasskeys(ctx context.Context, req api.ListPasskeysRequestOb
 	out := api.ListPasskeys200JSONResponse{Passkeys: make([]api.Passkey, len(keys))}
 	for i, k := range keys {
 		p := api.Passkey{Id: base64.RawURLEncoding.EncodeToString(k.ID), Name: k.Name, CreatedAt: k.CreatedAt,
-			LastUsedAt: k.LastUsedAt, Current: k.Current, CanUnlock: k.CanUnlock}
+			LastUsedAt: k.LastUsedAt, Current: k.Current, CanUnlock: k.CanUnlock, Devices: k.Devices}
 		if k.AAGUID != nil {
 			a := k.AAGUID.String()
 			p.Aaguid = &a

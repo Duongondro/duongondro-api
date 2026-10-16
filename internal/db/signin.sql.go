@@ -277,6 +277,40 @@ func (q *Queries) CreateWebauthnSession(ctx context.Context, arg CreateWebauthnS
 	return err
 }
 
+const credentialDevices = `-- name: CredentialDevices :many
+SELECT DISTINCT credential_id, device_id FROM sessions
+WHERE user_id = $1 AND credential_id IS NOT NULL AND device_id IS NOT NULL
+ORDER BY credential_id, device_id
+`
+
+type CredentialDevicesRow struct {
+	CredentialID []byte     `json:"credentialId"`
+	DeviceID     *uuid.UUID `json:"deviceId"`
+}
+
+// The devices bound to the account's live sessions that a passkey signed in with:
+// what a phone that passkey reached registered, for removing them from the device
+// list when the passkey is no longer trusted.
+func (q *Queries) CredentialDevices(ctx context.Context, userID uuid.UUID) ([]CredentialDevicesRow, error) {
+	rows, err := q.db.Query(ctx, credentialDevices, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CredentialDevicesRow
+	for rows.Next() {
+		var i CredentialDevicesRow
+		if err := rows.Scan(&i.CredentialID, &i.DeviceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteCredential = `-- name: DeleteCredential :execrows
 DELETE FROM credentials WHERE id = $1 AND user_id = $2
 `

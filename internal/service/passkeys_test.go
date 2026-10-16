@@ -38,6 +38,17 @@ func TestPasskeyManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The phone the passkey reached registered a device; a magic-link session's
+	// device is no passkey's.
+	reached, _ := f.device(ana.User, "hardware")
+	if err := a.BindDevice(ctx, viaPhone, reached.ID); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := f.device(ana.User, "hardware")
+	if err := a.BindDevice(ctx, viaLink, other.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	// Listing: oldest first, the AAGUID when it is not all zeros, the session's own.
 	current, err := a.SessionCredential(ctx, viaPhone)
 	if err != nil {
@@ -49,6 +60,9 @@ func TestPasskeyManagement(t *testing.T) {
 	}
 	if len(keys) != 2 || string(keys[0].ID) != string(phone) || !keys[0].Current || keys[1].Current {
 		t.Fatalf("passkeys: %+v", keys)
+	}
+	if len(keys[0].Devices) != 1 || keys[0].Devices[0] != reached.ID || keys[1].Devices == nil || len(keys[1].Devices) != 0 {
+		t.Fatalf("devices: %v, %v", keys[0].Devices, keys[1].Devices)
 	}
 	if keys[0].AAGUID == nil || string(keys[0].AAGUID[:]) != string(google) || keys[1].AAGUID != nil {
 		t.Fatalf("AAGUIDs: %v, %v", keys[0].AAGUID, keys[1].AAGUID)

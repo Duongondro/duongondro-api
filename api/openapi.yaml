@@ -778,8 +778,10 @@ paths:
         e-mail, Apple or Google identity). The passkey stays in the password manager.
         Its box goes with it, but removal is not revocation: a U this passkey already
         opened stays open to whoever opened it. When the passkey's canUnlock was true,
-        the app offers to replace U (PUT /api/me/user-key with replace) and rotate the
-        practice key (docs/crypto.md › Passkey unlock).
+        the app offers to shut it out (docs/crypto.md › Passkey unlock): read the
+        passkey's devices first, remove them and publish a device list without them,
+        sign out everywhere else, remove the passkey, replace U (PUT /api/me/user-key
+        with replace) and rotate the practice key.
       parameters:
         - {$ref: "#/components/parameters/Authorization"}
         - {$ref: "#/components/parameters/CredentialId"}
@@ -1573,7 +1575,7 @@ components:
         gender: {$ref: "#/components/schemas/Gender"}
     Passkey:
       type: object
-      required: [id, createdAt, current, canUnlock]
+      required: [id, createdAt, current, canUnlock, devices]
       properties:
         id: {type: string, description: "Credential id, base64url without padding"}
         name: {type: string, description: Absent when the person has not named it}
@@ -1582,6 +1584,15 @@ components:
         lastUsedAt: {type: string, format: date-time}
         current: {type: boolean, description: "This session signed in with this passkey, so removing it signs this phone out"}
         canUnlock: {type: boolean, description: "It holds a box of the user key, so signing in with it brings the keys to a new phone"}
+        devices:
+          type: array
+          items: {$ref: "#/components/schemas/UUID"}
+          description: |
+            Devices bound to live sessions this passkey signed in with (the phones it
+            reached, which registered these devices). Read it before removing a passkey
+            that is no longer trusted: those devices leave the signed device list.
+            Sessions already ended, or made before sessions recorded their passkey,
+            leave nothing here.
     PasskeyList:
       type: object
       required: [passkeys]

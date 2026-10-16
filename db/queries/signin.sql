@@ -155,3 +155,11 @@ DELETE FROM credentials WHERE id = $1 AND user_id = $2;
 -- Passkeys plus linked identities (an e-mail for magic links, later Apple or Google).
 SELECT (SELECT count(*) FROM credentials WHERE credentials.user_id = $1)
      + (SELECT count(*) FROM auth_identities WHERE auth_identities.user_id = $1) AS methods;
+
+-- name: CredentialDevices :many
+-- The devices bound to the account's live sessions that a passkey signed in with:
+-- what a phone that passkey reached registered, for removing them from the device
+-- list when the passkey is no longer trusted.
+SELECT DISTINCT credential_id, device_id FROM sessions
+WHERE user_id = $1 AND credential_id IS NOT NULL AND device_id IS NOT NULL
+ORDER BY credential_id, device_id;
