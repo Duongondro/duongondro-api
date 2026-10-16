@@ -772,6 +772,10 @@ paths:
         Removes a passkey and ends every session it signed in with, this one included
         if it did. 409 when it is the account's last way to sign in (no other passkey,
         e-mail, Apple or Google identity). The passkey stays in the password manager.
+        Its box goes with it, but removal is not revocation: a U this passkey already
+        opened stays open to whoever opened it. When the passkey's canUnlock was true,
+        the app offers to replace U (PUT /api/me/user-key with replace) and rotate the
+        practice key (docs/crypto.md › Passkey unlock).
       parameters:
         - {$ref: "#/components/parameters/Authorization"}
         - {$ref: "#/components/parameters/CredentialId"}
@@ -822,7 +826,9 @@ paths:
         "409": {$ref: "#/components/responses/Conflict"}
     delete:
       operationId: deletePasskeyUnlock
-      description: Stops this passkey from unlocking the counts. The passkey itself stays.
+      description: |
+        Stops the server handing out this passkey's box. The passkey itself stays. Not
+        a revocation: to shut out a U already opened, replace U and rotate.
       parameters:
         - {$ref: "#/components/parameters/Authorization"}
         - {$ref: "#/components/parameters/CredentialId"}
@@ -856,7 +862,8 @@ paths:
           The phone keeps no U of its own and waits for the existing one to reach it
           as a kind 4 wrap from a phone that holds it.
         - The same statement as the stored one again: 201 (a safe retry).
-        - `replace: true`, for when U is lost (no phone holds it): replaces U only
+        - `replace: true`, for when U is lost (no phone holds it) or may be
+          compromised (a passkey that could unlock it was removed): replaces U only
           when this session is bound to a device holding the current practice key,
           and the new U has a new id and a version above the stored one's; else 409
           without `userKey`. Replacing deletes every passkey box and wrap to the old
@@ -1203,7 +1210,7 @@ components:
         replace:
           type: boolean
           default: false
-          description: "Replace an existing U (it is lost). Only from a session bound to a device holding the current practice key; never implied."
+          description: "Replace an existing U (lost, or compromised). Only from a session bound to a device holding the current practice key; never implied."
     UserKeyConflict:
       type: object
       required: [error]
