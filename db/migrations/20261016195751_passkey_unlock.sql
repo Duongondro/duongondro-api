@@ -40,9 +40,11 @@ CREATE TABLE passkey_boxes (
 );
 CREATE INDEX passkey_boxes_user_key_id_idx ON passkey_boxes (user_key_id);
 
--- Kind 4 carries U's scalar from one phone to another.
+-- Kind 4 carries U's scalar from one phone to another. NOT VALID skips scanning
+-- the table while it is locked; the next migration validates it in its own
+-- transaction, under a lighter lock.
 ALTER TABLE key_wraps DROP CONSTRAINT key_wraps_kind_check;
-ALTER TABLE key_wraps ADD CONSTRAINT key_wraps_kind_check CHECK (kind IN (1, 2, 4));
+ALTER TABLE key_wraps ADD CONSTRAINT key_wraps_kind_check CHECK (kind IN (1, 2, 4)) NOT VALID;
 
 -- +goose Down
 -- Never rolled back; fix forward with a new migration.
