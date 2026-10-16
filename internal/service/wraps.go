@@ -27,13 +27,14 @@ type WrapInput struct {
 
 type Wraps struct {
 	q       *db.Queries
+	pool    *pgxpool.Pool
 	keys    *atrest.Keys
 	repo    *repository.Wraps
 	devices *Devices
 }
 
 func NewWraps(pool *pgxpool.Pool, keys *atrest.Keys, devices *Devices) *Wraps {
-	return &Wraps{q: db.New(pool), keys: keys, repo: repository.NewWraps(pool, keys), devices: devices}
+	return &Wraps{q: db.New(pool), pool: pool, keys: keys, repo: repository.NewWraps(pool, keys), devices: devices}
 }
 
 // Put stores a wrap to one of the user's devices. What the server cannot verify is
@@ -47,20 +48,7 @@ func (w *Wraps) Put(ctx context.Context, user atrest.User, deviceID uuid.UUID, i
 	}
 	maxVersion := int(user.KeyVersion)
 	if in.Kind == int(e2ee.KindUserKey) {
-		// U's scalar goes from phone to phone signed, at U's own version.
-		uk, err := w.q.GetUserKey(ctx, user.ID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return conflict("publish a user key before wrapping it to a device")
-		} else if err != nil {
-			return err
-		}
-		if in.AuthType != "signature" {
-			return invalid("a user key's wrap is signed by the identity key")
-		}
-		if in.KeyVersion != int(uk.Version) {
-			return conflict("a user key's wrap carries its version, %d", uk.Version)
-		}
-		maxVersion = int(uk.Version)
+		return w.putUserKeyToDevice(ctx, user, dev, in)
 	}
 	if err := validateWrap(user, dev, in, maxVersion); err != nil {
 		return err
@@ -80,6 +68,35 @@ func (w *Wraps) Put(ctx context.Context, user atrest.User, deviceID uuid.UUID, i
 		}
 	}
 	return w.q.PutWrap(ctx, wrapParams(dev.ID, in))
+}
+
+// putUserKeyToDevice stores U's scalar wrapped to one of the account's phones (kind
+// 4): signed by the identity key, at U's own version. The check and the write run
+// under the user's lock, which replacing U takes too, so a wrap of a U that is being
+// replaced is refused rather than stored beside the new one.
+func (w *Wraps) putUserKeyToDevice(ctx context.Context, user atrest.User, dev atrest.Device, in WrapInput) error {
+	if in.AuthType != "signature" {
+		return invalid("a user key's wrap is signed by the identity key")
+	}
+	return pgx.BeginTxFunc(ctx, w.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		q := w.q.WithTx(tx)
+		if _, err := q.LockUser(ctx, user.ID); err != nil {
+			return err
+		}
+		uk, err := q.GetUserKey(ctx, user.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return conflict("publish a user key before wrapping it to a device")
+		} else if err != nil {
+			return err
+		}
+		if in.KeyVersion != int(uk.Version) {
+			return conflict("a user key's wrap carries its version, %d", uk.Version)
+		}
+		if err := validateWrap(user, dev, in, int(uk.Version)); err != nil {
+			return err
+		}
+		return q.PutWrap(ctx, wrapParams(dev.ID, in))
+	})
 }
 
 func (w *Wraps) List(ctx context.Context, userID, deviceID uuid.UUID) ([]db.KeyWrap, error) {

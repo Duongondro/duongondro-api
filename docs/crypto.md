@@ -123,7 +123,7 @@ A passkey made with the WebAuthn PRF extension also brings the keys to a new pho
 
 **Removing a passkey is not revocation.** Removing a passkey (or only its box) deletes its box, so the server no longer hands it out, but whoever already used that passkey to open `U`, or kept a copy of the box and the PRF output, holds `U`'s scalar and can open every wrap to `U`: the practice key and the identity seed. To shut that out, the phone replaces `U` and then rotates the practice key (the rotation wraps the new key to the new `U` only). What was readable before stays readable to that holder, and the identity seed cannot be rotated. Apps therefore offer "Replace the unlock key and rotate" when the person removes a passkey whose `canUnlock` is true, and do both when they accept.
 
-**`U` between phones.** A phone holding `U` gives it to another of the account's phones as a kind 4 wrap ([Wraps](#wraps)), signed, with `keyVersion` = `U`'s `version`, so a phone that came in by the recovery code can still add a passkey.
+**`U` between phones.** A phone holding `U` gives it to another of the account's phones as a kind 4 wrap ([Wraps](#wraps)), signed, with `keyVersion` = `U`'s `version`, so a phone that came in by the recovery code can still add a passkey. The server stores a kind 4 wrap only at the current `U`'s version, checked under the account's lock, but a receiving phone does not rely on that: it fetches `U`'s statement (`GET /api/me/user-key`) and verifies it against the identity key, ignores a kind 4 wrap whose `keyVersion` is not that statement's `version`, and after unwrapping checks that `scalar·G` equals the signed `pk` before keeping or using the scalar.
 
 **A passkey's box.**
 
