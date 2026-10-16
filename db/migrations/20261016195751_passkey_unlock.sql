@@ -10,7 +10,7 @@ SET LOCAL lock_timeout = '10s';
 CREATE TABLE user_keys (
     user_id           uuid PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
     id                uuid NOT NULL UNIQUE,
-    version           bigint NOT NULL CHECK (version >= 1),
+    version           bigint NOT NULL CHECK (version BETWEEN 1 AND 2147483647),
     payload_encrypted bytea NOT NULL,
     signature         bytea NOT NULL CHECK (octet_length(signature) = 64),
     updated_at        timestamptz NOT NULL DEFAULT now()
