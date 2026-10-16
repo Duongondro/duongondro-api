@@ -21,7 +21,7 @@ The server stores sealed blobs and signed public streaks. It never receives a pr
 | `internal/server` | Echo strict server: authentication and DTO mapping |
 | `internal/service` | The rules: what is checked before a key, wrap, signed statement or sealed log is stored |
 | `internal/repository` | Transactions: practice-key rotation, the sync read |
-| `cmd/duongondro-api` | The server binary (`serve`, `migrate`, `reapply-purges`, `admit`) |
+| `cmd/duongondro-api` | The server binary (`serve`, `migrate`, `reapply-purges`, `admit`, `push-test`) |
 
 ## Commands
 
@@ -100,6 +100,12 @@ sudo -u duongondro sh -c 'set -a; . /path/to/duongondro.env; exec /usr/local/lib
 ```
 
 Hand each code to one person over a private channel; a spent or expired code is refused with the same 404 as an unknown invitation.
+
+`push-test -user <account UUID>` checks push end to end: it sends one discreet POKE_UNNAMED to that account's phones only and prints each phone's result, exiting non-zero if any was not sent. It needs the same env file, for the at-rest key that opens the tokens and the APNs and FCM keys:
+
+```sh
+sudo -u duongondro sh -c 'set -a; . /path/to/duongondro.env; exec /usr/local/lib/duongondro/current/server push-test -user <account UUID>'
+```
 
 ## Open sign-up
 

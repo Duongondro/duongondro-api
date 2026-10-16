@@ -14,6 +14,9 @@
 //	duongondro-api admit [-n 5] [-days 30]
 //	                         print fresh single-use admission codes, the sign-up
 //	                         gate for members nobody can invite (the first ones)
+//	duongondro-api push-test -user <account UUID>
+//	                         send one discreet test push to that account's phones
+//	                         and print each phone's result
 //
 // DATABASE_URL is required for all of them, and SECRET_KEY_BASE for all but admit:
 // base64 of 64 random bytes (`openssl rand -base64 64`), from which the keys of the
@@ -61,6 +64,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"uuid"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,6 +73,7 @@ import (
 	"github.com/Duongondro/duongondro-api/internal/apple"
 	"github.com/Duongondro/duongondro-api/internal/atrest"
 	"github.com/Duongondro/duongondro-api/internal/buildinfo"
+	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/migrate"
 	"github.com/Duongondro/duongondro-api/internal/oidc"
 	"github.com/Duongondro/duongondro-api/internal/push"
@@ -95,8 +100,10 @@ func main() {
 		err = reapplyPurges(ctx)
 	case "admit":
 		err = admit(ctx, os.Args[2:])
+	case "push-test":
+		err = pushTest(ctx, os.Args[2:])
 	default:
-		err = fmt.Errorf("unknown command %q (serve, migrate, reapply-purges or admit)", command)
+		err = fmt.Errorf("unknown command %q (serve, migrate, reapply-purges, admit or push-test)", command)
 	}
 	if err != nil {
 		slog.Error("fatal", "error", err.Error())
@@ -147,6 +154,62 @@ func reapplyPurges(ctx context.Context) error {
 		slog.Info("reapplied purges", "accounts", n)
 	}
 	return err
+}
+
+// pushTest sends one discreet test push (POKE_UNNAMED, no arguments) to every phone
+// of one account, and prints each phone's result. It is for checking push end to end
+// on the server, where the at-rest key and the provider keys are; it never sends to
+// anyone but the account named.
+func pushTest(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("push-test", flag.ContinueOnError)
+	user := flags.String("user", "", "the account whose phones get the push (UUID)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	userID, err := uuid.Parse(*user)
+	if err != nil || flags.NArg() > 0 {
+		return fmt.Errorf("push-test takes -user <account UUID> and nothing else")
+	}
+	keys, err := loadKeys()
+	if err != nil {
+		return err
+	}
+	senders, err := pushSenders()
+	if err != nil {
+		return err
+	}
+	pool, err := openPool(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	tokens, err := keys.PushTokens(db.New(pool).PushTokensOf(ctx, userID))
+	if err != nil {
+		return err
+	}
+	if len(tokens) == 0 {
+		return fmt.Errorf("account %s has no push tokens", userID)
+	}
+	// Not a UUID: a thread id that is one opens that friend on iOS.
+	m := push.Message{LocKey: service.LocPokeUnnamed, LocArgs: []string{}, ThreadID: "push-test"}
+	failed := 0
+	for _, t := range tokens {
+		result := "no sender configured"
+		if _, ok := senders[t.Platform]; ok {
+			result = "sent"
+			if err := senders.Send(ctx, t.Platform, t.Token, m); err != nil {
+				result = err.Error()
+			}
+		}
+		if result != "sent" {
+			failed++
+		}
+		fmt.Printf("%s %s: %s\n", t.DeviceID, t.Platform, result)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d phones not sent", failed, len(tokens))
+	}
+	return nil
 }
 
 // admit prints n fresh admission codes, one per line in groups of four, valid for
