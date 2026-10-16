@@ -770,7 +770,11 @@ paths:
       operationId: deletePasskey
       description: |
         Removes a passkey and ends every session it signed in with, this one included
-        if it did. 409 when it is the account's last way to sign in (no other passkey,
+        if it did. Sessions made before the deploy that records each session's passkey
+        (sessions.credential_id) are tied to none: removing a passkey does not end
+        them, and they never see current true; "sign out everywhere
+        else" (DELETE /api/me/sessions) ends them.
+        409 when it is the account's last way to sign in (no other passkey,
         e-mail, Apple or Google identity). The passkey stays in the password manager.
         Its box goes with it, but removal is not revocation: a U this passkey already
         opened stays open to whoever opened it. When the passkey's canUnlock was true,
