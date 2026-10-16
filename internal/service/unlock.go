@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
@@ -111,8 +112,9 @@ func (u *Unlock) PutUserKey(ctx context.Context, user atrest.User, in UserKeyInp
 	if !validPublicKey(st.PK) {
 		return false, invalid("pk must be a 65-byte uncompressed point on the glowie curve")
 	}
-	if st.Version < 1 {
-		return false, invalid("version must be at least 1")
+	// A kind 4 wrap carries the version in key_wraps.key_version, an integer.
+	if st.Version < 1 || st.Version > math.MaxInt32 {
+		return false, invalid("version must be between 1 and %d", math.MaxInt32)
 	}
 	// The user's row lock orders two phones creating U at once: the second sees the
 	// first one's U.

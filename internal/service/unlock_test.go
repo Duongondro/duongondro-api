@@ -110,6 +110,10 @@ func TestUserKey(t *testing.T) {
 	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: bad, Signature: badSig}); !isValidation(err) {
 		t.Fatalf("a key off the curve: %v", err)
 	}
+	huge, hugeSig := sign(ana, e2ee.TypeUserKey, e2ee.UserKey{ID: uuid.NewV7().String(), PK: key.PublicKey().Bytes(), User: ana.ID.String(), Version: 1 << 31})
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: huge, Signature: hugeSig}); !isValidation(err) {
+		t.Fatalf("a version above 2^31-1: %v", err)
+	}
 	spaced := append([]byte(" "), payload...)
 	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: spaced, Signature: e2ee.SignStatement(ana.identity, e2ee.TypeUserKey, spaced)}); !isValidation(err) {
 		t.Fatalf("a payload not in canonical form: %v", err)

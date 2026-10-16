@@ -83,7 +83,7 @@ signature = Ed25519(identity, message)
 | `streak` | `current`, `day`, `deadline`, `longest`, `practice`, `seq`, `user` (`current` and `longest` count tracked days only) |
 | `invite` | `expiresAt`, `inviteId`, `inviter`, `inviterIdentityPk` |
 | `acceptance` | `inviteId`, `invitee`, `inviteeIdentityPk` |
-| `user-key` | `id` (a UUIDv7 the phone picks, new for every key), `pk` (65 bytes), `user`, `version` (starts at 1, goes up with each new key) |
+| `user-key` | `id` (a UUIDv7 the phone picks, new for every key), `pk` (65 bytes), `user`, `version` (starts at 1, goes up with each new key, at most 2³¹−1) |
 
 ## Invites
 
