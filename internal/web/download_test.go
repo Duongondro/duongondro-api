@@ -34,7 +34,7 @@ func (f *fakeDownloads) Total(_ context.Context, platform string) (int64, error)
 	return f.counts[platform], f.err
 }
 
-const apk = "https://github.com/Duongondro/duongondro-android/releases/latest/download/duongondro.apk"
+const apk = "https://github.com/Duongondro/duongondro-android/releases/latest"
 
 func download(t *testing.T, h http.Handler, method, target, ua string, header ...string) *httptest.ResponseRecorder {
 	t.Helper()

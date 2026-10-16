@@ -40,8 +40,8 @@ func TestRoutes(t *testing.T) {
 	}{
 		{"/", "Track your meditation practice together with your friends.", "public, max-age=300"},
 		{"/privacy/", "Draft — not yet in force", "public, max-age=300"},
-		{"/i/7K2MQ9XA", "You have been invited", "no-store"},
-		{"/i/", "You have been invited", "no-store"},
+		{"/i/7K2MQ9XA", "A friendship code for Duongöndro", "no-store"},
+		{"/i/", "A friendship code for Duongöndro", "no-store"},
 		{"/f/7K2MQ9XA", "Add a friend", "no-store"},
 		{"/m", "Open this link on your phone", "no-store"},
 		{"/m/", "Open this link on your phone", "no-store"},
@@ -52,7 +52,7 @@ func TestRoutes(t *testing.T) {
 		{"/robots.txt", "Disallow: /i/", "public, max-age=604800"},
 		{"/robots.txt", "Disallow: /download/", "public, max-age=604800"},
 		{"/fonts/ibm-plex-sans-regular-latin1.woff2", "", "public, max-age=31536000, immutable"},
-		{"/I/7K2MQ9XA", "You have been invited", "no-store"},
+		{"/I/7K2MQ9XA", "A friendship code for Duongöndro", "no-store"},
 		{"/F/7K2MQ9XA", "Add a friend", "no-store"},
 	}
 	for _, tc := range tests {
