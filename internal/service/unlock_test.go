@@ -29,10 +29,17 @@ func (f *fixture) newUserKey(m member, version int64) (userKey, []byte, []byte) 
 
 // publishUserKey publishes U with the practice key and identity seed wrapped to it.
 func (f *fixture) publishUserKey(u *Unlock, m member, version int64) userKey {
+	return f.replaceUserKey(u, m, version, nil)
+}
+
+// replaceUserKey publishes U as publishUserKey does, replacing the stored one from
+// the given device when it is not nil.
+func (f *fixture) replaceUserKey(u *Unlock, m member, version int64, device *uuid.UUID) userKey {
 	f.t.Helper()
 	uk, payload, sig := f.newUserKey(m, version)
-	if err := u.PutUserKey(f.t.Context(), m.User, payload, sig); err != nil {
-		f.t.Fatalf("user key: %v", err)
+	replaced, err := u.PutUserKey(f.t.Context(), m.User, UserKeyInput{Payload: payload, Signature: sig, Replace: device != nil, Device: device})
+	if err != nil || replaced != (device != nil) {
+		f.t.Fatalf("user key: %v (replaced %v)", err, replaced)
 	}
 	for _, kind := range []e2ee.WrapKind{e2ee.KindPracticeKey, e2ee.KindIdentitySeed} {
 		if err := u.PutUserKeyWrap(f.t.Context(), m.User, wrapToUserKey(m, uk, kind, 1)); err != nil {
@@ -89,22 +96,22 @@ func TestUserKey(t *testing.T) {
 	// The statement: signed by the account's own identity key, naming it, canonical.
 	_, payload, _ := f.newUserKey(ana, 1)
 	_, _, bosSig := f.newUserKey(bo, 1)
-	if err := u.PutUserKey(ctx, ana.User, payload, bosSig); !isValidation(err) {
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: payload, Signature: bosSig}); !isValidation(err) {
 		t.Fatalf("someone else's signature: %v", err)
 	}
 	key, _ := ecdh.P256().GenerateKey(rand.Reader)
 	other, otherSig := sign(ana, e2ee.TypeUserKey, e2ee.UserKey{ID: uuid.NewV7().String(), PK: key.PublicKey().Bytes(), User: bo.ID.String(), Version: 1})
-	if err := u.PutUserKey(ctx, ana.User, other, otherSig); !isValidation(err) {
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: other, Signature: otherSig}); !isValidation(err) {
 		t.Fatalf("a statement naming another user: %v", err)
 	}
 	offCurve := append([]byte{}, key.PublicKey().Bytes()...)
 	offCurve[64] ^= 1
 	bad, badSig := sign(ana, e2ee.TypeUserKey, e2ee.UserKey{ID: uuid.NewV7().String(), PK: offCurve, User: ana.ID.String(), Version: 1})
-	if err := u.PutUserKey(ctx, ana.User, bad, badSig); !isValidation(err) {
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: bad, Signature: badSig}); !isValidation(err) {
 		t.Fatalf("a key off the curve: %v", err)
 	}
 	spaced := append([]byte(" "), payload...)
-	if err := u.PutUserKey(ctx, ana.User, spaced, e2ee.SignStatement(ana.identity, e2ee.TypeUserKey, spaced)); !isValidation(err) {
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: spaced, Signature: e2ee.SignStatement(ana.identity, e2ee.TypeUserKey, spaced)}); !isValidation(err) {
 		t.Fatalf("a payload not in canonical form: %v", err)
 	}
 
@@ -164,18 +171,38 @@ func TestUserKey(t *testing.T) {
 	if err := f.wraps.Put(ctx, ana.User, dev.ID, signedWrap(ana.User, ana.identity, dev, e2ee.KindUserKey, 1)); err != nil {
 		t.Fatalf("U to a phone: %v", err)
 	}
-	_, stale, staleSig := f.newUserKey(ana, 1)
-	if err := u.PutUserKey(ctx, ana.User, stale, staleSig); !isConflict(err) {
-		t.Fatalf("a user key at the same version: %v", err)
+	// Publishing is a conditional create: a second U is refused, never stored over
+	// the first, and that phone waits for the first one as a kind 4 wrap.
+	_, newer, newerSig := f.newUserKey(ana, 2)
+	var exists *UserKeyExistsError
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: newer, Signature: newerSig}); !errors.As(err, &exists) || exists.ID != first.id || exists.Version != 1 {
+		t.Fatalf("a second user key without replace: %v", err)
 	}
-	second := f.publishUserKey(u, ana, 2)
+	// Replacing needs replace and a phone holding the current practice key.
+	stranger, _ := f.device(ana.User, "hardware")
+	for _, device := range []*uuid.UUID{nil, &stranger.ID} {
+		if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: newer, Signature: newerSig, Replace: true, Device: device}); !isConflict(err) || errors.As(err, &exists) {
+			t.Fatalf("a replacement from a phone without the keys (%v): %v", device, err)
+		}
+	}
+	if err := f.wraps.Put(ctx, ana.User, dev.ID, signedWrap(ana.User, ana.identity, dev, e2ee.KindPracticeKey, 1)); err != nil {
+		t.Fatal(err)
+	}
+	_, stale, staleSig := f.newUserKey(ana, 1)
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: stale, Signature: staleSig, Replace: true, Device: &dev.ID}); !isConflict(err) {
+		t.Fatalf("a replacement at the same version: %v", err)
+	}
+	if _, wraps, _ := u.UserKey(ctx, ana.ID); len(wraps) != 2 || wraps[0].UserKeyID != first.id {
+		t.Fatalf("a refused U changed the stored one: %+v", wraps)
+	}
+	second := f.replaceUserKey(u, ana, 2, &dev.ID)
 	if _, err := u.PasskeyBox(ctx, ana.ID, phone); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("the old U's box outlived it: %v", err)
 	}
 	if _, wraps, _ := u.UserKey(ctx, ana.ID); len(wraps) != 2 || wraps[0].UserKeyID != second.id {
 		t.Fatalf("wraps after replacing U: %+v", wraps)
 	}
-	if onPhone, _ := f.wraps.List(ctx, ana.ID, dev.ID); len(onPhone) != 0 {
+	if onPhone, _ := f.wraps.List(ctx, ana.ID, dev.ID); len(onPhone) != 1 || onPhone[0].Kind != int16(e2ee.KindPracticeKey) {
 		t.Fatalf("the old U stayed on the phone: %+v", onPhone)
 	}
 	if err := u.PutUserKeyWrap(ctx, ana.User, wrapToUserKey(ana, first, e2ee.KindPracticeKey, 1)); !isConflict(err) {
@@ -242,5 +269,29 @@ func TestRotationWrapsToUserKey(t *testing.T) {
 	bo := f.member()
 	if err := f.wraps.Rotate(ctx, bo.User, 2, nil, &toU); !isConflict(err) {
 		t.Fatalf("a rotation wrapping to a user key that does not exist: %v", err)
+	}
+}
+
+// The first phone's U wins; sending the same statement again is a safe retry, and
+// another phone's U is refused with the stored one's id, without replacing it.
+func TestUserKeyFirstPhoneWins(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	u := NewUnlock(f.pool, f.keys)
+	ana := f.member()
+	_, payload, sig := f.newUserKey(ana, 1)
+	for range 2 {
+		if replaced, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: payload, Signature: sig}); err != nil || replaced {
+			t.Fatalf("publishing U: %v (replaced %v)", err, replaced)
+		}
+	}
+	stored, _, _ := u.UserKey(ctx, ana.ID)
+	_, other, otherSig := f.newUserKey(ana, 1)
+	var exists *UserKeyExistsError
+	if _, err := u.PutUserKey(ctx, ana.User, UserKeyInput{Payload: other, Signature: otherSig}); !errors.As(err, &exists) || exists.ID != stored.ID {
+		t.Fatalf("a second phone's U: %v", err)
+	}
+	if got, _, _ := u.UserKey(ctx, ana.ID); got.ID != stored.ID || string(got.Payload) != string(payload) {
+		t.Fatalf("the stored U changed: %+v", got)
 	}
 }

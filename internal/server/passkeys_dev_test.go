@@ -130,8 +130,28 @@ func TestPasskeyUnlockOverHTTP(t *testing.T) {
 	u, _ := ecdh.P256().GenerateKey(rand.Reader)
 	ukID := uuid.NewV7()
 	if rec := serve(t, e, http.MethodPut, "/api/me/user-key", ana.token, statement(ana, e2ee.TypeUserKey,
-		e2ee.UserKey{ID: ukID.String(), PK: u.PublicKey().Bytes(), User: ana.id, Version: 1})); rec.Code != http.StatusNoContent {
+		e2ee.UserKey{ID: ukID.String(), PK: u.PublicKey().Bytes(), User: ana.id, Version: 1})); rec.Code != http.StatusCreated {
 		t.Fatalf("user key: %d %s", rec.Code, rec.Body)
+	}
+	// A second phone's U is refused with the stored one's id, which it waits for.
+	other, _ := ecdh.P256().GenerateKey(rand.Reader)
+	second := statement(ana, e2ee.TypeUserKey, e2ee.UserKey{ID: uuid.NewV7().String(), PK: other.PublicKey().Bytes(), User: ana.id, Version: 2})
+	rec := serve(t, e, http.MethodPut, "/api/me/user-key", ana.token, second)
+	var refused struct {
+		UserKey *struct {
+			Id      uuid.UUID
+			Version int64
+		}
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &refused); rec.Code != http.StatusConflict || err != nil || refused.UserKey == nil || refused.UserKey.Id != ukID {
+		t.Fatalf("a second user key: %d %s", rec.Code, rec.Body)
+	}
+	// Replacing it needs a session bound to a phone holding the keys; this one is not.
+	second["replace"] = true
+	rec = serve(t, e, http.MethodPut, "/api/me/user-key", ana.token, second)
+	refused.UserKey = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &refused); rec.Code != http.StatusConflict || err != nil || refused.UserKey != nil {
+		t.Fatalf("a replacement from an unbound session: %d %s", rec.Code, rec.Body)
 	}
 	eph, _ := ecdh.P256().GenerateKey(rand.Reader)
 	aad := e2ee.WrapAAD(user, 1, e2ee.UUID(ukID), e2ee.KindPracticeKey)
@@ -148,7 +168,7 @@ func TestPasskeyUnlockOverHTTP(t *testing.T) {
 		t.Fatalf("passkey box: %d %s", rec.Code, rec.Body)
 	}
 
-	rec := serve(t, e, http.MethodGet, unlockPath, ana.token, nil)
+	rec = serve(t, e, http.MethodGet, unlockPath, ana.token, nil)
 	var got struct {
 		Box     []byte
 		UserKey struct {

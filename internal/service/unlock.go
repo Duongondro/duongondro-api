@@ -44,72 +44,132 @@ type UserKeyWrapInput struct {
 	Signature    []byte
 }
 
-// PutUserKey publishes a new U. Its statement must be signed by the identity key, in
-// canonical form, name this user, carry a new id and a key on the glowie curve, and a
-// version above the stored one's. The old U's boxes and wraps, and its copies on the
-// account's phones, are deleted with it: nothing could open them for the new one.
-func (u *Unlock) PutUserKey(ctx context.Context, user atrest.User, payload, signature []byte) error {
+// UserKeyInput publishes a user key U: its signed statement, and whether it may
+// replace a U the account already has.
+type UserKeyInput struct {
+	Payload   []byte
+	Signature []byte
+	// Replace asks to replace an existing U (the case where U is lost: no phone holds
+	// it any more). Never implied: without it an existing U is kept and the request
+	// answered with UserKeyExistsError.
+	Replace bool
+	// Device is the device the session is bound to; replacing U needs it to hold the
+	// current practice key.
+	Device *uuid.UUID
+}
+
+// UserKeyExistsError refuses to create U because the account already has one (409).
+// The phone keeps it: it waits for U to reach it as a kind 4 wrap from a phone that
+// holds it (design 05 › Passkeys that unlock the counts, the retrofit rule).
+type UserKeyExistsError struct {
+	ID      uuid.UUID
+	Version int64
+}
+
+func (e *UserKeyExistsError) Error() string {
+	return "the account already has a user key; wait for it as a kind 4 wrap from a phone that holds it"
+}
+
+// PutUserKey publishes U, reporting whether it replaced one. Its statement must be
+// signed by the identity key, in canonical form, name this user, and carry a key on
+// the glowie curve and a version of at least 1.
+//
+// Publishing is a conditional create: the first phone wins, and while the account
+// has a U, another one is refused with UserKeyExistsError, never stored over it.
+// Sending the stored statement again is answered as a success, so a retry is safe.
+// Replacing U needs both Replace and a session bound to a device that holds the
+// current practice key; the new U then has a new id and a higher version, and the
+// old one's boxes and wraps, and its copies on the account's phones, are deleted
+// with it: nothing could open them for the new one.
+func (u *Unlock) PutUserKey(ctx context.Context, user atrest.User, in UserKeyInput) (replaced bool, err error) {
+	payload, signature := in.Payload, in.Signature
 	if err := checkPayloadSize(payload, maxUserKeyPayload); err != nil {
-		return err
+		return false, err
 	}
 	if user.IdentityPublicKey == nil {
-		return conflict("set the identity key before publishing a user key")
+		return false, conflict("set the identity key before publishing a user key")
 	}
 	if !e2ee.VerifyStatement(user.IdentityPublicKey, e2ee.TypeUserKey, payload, signature) {
-		return invalid("the signature does not verify against the identity key")
+		return false, invalid("the signature does not verify against the identity key")
 	}
 	var st e2ee.UserKey
 	dec := json.NewDecoder(bytes.NewReader(payload))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&st); err != nil {
-		return invalid("payload is not a user key: %v", err)
+		return false, invalid("payload is not a user key: %v", err)
 	}
 	if canonical, err := e2ee.Marshal(st); err != nil || !bytes.Equal(canonical, payload) {
-		return invalid("payload is not in canonical form (compact JSON, keys in order)")
+		return false, invalid("payload is not in canonical form (compact JSON, keys in order)")
 	}
 	if st.User != user.ID.String() {
-		return invalid("the user key names another user")
+		return false, invalid("the user key names another user")
 	}
 	id, err := uuid.Parse(st.ID)
 	if err != nil || id.String() != st.ID {
-		return invalid("id must be a lowercase UUID")
+		return false, invalid("id must be a lowercase UUID")
 	}
 	if !validPublicKey(st.PK) {
-		return invalid("pk must be a 65-byte uncompressed point on the glowie curve")
+		return false, invalid("pk must be a 65-byte uncompressed point on the glowie curve")
 	}
 	if st.Version < 1 {
-		return invalid("version must be at least 1")
+		return false, invalid("version must be at least 1")
 	}
+	// The user's row lock orders two phones creating U at once: the second sees the
+	// first one's U.
 	err = pgx.BeginTxFunc(ctx, u.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		q := u.q.WithTx(tx)
-		if _, err := q.LockUser(ctx, user.ID); err != nil {
+		locked, err := q.LockUser(ctx, user.ID)
+		if err != nil {
 			return err
 		}
-		current, err := q.GetUserKey(ctx, user.ID)
+		current, err := u.keys.UserKey(q.GetUserKey(ctx, user.ID))
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
 			return err
-		case st.Version <= current.Version:
-			return conflict("version %d is not above the stored user key's", st.Version)
-		case id == current.ID:
-			return invalid("a new user key needs a new id")
+		case id == current.ID && bytes.Equal(payload, current.Payload):
+			return errAlreadyStored
+		case !in.Replace:
+			return &UserKeyExistsError{ID: current.ID, Version: current.Version}
 		default:
+			holds := false
+			if in.Device != nil {
+				if holds, err = q.DeviceHoldsPracticeKey(ctx, db.DeviceHoldsPracticeKeyParams{
+					DeviceID: *in.Device, UserID: user.ID, KeyVersion: locked.KeyVersion}); err != nil {
+					return err
+				}
+			}
+			if !holds {
+				return conflict("only a phone holding the current practice key may replace the user key")
+			}
+			if st.Version <= current.Version {
+				return conflict("version %d is not above the stored user key's", st.Version)
+			}
+			if id == current.ID {
+				return invalid("a new user key needs a new id")
+			}
 			if err := q.DeleteUserKey(ctx, user.ID); err != nil {
 				return err
 			}
 			if err := q.DeleteUserKeyDeviceWraps(ctx, user.ID); err != nil {
 				return err
 			}
+			replaced = true
 		}
 		return q.CreateUserKey(ctx, db.CreateUserKeyParams{UserID: user.ID, ID: id, Version: st.Version,
 			PayloadEncrypted: u.keys.Seal(atrest.UserKeysPayload, atrest.IDRow(user.ID), payload), Signature: signature})
 	})
-	if repository.IsUniqueViolation(err, "user_keys_id_key") {
-		return conflict("a new user key needs a new id")
+	switch {
+	case errors.Is(err, errAlreadyStored):
+		return false, nil
+	case repository.IsUniqueViolation(err, "user_keys_id_key"):
+		return false, conflict("a new user key needs a new id")
 	}
-	return err
+	return replaced, err
 }
+
+// errAlreadyStored ends a transaction that found the request already done.
+var errAlreadyStored = errors.New("already stored")
 
 // UserKey returns U's statement and the wraps to it; ErrNotFound when none is published.
 func (u *Unlock) UserKey(ctx context.Context, userID uuid.UUID) (atrest.UserKey, []db.UserKeyWrap, error) {

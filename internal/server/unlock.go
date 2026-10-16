@@ -7,6 +7,7 @@ import (
 
 	"github.com/Duongondro/duongondro-api/internal/api"
 	"github.com/Duongondro/duongondro-api/internal/atrest"
+	"github.com/Duongondro/duongondro-api/internal/auth"
 	"github.com/Duongondro/duongondro-api/internal/db"
 	"github.com/Duongondro/duongondro-api/internal/service"
 )
@@ -51,16 +52,34 @@ func (s *Server) PutUserKey(ctx context.Context, req api.PutUserKeyRequestObject
 	} else if !ok {
 		return api.PutUserKey401Response{}, nil
 	}
-	if err := s.unlock.PutUserKey(ctx, user, req.Body.Payload, req.Body.Signature); err != nil {
+	in := service.UserKeyInput{Payload: req.Body.Payload, Signature: req.Body.Signature,
+		Replace: req.Body.Replace != nil && *req.Body.Replace}
+	if in.Replace {
+		token, _ := auth.BearerPrefix(req.Params.Authorization)
+		if in.Device, err = s.auth.SessionDevice(ctx, token); errors.Is(err, auth.ErrInvalidToken) {
+			return api.PutUserKey401Response{}, nil
+		} else if err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.unlock.PutUserKey(ctx, user, in); err != nil {
+		if exists, is := errors.AsType[*service.UserKeyExistsError](err); is {
+			body := api.PutUserKey409JSONResponse{Error: exists.Error()}
+			body.UserKey = &struct {
+				Id      api.UUID `json:"id"`
+				Version int64    `json:"version"`
+			}{Id: exists.ID, Version: exists.Version}
+			return body, nil
+		}
 		switch kind, body, ok := clientError(err); {
 		case ok && kind == http.StatusBadRequest:
 			return api.PutUserKey400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(body)}, nil
 		case ok && kind == http.StatusConflict:
-			return api.PutUserKey409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(body)}, nil
+			return api.PutUserKey409JSONResponse{Error: body.Error}, nil
 		}
 		return nil, err
 	}
-	return api.PutUserKey204Response{}, nil
+	return api.PutUserKey201Response{}, nil
 }
 
 func (s *Server) PutUserKeyWrap(ctx context.Context, req api.PutUserKeyWrapRequestObject) (api.PutUserKeyWrapResponseObject, error) {

@@ -393,6 +393,15 @@ func TestPurgeLeavesNoTrace(t *testing.T) {
 	if links != 0 {
 		t.Errorf("%d unused magic links or confirmations remain", links)
 	}
+	// U, the wraps to it and the passkey boxes go with the account (no column of
+	// theirs names the user, so the loop above cannot see them).
+	for _, table := range []string{"user_keys", "user_key_wraps", "passkey_boxes"} {
+		var n int
+		_ = f.pool.QueryRow(ctx, fmt.Sprintf(`SELECT count(*) FROM %q`, table)).Scan(&n)
+		if n != 0 {
+			t.Errorf("%d rows remain in %s", n, table)
+		}
+	}
 	var named int
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username_hash = $1`, f.keys.HashString("ana")).Scan(&named)
 	if named != 0 {

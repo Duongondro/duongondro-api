@@ -846,21 +846,40 @@ paths:
     put:
       operationId: putUserKey
       description: |
-        Publishes a user key U (type `user-key`). The payload must name this user,
-        carry a new id, a 65-byte point on the glowie curve and a version above the
-        stored one's, and be signed by the identity key. Replacing U deletes every
-        passkey box and wrap of the old one, including its kind 4 wraps to devices.
+        Publishes the user key U (type `user-key`): a conditional create, never an
+        implicit replacement (docs/crypto.md › Passkey unlock). The payload must name
+        this user, carry a lowercase UUID id, a 65-byte point on the glowie curve and
+        a version of at least 1, and be signed by the identity key.
+
+        - No U yet: stored, 201. The first phone wins.
+        - A U exists: 409 with `userKey` (its id and version), and nothing changes.
+          The phone keeps no U of its own and waits for the existing one to reach it
+          as a kind 4 wrap from a phone that holds it.
+        - The same statement as the stored one again: 201 (a safe retry).
+        - `replace: true`, for when U is lost (no phone holds it): replaces U only
+          when this session is bound to a device holding the current practice key,
+          and the new U has a new id and a version above the stored one's; else 409
+          without `userKey`. Replacing deletes every passkey box and wrap to the old
+          U, and its kind 4 wraps to the account's devices.
       parameters: [{$ref: "#/components/parameters/Authorization"}]
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/SignedStatement"}
+            schema: {$ref: "#/components/schemas/UserKeyInput"}
       responses:
-        "204": {description: Stored.}
+        "201": {description: "Stored: U is now this statement's key."}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {$ref: "#/components/responses/Conflict"}
+        "409":
+          description: |
+            The account already has a U (`userKey` is present), or a replacement or
+            precondition was refused (identity key not set, the session's device does
+            not hold the current practice key, the version is not above the stored
+            one's).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UserKeyConflict"}
   /api/me/user-key/wraps:
     post:
       operationId: putUserKeyWrap
@@ -1174,6 +1193,29 @@ components:
       properties:
         payload: {type: string, format: byte}
         signature: {type: string, format: byte}
+    UserKeyInput:
+      type: object
+      required: [payload, signature]
+      description: A signed `user-key` statement (as SignedStatement), and whether it may replace a stored U.
+      properties:
+        payload: {type: string, format: byte}
+        signature: {type: string, format: byte}
+        replace:
+          type: boolean
+          default: false
+          description: "Replace an existing U (it is lost). Only from a session bound to a device holding the current practice key; never implied."
+    UserKeyConflict:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+        userKey:
+          type: object
+          description: Present when the account already has a U; the phone waits for it as a kind 4 wrap.
+          required: [id, version]
+          properties:
+            id: {$ref: "#/components/schemas/UUID"}
+            version: {type: integer, format: int64}
     Tier:
       type: string
       enum: [hardware, tee, software]
