@@ -15,10 +15,10 @@ type Downloads interface {
 	Total(ctx context.Context, platform string) (int64, error)
 }
 
-// downloadURLs are where /download/<platform> sends the browser: the stable
-// URL of the newest release's file.
+// downloadURLs are where /download/<platform> sends the browser: the newest
+// release's page, with its notes, the APK and the hash to check it against.
 var downloadURLs = map[string]string{
-	"android": "https://github.com/Duongondro/duongondro-android/releases/latest/download/duongondro.apk",
+	"android": "https://github.com/Duongondro/duongondro-android/releases/latest",
 }
 
 // cacheCount lets browsers and Caddy reuse the total for a minute, so a busy
@@ -27,7 +27,7 @@ const cacheCount = "public, max-age=60"
 
 // serveDownload answers the download links:
 //
-//   - GET /download/<platform>: 302 to the file, uncached. It never counts, so
+//   - GET /download/<platform>: 302 to the release page, uncached. It never counts, so
 //     a link preview or a crawler following a shared link changes nothing.
 //   - POST /download/<platform>/count: counts one download and answers 204. The
 //     landing page's script sends it as a beacon when someone clicks the button.
