@@ -14,7 +14,7 @@ The server's own column encryption, for what it must be able to read: names, e-m
 | blind-index key | 32 | `DatabaseHMAC` |
 | key id | 4 | `ColumnLevelEncryptionKeyId` |
 
-Release builds refuse to start (`serve`, `migrate`, `reapply-purges`) without `SECRET_KEY_BASE`; DEV builds fall back to a fixed development key. Vectors computed with OpenSSL are in `internal/atrest/atrest_test.go`.
+Release builds refuse to start (`serve`, `migrate`, `reapply-purges`, `push-test`) without `SECRET_KEY_BASE`; DEV builds fall back to a fixed development key. Vectors computed with OpenSSL are in `internal/atrest/atrest_test.go`.
 
 ## Sealed values
 

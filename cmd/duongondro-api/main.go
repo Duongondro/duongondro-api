@@ -14,6 +14,9 @@
 //	duongondro-api admit [-n 5] [-days 30]
 //	                         print fresh single-use admission codes, the sign-up
 //	                         gate for members nobody can invite (the first ones)
+//	duongondro-api push-test -user <account UUID>
+//	                         send one discreet test push to that account's phones
+//	                         and print each phone's result
 //
 // DATABASE_URL is required for all of them, and SECRET_KEY_BASE for all but admit:
 // base64 of 64 random bytes (`openssl rand -base64 64`), from which the keys of the
@@ -187,7 +190,9 @@ func pushTest(ctx context.Context, args []string) error {
 	if len(tokens) == 0 {
 		return fmt.Errorf("account %s has no push tokens", userID)
 	}
-	m := push.Message{LocKey: service.LocPokeUnnamed, LocArgs: []string{}, ThreadID: userID.String()}
+	// Not a UUID: a thread id that is one opens that friend on iOS.
+	m := push.Message{LocKey: service.LocPokeUnnamed, LocArgs: []string{}, ThreadID: "push-test"}
+	failed := 0
 	for _, t := range tokens {
 		result := "no sender configured"
 		if _, ok := senders[t.Platform]; ok {
@@ -196,7 +201,13 @@ func pushTest(ctx context.Context, args []string) error {
 				result = err.Error()
 			}
 		}
+		if result != "sent" {
+			failed++
+		}
 		fmt.Printf("%s %s: %s\n", t.DeviceID, t.Platform, result)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d phones not sent", failed, len(tokens))
 	}
 	return nil
 }
