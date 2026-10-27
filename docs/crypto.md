@@ -33,7 +33,7 @@ sealed    = nonce(12) ‖ ChaCha20-Poly1305(seal_key, nonce, padded, aad)   (cip
 | Field | Type | Meaning |
 |---|---|---|
 | `practice` | string | Catalogue id (`dorje-sempa`) or a custom practice's id |
-| `count` | integer | Repetitions in this sitting (a mala's worth, or 0 for streak-only) |
+| `count` | integer | Repetitions in this sitting (a mala's worth, or 0 for streak-only); on a correction, the change, which may be negative |
 | `day` | string | The civil day the session counts for; written for other readers, derivable from `start`, `tz` and `chosenDay` |
 | `chosenDay` | string, optional | Present when the session counts for another day than its start's: the night rule (logged before 02:00, or within 40 minutes of a session that counted so, counts for the previous day) or the after-midnight sheet |
 | `start` | integer | When the sitting started |
@@ -43,6 +43,7 @@ sealed    = nonce(12) ‖ ChaCha20-Poly1305(seal_key, nonce, padded, aad)   (cip
 | `updatedAt` | integer | Last change; must equal the outer `updatedAt`, which a client checks, so the server cannot replay an old blob under a newer time. The outer time is sent as exactly this millisecond (RFC 3339 with three fractional digits), and both sides round a clock reading to the nearest millisecond, never down: a stored time can sit a hair below its millisecond |
 | `deletedAt` | integer, optional | Present on a tombstone |
 | `practiceName` | string, optional | A custom practice's name, so another phone can show it |
+| `correction` | boolean, optional | True when the person corrected the practice's count (design decision 34): `count` goes into the practice's total and rounds, never into a day's total, malas or the streak. `start` is when it was saved. Readers before 0.5 skip a negative count |
 
 Readers ignore unknown fields (`minutes` and `note` are reserved for later versions). A deletion is sealed like any other write, as a tombstone whose json carries `deletedAt` and `updatedAt` and may omit the rest, so only a holder of the practice key can delete a session. Padding hides the length of notes and names from the server; unpadding strips trailing zero bytes and then exactly one `0x80`, and fails if that byte is missing. The AAD binds a blob to one session id, one user and one key version, so the server cannot move or replay it under another identity.
 
